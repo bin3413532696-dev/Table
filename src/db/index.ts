@@ -55,6 +55,33 @@ function loadFromStorage<T>(key: string): T[] {
 
 function saveToStorage<T>(key: string, records: T[]) {
   localStorage.setItem(key, JSON.stringify(records));
+  scheduleSync();
+}
+
+// ── 自动同步到 data/ 文件夹 ──
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleSync() {
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    try {
+      fetch('/api/sync-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notes: noteRecords,
+          folders: folderRecords,
+          tasks: taskRecords,
+          finance: financeRecords
+        })
+      }).catch(() => {
+        /* 开发服务器未运行时静默忽略 */
+      });
+    } catch {
+      /* 兼容非浏览器环境 */
+    }
+  }, 1500); // 防抖 1.5 秒
 }
 
 let financeRecords: FinanceRecord[] = loadFromStorage(STORAGE_KEYS.finance);
@@ -251,8 +278,23 @@ export const folderDB = {
   },
 
   async delete(id: string): Promise<void> {
-    folderRecords = folderRecords.filter(f => f.id !== id);
+    // 递归收集所有子文件夹 ID
+    const collectDescendants = (parentId: string): string[] => {
+      const children = folderRecords.filter(f => f.parentId === parentId);
+      return [
+        ...children.map(c => c.id),
+        ...children.flatMap(c => collectDescendants(c.id))
+      ];
+    };
+    const descendantIds = collectDescendants(id);
+    const allToDelete = [id, ...descendantIds];
+
+    // 删除所有子文件夹及其笔记关联
+    descendantIds.forEach(did => {
+      noteRecords = noteRecords.map(n => n.folderId === did ? { ...n, folderId: null } : n);
+    });
     noteRecords = noteRecords.map(n => n.folderId === id ? { ...n, folderId: null } : n);
+    folderRecords = folderRecords.filter(f => !allToDelete.includes(f.id));
     saveToStorage(STORAGE_KEYS.folders, folderRecords);
     saveToStorage(STORAGE_KEYS.notes, noteRecords);
   },
@@ -269,9 +311,11 @@ export const folderDB = {
 export const dataManager = {
   exportAll(): string {
     const data = {
+      version: 1,
       finance: financeRecords,
       tasks: taskRecords,
       notes: noteRecords,
+      folders: folderRecords,
       exportTime: new Date().toISOString()
     };
     return JSON.stringify(data, null, 2);
@@ -280,17 +324,26 @@ export const dataManager = {
   importAll(jsonString: string): boolean {
     try {
       const data = JSON.parse(jsonString);
-      if (data.finance) {
+      // 只有导入数据中明确包含某集合时才替换，避免误覆盖
+      if ('finance' in data) {
+        if (!Array.isArray(data.finance)) return false;
         financeRecords = data.finance;
         saveToStorage(STORAGE_KEYS.finance, financeRecords);
       }
-      if (data.tasks) {
+      if ('tasks' in data) {
+        if (!Array.isArray(data.tasks)) return false;
         taskRecords = data.tasks;
         saveToStorage(STORAGE_KEYS.tasks, taskRecords);
       }
-      if (data.notes) {
+      if ('notes' in data) {
+        if (!Array.isArray(data.notes)) return false;
         noteRecords = data.notes;
         saveToStorage(STORAGE_KEYS.notes, noteRecords);
+      }
+      if ('folders' in data) {
+        if (!Array.isArray(data.folders)) return false;
+        folderRecords = data.folders;
+        saveToStorage(STORAGE_KEYS.folders, folderRecords);
       }
       return true;
     } catch {
@@ -302,17 +355,21 @@ export const dataManager = {
     financeRecords = [];
     taskRecords = [];
     noteRecords = [];
+    folderRecords = [];
     saveToStorage(STORAGE_KEYS.finance, []);
     saveToStorage(STORAGE_KEYS.tasks, []);
     saveToStorage(STORAGE_KEYS.notes, []);
+    saveToStorage(STORAGE_KEYS.folders, []);
   },
 
   getStats() {
+    const financeData = { finance: financeRecords, tasks: taskRecords, notes: noteRecords, folders: folderRecords };
     return {
       finance: financeRecords.length,
       tasks: taskRecords.length,
       notes: noteRecords.length,
-      totalSize: JSON.stringify({ finance: financeRecords, tasks: taskRecords, notes: noteRecords }).length
+      folders: folderRecords.length,
+      totalSize: JSON.stringify(financeData).length
     };
   }
 };

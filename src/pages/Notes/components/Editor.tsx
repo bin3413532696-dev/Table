@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
+import { Extension } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
 import { vim } from '@replit/codemirror-vim';
 import ReactMarkdown from 'react-markdown';
@@ -57,7 +58,7 @@ export const Editor: React.FC<EditorProps> = ({
     }
   }, [content, onChange]);
 
-  const extensions = [markdown()];
+  const extensions: Extension[] = [markdown()];
   if (isVimMode) {
     extensions.push(vim());
   }
@@ -112,75 +113,75 @@ export const Editor: React.FC<EditorProps> = ({
         }
       `}</style>
 
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-gray-50">
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-white/80 backdrop-blur-xl">
+        <div className="flex items-center gap-0.5">
           <button
             onClick={() => insertText('**', '**')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="粗体"
           >
             <Bold className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('*', '*')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="斜体"
           >
             <Italic className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('~~', '~~')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="删除线"
           >
             <Strikethrough className="w-4 h-4" />
           </button>
-          <div className="w-px h-5 mx-1 bg-gray-300" />
+          <div className="w-px h-5 mx-1 bg-gray-200" />
           <button
             onClick={() => insertText('## ', '')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="标题"
           >
             <Heading className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('- ', '')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="无序列表"
           >
             <List className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('1. ', '')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="有序列表"
           >
             <ListOrdered className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('> ', '')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="引用"
           >
             <Quote className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('```\n', '\n```')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="代码块"
           >
             <Code className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('[', '](url)')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="链接"
           >
             <Link className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('- [ ] ', '')}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
             title="任务列表"
           >
             <CheckSquare className="w-4 h-4" />
@@ -188,33 +189,33 @@ export const Editor: React.FC<EditorProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg bg-gray-100">
+          <div className="flex rounded-lg bg-gray-100 p-0.5">
             <button
               onClick={() => setMode('edit')}
-              className={`px-3 py-1.5 text-sm rounded-l-lg transition-colors ${
+              className={`px-3 py-1.5 text-sm rounded-md transition-all ${
                 mode === 'edit'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:text-gray-700'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
               }`}
             >
               编辑
             </button>
             <button
               onClick={() => setMode('split')}
-              className={`px-3 py-1.5 text-sm transition-colors ${
+              className={`px-3 py-1.5 text-sm rounded-md transition-all ${
                 mode === 'split'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:text-gray-700'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
               }`}
             >
               分屏
             </button>
             <button
               onClick={() => setMode('preview')}
-              className={`px-3 py-1.5 text-sm rounded-r-lg transition-colors ${
+              className={`px-3 py-1.5 text-sm rounded-md transition-all ${
                 mode === 'preview'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-600 hover:text-gray-700'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
               }`}
             >
               预览
@@ -223,10 +224,10 @@ export const Editor: React.FC<EditorProps> = ({
 
           <button
             onClick={onToggleVim}
-            className={`px-2 py-1.5 text-sm rounded transition-colors ${
+            className={`px-2 py-1.5 text-sm rounded-md transition-colors ${
               isVimMode
                 ? 'bg-green-100 text-green-700'
-                : 'text-gray-600 hover:bg-gray-100'
+                : 'text-gray-500 hover:bg-gray-100'
             }`}
           >
             Vim
@@ -234,7 +235,7 @@ export const Editor: React.FC<EditorProps> = ({
 
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1.5 rounded transition-colors hover:bg-gray-200 text-gray-600"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>

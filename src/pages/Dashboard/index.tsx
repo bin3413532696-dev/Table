@@ -62,8 +62,8 @@ export default function Dashboard() {
       icon: CheckSquare,
       label: '待办任务',
       count: stats.tasks.pending,
-      color: 'from-blue-500 to-blue-600',
-      bgColor: 'bg-gradient-to-br from-blue-50 to-blue-100/50',
+      color: 'bg-blue-500',
+      bgColor: 'bg-blue-50',
       borderColor: 'border-blue-200',
       textColor: 'text-blue-600',
       path: '/tasks'
@@ -72,20 +72,20 @@ export default function Dashboard() {
       icon: FileText,
       label: '笔记',
       count: stats.notes,
-      color: 'from-violet-500 to-violet-600',
-      bgColor: 'bg-gradient-to-br from-violet-50 to-violet-100/50',
-      borderColor: 'border-violet-200',
-      textColor: 'text-violet-600',
+      color: 'bg-gray-700',
+      bgColor: 'bg-gray-50',
+      borderColor: 'border-gray-200',
+      textColor: 'text-gray-600',
       path: '/notes'
     },
     {
       icon: Wallet,
       label: '净收益',
       count: `¥${stats.finance.profit.toLocaleString()}`,
-      color: stats.finance.profit >= 0 ? 'from-emerald-500 to-emerald-600' : 'from-rose-500 to-rose-600',
+      color: stats.finance.profit >= 0 ? 'bg-emerald-500' : 'bg-rose-500',
       bgColor: stats.finance.profit >= 0
-        ? 'bg-gradient-to-br from-emerald-50 to-emerald-100/50'
-        : 'bg-gradient-to-br from-rose-50 to-rose-100/50',
+        ? 'bg-emerald-50'
+        : 'bg-rose-50',
       borderColor: stats.finance.profit >= 0 ? 'border-emerald-200' : 'border-rose-200',
       textColor: stats.finance.profit >= 0 ? 'text-emerald-600' : 'text-rose-600',
       path: '/finance'
@@ -94,34 +94,34 @@ export default function Dashboard() {
       icon: Calendar,
       label: '今日',
       count: new Date().toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }),
-      color: 'from-amber-500 to-amber-600',
-      bgColor: 'bg-gradient-to-br from-amber-50 to-amber-100/50',
-      borderColor: 'border-amber-200',
-      textColor: 'text-amber-600',
+      color: 'bg-gray-500',
+      bgColor: 'bg-gray-50',
+      borderColor: 'border-gray-200',
+      textColor: 'text-gray-600',
       path: '/tasks'
     },
   ];
 
   return (
     <div className="p-8 max-w-7xl mx-auto min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="mb-8"
-      >
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/25">
-            <LayoutDashboard className="w-5 h-5 text-white" />
+<motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="mb-8"
+        >
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-10 h-10 bg-gray-900 rounded-lg flex items-center justify-center">
+              <LayoutDashboard className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">个人工作台</h1>
+              <p className="text-sm text-gray-500">
+                {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">个人工作台</h1>
-            <p className="text-sm text-gray-500">
-              {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-            </p>
-          </div>
-        </div>
-      </motion.div>
+        </motion.div>
 
       <motion.div
         variants={containerVariants}
@@ -133,11 +133,11 @@ export default function Dashboard() {
           <motion.div
             key={action.label}
             variants={itemVariants}
-            whileHover={{ y: -4, transition: { duration: 0.2 } }}
+            whileHover={{ y: -2, transition: { duration: 0.2 } }}
             onClick={() => navigate(action.path)}
-            className={`${action.bgColor} rounded-2xl p-5 cursor-pointer group border ${action.borderColor} hover:shadow-xl transition-all duration-300 hover:shadow-blue-200/50`}
+            className={`${action.bgColor} rounded-xl p-5 cursor-pointer group border ${action.borderColor} hover:shadow-md transition-all duration-200`}
           >
-            <div className={`w-12 h-12 bg-gradient-to-br ${action.color} rounded-xl flex items-center justify-center mb-4 shadow-lg group-hover:scale-110 transition-transform duration-300`}>
+            <div className={`w-12 h-12 ${action.color} rounded-lg flex items-center justify-center mb-4`}>
               <action.icon className="w-6 h-6 text-white" />
             </div>
             <p className={`text-sm font-medium mb-1 ${action.textColor}`}>{action.label}</p>
@@ -263,16 +263,16 @@ export default function Dashboard() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5 }}
-        className="mt-8 bg-gradient-to-r from-blue-500 to-violet-500 rounded-2xl p-6 text-white shadow-lg shadow-blue-500/25"
+        className="mt-8 rounded-2xl p-6 text-gray-900 shadow-sm border bg-white"
       >
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-bold mb-1">费用概览</h3>
-            <p className="text-blue-100 text-sm">本月收支情况</p>
+            <p className="text-sm text-gray-500">本月收支情况</p>
           </div>
           <button
             onClick={() => navigate('/finance')}
-            className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-colors"
+            className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-medium hover:bg-gray-800 transition-colors"
           >
             查看详情
           </button>

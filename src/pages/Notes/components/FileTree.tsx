@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Folder, FolderOpen, FileText, Plus, MoreVertical, ChevronRight, ChevronDown, Trash2, Edit3 } from 'lucide-react';
+import { Folder, FolderOpen, FileText, Plus, MoreVertical, ChevronRight, ChevronDown, Trash2, Edit3, GripVertical } from 'lucide-react';
 import { Folder as FolderType, Note } from '../../../db';
 
 interface FileTreeProps {
@@ -14,6 +14,8 @@ interface FileTreeProps {
   onCreateNote: (folderId: string | null) => void;
   onDeleteFolder: (folderId: string) => void;
   onRenameFolder: (folderId: string, newName: string) => void;
+  onDeleteNote: (noteId: string) => void;
+  onMoveNote: (noteId: string, folderId: string | null) => void;
 }
 
 interface TreeNodeProps {
@@ -31,7 +33,98 @@ interface TreeNodeProps {
   onCreateNote: (folderId: string | null) => void;
   onDeleteFolder: (folderId: string) => void;
   onRenameFolder: (folderId: string, newName: string) => void;
+  onDeleteNote: (noteId: string) => void;
+  onMoveNote: (noteId: string, folderId: string | null) => void;
 }
+
+const GUIDE_LINE_OFFSET = 10;
+
+const NoteContextMenu: React.FC<{
+  noteId: string;
+  onDelete: (noteId: string) => void;
+  onClose: () => void;
+}> = ({ noteId, onDelete, onClose }) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      className="absolute right-0 top-full mt-1 py-1 rounded-lg shadow-xl z-50 min-w-[120px] bg-white border border-gray-100 ring-1 ring-black/5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button
+        onClick={() => {
+          onDelete(noteId);
+          onClose();
+        }}
+        className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-rose-50 text-rose-600"
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+        删除笔记
+      </button>
+    </motion.div>
+  );
+};
+
+const NoteItem: React.FC<{
+  note: Note;
+  isSelected: boolean;
+  level: number;
+  onSelect: (note: Note) => void;
+  onDelete: (noteId: string) => void;
+  onDragStart: (e: React.DragEvent, noteId: string) => void;
+}> = ({ note, isSelected, level, onSelect, onDelete, onDragStart }) => {
+  const [showMenu, setShowMenu] = useState(false);
+
+  return (
+    <div className="relative group">
+      {/* Branch connector line */}
+      {level > 0 && (
+        <div
+          className="absolute top-1/2 w-3 h-px bg-gray-300 pointer-events-none"
+          style={{ left: `${level * 16 + GUIDE_LINE_OFFSET}px` }}
+        />
+      )}
+      <div
+        draggable
+        onDragStart={(e) => onDragStart(e, note.id)}
+        onClick={() => onSelect(note)}
+        className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer transition-colors ${
+          isSelected
+            ? 'bg-blue-50 text-blue-700'
+            : 'hover:bg-gray-50 text-gray-600'
+        }`}
+        style={{ paddingLeft: `${level * 16 + 8}px` }}
+      >
+        <GripVertical className="w-3 h-3 opacity-0 group-hover:opacity-40 text-gray-400 flex-shrink-0" />
+        <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+        <span className="text-sm truncate flex-1">{note.title}</span>
+
+        <div className="relative">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(!showMenu);
+            }}
+            className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-200"
+          >
+            <MoreVertical className="w-3.5 h-3.5" />
+          </button>
+
+          <AnimatePresence>
+            {showMenu && (
+              <NoteContextMenu
+                noteId={note.id}
+                onDelete={onDelete}
+                onClose={() => setShowMenu(false)}
+              />
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const TreeNode: React.FC<TreeNodeProps> = ({
   folder,
@@ -47,15 +140,19 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   onCreateFolder,
   onCreateNote,
   onDeleteFolder,
-  onRenameFolder
+  onRenameFolder,
+  onDeleteNote,
+  onMoveNote
 }) => {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(folder.name);
   const [showMenu, setShowMenu] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const isExpanded = expandedFolders.has(folder.id);
   const childFolders = folders.filter(f => f.parentId === folder.id);
   const folderNotes = notes.filter(n => n.folderId === folder.id);
   const isSelected = selectedFolderId === folder.id;
+  const isParent = level === 0;
 
   const handleRename = () => {
     if (renameValue.trim() && renameValue !== folder.name) {
@@ -64,134 +161,205 @@ const TreeNode: React.FC<TreeNodeProps> = ({
     setIsRenaming(false);
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const noteId = e.dataTransfer.getData('text/plain');
+    if (noteId) {
+      onMoveNote(noteId, folder.id);
+    }
+  };
+
+  const hasChildren = childFolders.length > 0 || folderNotes.length > 0;
+
   return (
     <div>
-      <div
-        className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer transition-colors ${
-          isSelected
-            ? 'bg-blue-100 text-blue-700'
-            : 'hover:bg-gray-100 text-gray-700'
-        }`}
-        style={{ paddingLeft: `${level * 12 + 8}px` }}
-      >
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleFolder(folder.id);
-          }}
-          className="p-0.5 rounded transition-colors hover:bg-gray-200"
-        >
-          {isExpanded ? (
-            <ChevronDown className="w-3.5 h-3.5" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5" />
-          )}
-        </button>
-
-        {isExpanded ? (
-          <FolderOpen className="w-4 h-4 text-blue-600" />
-        ) : (
-          <Folder className="w-4 h-4 text-blue-600" />
-        )}
-
-        {isRenaming ? (
-          <input
-            type="text"
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            onBlur={handleRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRename();
-              if (e.key === 'Escape') {
-                setRenameValue(folder.name);
-                setIsRenaming(false);
-              }
-            }}
-            className="flex-1 px-1 py-0.5 text-sm rounded border bg-white border-gray-300"
-            autoFocus
+      <div className="relative group">
+        {/* Branch connector for non-root folders */}
+        {level > 0 && (
+          <div
+            className="absolute top-1/2 w-3 h-px bg-gray-300 pointer-events-none"
+            style={{ left: `${level * 16 + GUIDE_LINE_OFFSET}px` }}
           />
-        ) : (
-          <span
-            onClick={() => onSelectFolder(folder.id)}
-            className="flex-1 text-sm truncate"
-          >
-            {folder.name}
-          </span>
         )}
+        <div
+          className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer transition-colors ${
+            isSelected
+              ? 'bg-blue-50 text-blue-700'
+              : dragOver
+                ? 'bg-blue-50 text-blue-700 ring-2 ring-blue-400'
+                : 'hover:bg-gray-50 text-gray-700'
+          }`}
+          style={{ paddingLeft: `${level * 16 + 8}px` }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {/* Selected state left bar indicator */}
+          {isSelected && (
+            <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-blue-500" />
+          )}
 
-        <div className="relative">
           <button
             onClick={(e) => {
               e.stopPropagation();
-              setShowMenu(!showMenu);
+              onToggleFolder(folder.id);
             }}
-            className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-gray-200"
+            className={`p-0.5 rounded transition-colors ${
+              isSelected
+                ? 'hover:bg-blue-500 text-white'
+                : 'hover:bg-gray-200 text-gray-500'
+            }`}
           >
-            <MoreVertical className="w-3.5 h-3.5" />
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4" strokeWidth={2.5} />
+            ) : (
+              <ChevronRight className="w-4 h-4" strokeWidth={2.5} />
+            )}
           </button>
 
-          <AnimatePresence>
-            {showMenu && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="absolute right-0 top-full mt-1 py-1 rounded-lg shadow-lg z-50 min-w-[120px] bg-white border border-gray-200"
-              >
-                <button
-                  onClick={() => {
-                    onCreateNote(folder.id);
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-gray-100 text-gray-700"
+          {isExpanded ? (
+            <FolderOpen
+              className={`w-4 h-4 flex-shrink-0 ${
+                isSelected
+                  ? 'text-blue-600'
+                  : 'text-blue-400'
+              }`}
+            />
+          ) : (
+            <Folder
+              className={`w-4 h-4 flex-shrink-0 ${
+                isSelected
+                  ? 'text-white'
+                  : isParent
+                    ? 'text-blue-600'
+                    : 'text-blue-400'
+              }`}
+            />
+          )}
+
+          {isRenaming ? (
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={handleRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRename();
+                if (e.key === 'Escape') {
+                  setRenameValue(folder.name);
+                  setIsRenaming(false);
+                }
+              }}
+              className="flex-1 px-1 py-0.5 text-sm rounded border bg-white border-gray-300 text-gray-900"
+              autoFocus
+            />
+          ) : (
+            <span
+              onClick={() => onSelectFolder(folder.id)}
+              className={`flex-1 text-sm truncate ${
+                isSelected ? 'font-semibold text-white' : 'text-gray-700'
+              }`}
+            >
+              {folder.name}
+            </span>
+          )}
+
+          <div className="relative">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(!showMenu);
+              }}
+              className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
+                isSelected
+                  ? 'text-blue-400 hover:bg-blue-100'
+                  : 'hover:bg-gray-200 text-gray-400'
+              }`}
+            >
+              <MoreVertical className="w-3.5 h-3.5" />
+            </button>
+
+            <AnimatePresence>
+              {showMenu && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="absolute right-0 top-full mt-1 py-1 rounded-lg shadow-lg z-50 min-w-[120px] bg-white border border-gray-200"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  新建笔记
-                </button>
-                <button
-                  onClick={() => {
-                    onCreateFolder(folder.id);
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-gray-100 text-gray-700"
-                >
-                  <Folder className="w-3.5 h-3.5" />
-                  新建文件夹
-                </button>
-                <button
-                  onClick={() => {
-                    setIsRenaming(true);
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-gray-100 text-gray-700"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  重命名
-                </button>
-                <button
-                  onClick={() => {
-                    onDeleteFolder(folder.id);
-                    setShowMenu(false);
-                  }}
-                  className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-rose-50 text-rose-600"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  删除
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <button
+                    onClick={() => {
+                      onCreateNote(folder.id);
+                      setShowMenu(false);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-gray-100 text-gray-700"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    新建笔记
+                  </button>
+                  <button
+                    onClick={() => {
+                      onCreateFolder(folder.id);
+                      setShowMenu(false);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-gray-100 text-gray-700"
+                  >
+                    <Folder className="w-3.5 h-3.5" />
+                    新建文件夹
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsRenaming(true);
+                      setShowMenu(false);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-gray-100 text-gray-700"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    重命名
+                  </button>
+                  <button
+                    onClick={() => {
+                      onDeleteFolder(folder.id);
+                      setShowMenu(false);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 hover:bg-rose-50 text-rose-600"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    删除
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
       <AnimatePresence>
-        {isExpanded && (
+        {isExpanded && hasChildren && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
+            className="relative"
           >
+            {/* Vertical guide line */}
+            <div
+              className="absolute top-0 bottom-0 w-px bg-gray-200 pointer-events-none"
+              style={{ left: `${(level + 1) * 16 + GUIDE_LINE_OFFSET}px` }}
+            />
             {childFolders.map(childFolder => (
               <TreeNode
                 key={childFolder.id}
@@ -209,24 +377,40 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 onCreateNote={onCreateNote}
                 onDeleteFolder={onDeleteFolder}
                 onRenameFolder={onRenameFolder}
+                onDeleteNote={onDeleteNote}
+                onMoveNote={onMoveNote}
               />
             ))}
 
             {folderNotes.map(note => (
-              <div
+              <NoteItem
                 key={note.id}
-                onClick={() => onSelectNote(note)}
-                className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer transition-colors ${
-                  selectedNoteId === note.id
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'hover:bg-gray-100 text-gray-600'
-                }`}
-                style={{ paddingLeft: `${(level + 1) * 12 + 8}px` }}
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span className="text-sm truncate flex-1">{note.title}</span>
-              </div>
+                note={note}
+                isSelected={selectedNoteId === note.id}
+                level={level + 1}
+                onSelect={onSelectNote}
+                onDelete={onDeleteNote}
+                onDragStart={(e, noteId) => {
+                  e.dataTransfer.setData('text/plain', noteId);
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+              />
             ))}
+          </motion.div>
+        )}
+        {isExpanded && !hasChildren && level > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="relative"
+          >
+            {/* Short guide line ending for empty folders */}
+            <div
+              className="absolute top-0 h-4 w-px bg-gray-200 pointer-events-none"
+              style={{ left: `${(level + 1) * 16 + GUIDE_LINE_OFFSET}px` }}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -244,9 +428,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onCreateFolder,
   onCreateNote,
   onDeleteFolder,
-  onRenameFolder
+  onRenameFolder,
+  onDeleteNote,
+  onMoveNote
 }) => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [dragOverRoot, setDragOverRoot] = useState(false);
 
   const toggleFolder = useCallback((folderId: string) => {
     setExpandedFolders(prev => {
@@ -263,17 +450,37 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const rootFolders = folders.filter(f => f.parentId === null);
   const rootNotes = notes.filter(n => n.folderId === null);
 
+  const handleRootDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverRoot(true);
+  };
+
+  const handleRootDragLeave = (e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setDragOverRoot(false);
+  };
+
+  const handleRootDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverRoot(false);
+    const noteId = e.dataTransfer.getData('text/plain');
+    if (noteId) {
+      onMoveNote(noteId, null);
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="p-3">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             文件
           </h3>
           <div className="flex gap-1">
             <button
               onClick={() => onCreateNote(null)}
-              className="p-1.5 rounded transition-colors hover:bg-gray-100 text-gray-500"
+              className="p-1.5 rounded-lg transition-colors hover:bg-gray-100 text-gray-400"
               title="新建笔记"
             >
               <Plus className="w-4 h-4" />
@@ -290,15 +497,20 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
         <div
           onClick={() => onSelectFolder(null)}
+          onDragOver={handleRootDragOver}
+          onDragLeave={handleRootDragLeave}
+          onDrop={handleRootDrop}
           className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded transition-colors mb-1 ${
             selectedFolderId === null && !selectedNoteId
-              ? 'bg-blue-100 text-blue-700'
-              : 'hover:bg-gray-100 text-gray-700'
+              ? 'bg-blue-50 text-blue-700 font-medium'
+              : dragOverRoot
+                ? 'bg-blue-50 text-blue-700 ring-2 ring-blue-400'
+                : 'hover:bg-gray-50 text-gray-700'
           }`}
         >
           <FileText className="w-4 h-4" />
           <span className="text-sm">全部笔记</span>
-          <span className="text-xs text-gray-400">({notes.length})</span>
+          <span className={`text-xs ${selectedFolderId === null && !selectedNoteId ? 'text-blue-400' : 'text-gray-400'}`}>({notes.length})</span>
         </div>
 
         {rootFolders.map(folder => (
@@ -318,23 +530,24 @@ export const FileTree: React.FC<FileTreeProps> = ({
             onCreateNote={onCreateNote}
             onDeleteFolder={onDeleteFolder}
             onRenameFolder={onRenameFolder}
+            onDeleteNote={onDeleteNote}
+            onMoveNote={onMoveNote}
           />
         ))}
 
         {rootNotes.map(note => (
-          <div
+          <NoteItem
             key={note.id}
-            onClick={() => onSelectNote(note)}
-            className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer transition-colors ${
-              selectedNoteId === note.id
-                ? 'bg-blue-50 text-blue-700'
-                : 'hover:bg-gray-100 text-gray-600'
-            }`}
-            style={{ paddingLeft: '8px' }}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span className="text-sm truncate flex-1">{note.title}</span>
-          </div>
+            note={note}
+            isSelected={selectedNoteId === note.id}
+            level={0}
+            onSelect={onSelectNote}
+            onDelete={onDeleteNote}
+            onDragStart={(e, noteId) => {
+              e.dataTransfer.setData('text/plain', noteId);
+              e.dataTransfer.effectAllowed = 'move';
+            }}
+          />
         ))}
       </div>
     </div>

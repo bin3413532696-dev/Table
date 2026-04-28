@@ -134,7 +134,7 @@ export default function Finance() {
         className="mb-8"
       >
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-500/25">
+          <div className="w-10 h-10 bg-gray-900 rounded-lg flex items-center justify-center">
             <Wallet className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -148,11 +148,11 @@ export default function Finance() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="rounded-2xl p-6 shadow-sm border bg-white border-gray-200"
+          className="rounded-xl p-6 shadow-sm border bg-white border-gray-200"
         >
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-emerald-100">
-              <TrendingUp className="w-5 h-5 text-emerald-600" />
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100">
+              <TrendingUp className="w-5 h-5 text-gray-600" />
             </div>
             <span className="font-medium text-gray-600">总收入</span>
           </div>
@@ -163,11 +163,11 @@ export default function Finance() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="rounded-2xl p-6 shadow-sm border bg-white border-gray-200"
+          className="rounded-xl p-6 shadow-sm border bg-white border-gray-200"
         >
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-rose-100">
-              <TrendingDown className="w-5 h-5 text-rose-600" />
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100">
+              <TrendingDown className="w-5 h-5 text-gray-600" />
             </div>
             <span className="font-medium text-gray-600">总支出</span>
           </div>
@@ -178,15 +178,15 @@ export default function Finance() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className={`rounded-2xl p-6 shadow-sm border transition-colors duration-300 ${stats.profit >= 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-rose-50 border-rose-200'}`}
+          className={`rounded-xl p-6 shadow-sm border bg-white border-gray-200`}
         >
           <div className="flex items-center gap-3 mb-4">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${stats.profit >= 0 ? 'bg-emerald-200' : 'bg-rose-200'}`}>
-              <DollarSign className={`w-5 h-5 ${stats.profit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`} />
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100">
+              <DollarSign className={`w-5 h-5 text-gray-600`} />
             </div>
             <span className="font-medium text-gray-600">净收益</span>
           </div>
-          <p className={`text-3xl font-bold ${stats.profit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+          <p className={`text-3xl font-bold text-gray-900`}>
             ¥{stats.profit.toLocaleString()}
           </p>
         </motion.div>
@@ -346,11 +346,11 @@ export default function Finance() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="rounded-2xl shadow-sm border p-6 bg-white border-gray-200"
+            className="rounded-xl shadow-sm border p-6 bg-white border-gray-200"
           >
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-100">
-                <PieChart className="w-4 h-4 text-violet-600" />
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-100">
+                <PieChart className="w-4 h-4 text-gray-600" />
               </div>
               <h2 className="text-lg font-bold text-gray-900">模型统计</h2>
             </div>

@@ -140,6 +140,18 @@ export default function Notes() {
     setNotes(results);
   }, [searchQuery]);
 
+  const handleDeleteNote = useCallback(async (noteId: string) => {
+    await noteDB.delete(noteId);
+    setNotes(prev => prev.filter(n => n.id !== noteId));
+    setCurrentNote(prev => prev?.id === noteId ? null : prev);
+  }, []);
+
+  const handleMoveNote = useCallback(async (noteId: string, folderId: string | null) => {
+    await noteDB.update(noteId, { folderId });
+    setNotes(prev => prev.map(n => n.id === noteId ? { ...n, folderId } : n));
+    setCurrentNote(prev => prev?.id === noteId ? { ...prev, folderId } : prev);
+  }, []);
+
   const filteredNotes = selectedTags.length > 0
     ? notes.filter(n => selectedTags.some(tag => n.tags?.includes(tag)))
     : notes;
@@ -179,16 +191,18 @@ export default function Notes() {
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-5 py-2.5 border-b border-gray-200 bg-white/80 backdrop-blur-xl">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={() => setLeftCollapsed(!leftCollapsed)}
-            className="p-1.5 rounded transition-colors hover:bg-gray-100 text-gray-500"
+            className={`p-2 rounded-lg transition-colors ${
+              leftCollapsed ? 'bg-gray-100 text-gray-900' : 'hover:bg-gray-100 text-gray-500'
+            }`}
           >
             <PanelLeft className="w-4 h-4" />
           </button>
           {isSearching ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <input
                 type="text"
                 value={searchQuery}
@@ -200,7 +214,7 @@ export default function Notes() {
               />
               <button
                 onClick={handleSearch}
-                className="p-1.5 rounded transition-colors hover:bg-gray-100 text-gray-500"
+                className="p-2 rounded-lg transition-colors hover:bg-gray-100 text-gray-500"
               >
                 <Search className="w-4 h-4" />
               </button>
@@ -210,7 +224,7 @@ export default function Notes() {
                   setSearchQuery('');
                   loadData();
                 }}
-                className="p-1.5 rounded transition-colors hover:bg-gray-100 text-gray-500"
+                className="p-2 rounded-lg transition-colors hover:bg-gray-100 text-gray-500"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -222,15 +236,13 @@ export default function Notes() {
                 className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-gray-100 text-gray-500"
               >
                 <Search className="w-4 h-4" />
-                <span>搜索</span>
               </button>
               <button
                 onClick={() => setIsCommandPaletteOpen(true)}
                 className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-gray-100 text-gray-500"
               >
                 <Command className="w-4 h-4" />
-                <span>命令面板</span>
-                <span className="text-xs px-1.5 py-0.5 rounded bg-gray-200 text-gray-400">⌘K</span>
+                <span className="text-xs px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-400 border border-gray-200">⌘K</span>
               </button>
             </>
           )}
@@ -242,24 +254,24 @@ export default function Notes() {
               type="text"
               value={currentNote.title}
               onChange={(e) => handleUpdateTitle(e.target.value)}
-              className="px-3 py-1.5 text-sm font-medium rounded-lg outline-none transition-colors bg-transparent text-gray-900 hover:bg-gray-100 focus:bg-gray-100"
+              className="px-3 py-1.5 text-sm font-medium rounded-lg outline-none transition-colors bg-transparent text-gray-900 hover:bg-gray-100 focus:bg-gray-100 text-center"
             />
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-lg bg-gray-100">
-            {(['backlinks', 'tags', 'graph'] as RightPanelType[]).map((panel) => (
+        <div className="flex items-center gap-1.5">
+          <div className="flex rounded-lg bg-gray-100 p-0.5">
+            {(['backlinks', 'tags', 'graph'] as RightPanelType[]).map((panel, i) => (
               <button
                 key={panel}
                 onClick={() => {
                   if (rightCollapsed) setRightCollapsed(false);
                   setRightPanel(panel);
                 }}
-                className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                className={`px-3 py-1.5 text-sm rounded-md transition-all ${
                   rightPanel === panel && !rightCollapsed
-                    ? 'bg-blue-600 text-white'
-                    : 'text-gray-600 hover:text-gray-700'
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
                 }`}
               >
                 {panel === 'backlinks' && '反向链接'}
@@ -270,7 +282,9 @@ export default function Notes() {
           </div>
           <button
             onClick={() => setRightCollapsed(!rightCollapsed)}
-            className="p-1.5 rounded transition-colors hover:bg-gray-100 text-gray-500"
+            className={`p-2 rounded-lg transition-colors ${
+              rightCollapsed ? 'bg-gray-100 text-gray-900' : 'hover:bg-gray-100 text-gray-500'
+            }`}
           >
             <PanelRight className="w-4 h-4" />
           </button>
@@ -298,12 +312,14 @@ export default function Notes() {
                 onCreateNote={handleCreateNote}
                 onDeleteFolder={handleDeleteFolder}
                 onRenameFolder={handleRenameFolder}
+                onDeleteNote={handleDeleteNote}
+                onMoveNote={handleMoveNote}
               />
             </motion.div>
             <div
               ref={leftResizeRef}
               onMouseDown={startResizeLeft}
-              className="w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors bg-gray-200"
+              className="w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-400 transition-all bg-gray-100 shrink-0"
             />
           </>
         )}
@@ -317,15 +333,15 @@ export default function Notes() {
               onToggleVim={() => setIsVimMode(!isVimMode)}
             />
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-gray-400">
-              <div className="w-24 h-24 rounded-2xl mb-6 flex items-center justify-center bg-gray-100">
-                <Search className="w-10 h-10 opacity-50" />
+            <div className="h-full flex flex-col items-center justify-center">
+              <div className="w-20 h-20 rounded-2xl mb-5 flex items-center justify-center bg-white shadow-sm border border-gray-200">
+                <Search className="w-8 h-8 text-gray-300" />
               </div>
-              <p className="text-lg font-medium mb-2">选择一个笔记开始编辑</p>
-              <p className="text-sm mb-6">或者创建一个新笔记</p>
+              <p className="text-base font-medium text-gray-700 mb-1">选择一个笔记开始编辑</p>
+              <p className="text-sm text-gray-400 mb-6">或者创建一个新笔记</p>
               <button
                 onClick={() => handleCreateNote()}
-                className="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white"
+                className="px-5 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-900 hover:bg-gray-800 text-white"
               >
                 新建笔记
               </button>
@@ -338,7 +354,7 @@ export default function Notes() {
             <div
               ref={rightResizeRef}
               onMouseDown={startResizeRight}
-              className="w-1 cursor-col-resize hover:bg-blue-500/50 transition-colors bg-gray-200"
+              className="w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-400 transition-all bg-gray-100 shrink-0"
             />
             <motion.div
               initial={{ width: 0, opacity: 0 }}

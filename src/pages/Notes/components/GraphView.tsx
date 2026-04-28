@@ -72,10 +72,10 @@ export const GraphView: React.FC<GraphViewProps> = ({
     const height = svgRef.current.clientHeight;
 
     const simulation = d3.forceSimulation<GraphNode>(nodes)
-      .force('link', d3.forceLink<GraphNode, GraphLink>(links).id(d => d.id).distance(80))
+      .force('link', d3.forceLink<GraphNode, GraphLink>(links).id((d: GraphNode) => d.id).distance(80))
       .force('charge', d3.forceManyBody().strength(-200))
       .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide<GraphNode>().radius(d => d.radius + 5));
+      .force('collision', d3.forceCollide<GraphNode>().radius((d: GraphNode) => d.radius + 5));
 
     simulationRef.current = simulation;
 
@@ -84,63 +84,64 @@ export const GraphView: React.FC<GraphViewProps> = ({
       .attr('stroke-opacity', 0.6)
       .selectAll('line')
       .data(links)
-      .join('line')
+      .join<SVGLineElement>('line')
       .attr('stroke-width', 1.5);
 
     const node = svg.append('g')
       .selectAll('g')
       .data(nodes)
       .join('g')
-      .attr('cursor', 'pointer')
-      .call(d3.drag<SVGGElement, GraphNode>()
-        .on('start', (event, d) => {
+      .attr('cursor', 'pointer') as unknown as d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>;
+
+    node.call(d3.drag<SVGGElement, GraphNode>()
+        .on('start', (event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) => {
           if (!event.active) simulation.alphaTarget(0.3).restart();
           d.fx = d.x;
           d.fy = d.y;
         })
-        .on('drag', (event, d) => {
+        .on('drag', (event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) => {
           d.fx = event.x;
           d.fy = event.y;
         })
-        .on('end', (event, d) => {
+        .on('end', (event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) => {
           if (!event.active) simulation.alphaTarget(0);
           d.fx = null;
           d.fy = null;
         }));
 
     node.append('circle')
-      .attr('r', d => d.radius)
-      .attr('fill', d => {
+      .attr('r', (d: GraphNode) => d.radius)
+      .attr('fill', (d: GraphNode) => {
         if (d.id === currentNote?.id) return '#2563EB';
         return '#E5E7EB';
       })
-      .attr('stroke', d => {
+      .attr('stroke', (d: GraphNode) => {
         if (d.id === currentNote?.id) return '#3B82F6';
         return '#9CA3AF';
       })
-      .attr('stroke-width', d => d.id === currentNote?.id ? 3 : 1);
+      .attr('stroke-width', (d: GraphNode) => d.id === currentNote?.id ? 3 : 1);
 
     node.append('text')
-      .text(d => d.title.length > 10 ? d.title.slice(0, 10) + '...' : d.title)
+      .text((d: GraphNode) => d.title.length > 10 ? d.title.slice(0, 10) + '...' : d.title)
       .attr('text-anchor', 'middle')
-      .attr('dy', d => d.radius + 14)
+      .attr('dy', (d: GraphNode) => d.radius + 14)
       .attr('font-size', '11px')
       .attr('fill', '#374151')
       .attr('pointer-events', 'none');
 
-    node.on('click', (event, d) => {
+    node.on('click', (event: MouseEvent, d: GraphNode) => {
       const note = notes.find(n => n.id === d.id);
       if (note) onSelectNote(note);
     });
 
     simulation.on('tick', () => {
       link
-        .attr('x1', d => (d.source as GraphNode).x || 0)
-        .attr('y1', d => (d.source as GraphNode).y || 0)
-        .attr('x2', d => (d.target as GraphNode).x || 0)
-        .attr('y2', d => (d.target as GraphNode).y || 0);
+        .attr('x1', (d: GraphLink) => (d.source as GraphNode).x || 0)
+        .attr('y1', (d: GraphLink) => (d.source as GraphNode).y || 0)
+        .attr('x2', (d: GraphLink) => (d.target as GraphNode).x || 0)
+        .attr('y2', (d: GraphLink) => (d.target as GraphNode).y || 0);
 
-      node.attr('transform', d => `translate(${d.x || 0},${d.y || 0})`);
+      node.attr('transform', (d: GraphNode) => `translate(${d.x || 0},${d.y || 0})`);
     });
 
     return () => {
@@ -158,12 +159,16 @@ export const GraphView: React.FC<GraphViewProps> = ({
   }
 
   return (
-    <div className="h-full w-full">
-      <svg
-        ref={svgRef}
-        className="w-full h-full"
-        style={{ minHeight: '300px' }}
-      />
+    <div className="p-3 h-full flex flex-col">
+      <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 text-gray-500">
+        知识图谱
+      </h3>
+      <div className="flex-1 min-h-0">
+        <svg
+          ref={svgRef}
+          className="w-full h-full"
+        />
+      </div>
     </div>
   );
 };
