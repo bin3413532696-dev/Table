@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Bell, Shield, Palette, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, FileText, Lock, Eye, EyeOff, Mail, MessageSquare, Calendar, Check } from 'lucide-react';
+import { User, Bell, Shield, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, FileText, Lock, Eye, EyeOff, Mail, MessageSquare, Calendar, Check } from 'lucide-react';
 import { dataManager, noteDB, folderDB, Note, Folder } from '../../db';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User },
   { id: 'notifications', label: '通知设置', icon: Bell },
   { id: 'security', label: '安全隐私', icon: Shield },
-  { id: 'appearance', label: '外观主题', icon: Palette },
   { id: 'data', label: '数据管理', icon: Database },
 ];
 
@@ -15,7 +14,6 @@ const tabContent: Record<string, { title: string; desc: string }> = {
   profile: { title: '个人资料', desc: '管理您的个人信息和账户设置' },
   notifications: { title: '通知设置', desc: '自定义您接收通知的方式' },
   security: { title: '安全隐私', desc: '保护您的账户和数据安全' },
-  appearance: { title: '外观主题', desc: '个性化您的工作站界面' },
   data: { title: '数据管理', desc: '浏览数据统计，导入导出备份，自动同步到文件系统' },
 };
 
@@ -221,44 +219,6 @@ function SecuritySettings() {
           )}
         </div>
         {enabled && <p className="text-sm text-emerald-500">密码保护已启用</p>}
-      </div>
-    </div>
-  );
-}
-
-function AppearanceSettings() {
-  const [compactMode, setCompactMode] = useState(false);
-
-  useEffect(() => {
-    const compact = localStorage.getItem('compact_mode');
-    if (compact) setCompactMode(compact === 'true');
-  }, []);
-
-  const toggleCompact = () => {
-    setCompactMode(!compactMode);
-    localStorage.setItem('compact_mode', String(!compactMode));
-  };
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h4 className="font-medium mb-4 text-gray-900">主题模式</h4>
-        <div className="p-4 rounded-xl border bg-blue-50 border-blue-200">
-          <p className="text-sm text-gray-600">当前使用浅色主题</p>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between p-4 rounded-xl bg-gray-50">
-        <div>
-          <div className="font-medium text-gray-900">紧凑模式</div>
-          <div className="text-sm text-gray-500">减小间距，显示更多内容</div>
-        </div>
-        <button
-          onClick={toggleCompact}
-          className={`w-12 h-6 rounded-full transition-colors ${compactMode ? 'bg-blue-500' : 'bg-gray-300'}`}
-        >
-          <div className={`w-5 h-5 bg-white rounded-full shadow-sm transition-transform ${compactMode ? 'translate-x-6' : 'translate-x-0.5'} mt-0.5`} />
-        </button>
       </div>
     </div>
   );
@@ -479,7 +439,6 @@ export default function Settings() {
       case 'profile': return <ProfileSettings />;
       case 'notifications': return <NotificationSettings />;
       case 'security': return <SecuritySettings />;
-      case 'appearance': return <AppearanceSettings />;
       case 'data': return <DataManager />;
       default: return null;
     }
