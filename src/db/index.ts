@@ -320,6 +320,10 @@ class Store<T extends { id: string }> {
   restoreRecords(records: T[]): void {
     this.records = records;
   }
+
+  getRecords(): T[] {
+    return this.records;
+  }
 }
 
 interface TransactionOperation {
@@ -538,6 +542,25 @@ async function migrateLinksFromTitleToId(notes: Note[]): Promise<void> {
   noteStore.replaceAll(migratedRecords);
 }
 
+let fuseCache: { notes: Note[]; fuse: Fuse<Note> } | null = null;
+
+function getFuseInstance(notes: Note[]): Fuse<Note> {
+  if (fuseCache && fuseCache.notes === notes) {
+    return fuseCache.fuse;
+  }
+  const fuse = new Fuse(notes, {
+    keys: [
+      { name: 'title', weight: 2 },
+      { name: 'content', weight: 1 }
+    ],
+    threshold: 0.4,
+    includeScore: true,
+    minMatchCharLength: 1
+  });
+  fuseCache = { notes, fuse };
+  return fuse;
+}
+
 export const noteDB = {
   async getAll(): Promise<Note[]> {
     return noteStore.getAll().sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
@@ -551,7 +574,7 @@ export const noteDB = {
     return runInTransaction(() => {
       const now = new Date().toISOString();
       const folderId = record.folderId || null;
-      
+
       const newNote = noteStore.add({
         ...record,
         tags: record.tags || [],
@@ -569,6 +592,7 @@ export const noteDB = {
         }
       }
 
+      fuseCache = null;
       return newNote;
     });
   },
@@ -599,9 +623,11 @@ export const noteDB = {
         }
 
         noteStore.update(id, { ...updates, updatedAt: new Date().toISOString() });
+        fuseCache = null;
       });
     } else {
       noteStore.update(id, { ...updates, updatedAt: new Date().toISOString() });
+      fuseCache = null;
     }
   },
 
@@ -625,22 +651,15 @@ export const noteDB = {
       }
 
       noteStore.delete(id);
+      fuseCache = null;
     });
   },
 
   async search(query: string): Promise<Note[]> {
     if (!query.trim()) return this.getAll();
 
-    const fuse = new Fuse(noteStore.getAll(), {
-      keys: [
-        { name: 'title', weight: 2 },
-        { name: 'content', weight: 1 }
-      ],
-      threshold: 0.4,
-      includeScore: true,
-      minMatchCharLength: 1
-    });
-
+    const allNotes = noteStore.getAll();
+    const fuse = getFuseInstance(allNotes);
     return fuse.search(query).map(r => r.item);
   },
 
@@ -672,6 +691,7 @@ export const noteDB = {
           });
         }
       }
+      fuseCache = null;
     });
   },
 
@@ -873,34 +893,45 @@ export function createUseDB(React: typeof import('react')) {
   ): { data: T | null; loading: boolean } {
     const [data, setData] = React.useState<T | null>(null);
     const [loading, setLoading] = React.useState(true);
-    const depsKey = dependencies.join(',');
+    const fetcherRef = React.useRef(fetcher);
+    const depsRef = React.useRef(dependencies);
 
     React.useEffect(() => {
-      let cancelled = false;
+      fetcherRef.current = fetcher;
+    }, [fetcher]);
 
-      const fetch = async (initial: boolean) => {
-        if (initial) setLoading(true);
+    React.useEffect(() => {
+      depsRef.current = dependencies;
+    }, [dependencies]);
+
+    React.useEffect(() => {
+      let ignore = false;
+
+      const load = async () => {
+        setLoading(true);
         try {
-          const result = await fetcher();
-          if (!cancelled) setData(result);
+          const result = await fetcherRef.current();
+          if (!ignore) setData(result);
+        } catch (error) {
+          console.error('useDB fetch error:', error);
         } finally {
-          if (!cancelled && initial) setLoading(false);
+          if (!ignore) setLoading(false);
         }
       };
 
-      fetch(true);
+      load();
 
       const unsubscribe = subscribe((collection) => {
-        if (dependencies.includes(collection)) {
-          fetch(false);
+        if (depsRef.current.includes(collection)) {
+          load();
         }
       });
 
       return () => {
-        cancelled = true;
+        ignore = true;
         unsubscribe();
       };
-    }, [depsKey]);
+    }, []);
 
     return { data, loading };
   };

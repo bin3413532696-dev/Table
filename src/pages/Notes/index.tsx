@@ -123,53 +123,93 @@ export default function Notes() {
     const oldLinks = currentNote.links || [];
     const removedLinks = oldLinks.filter(l => !links.includes(l));
     const addedLinks = links.filter(l => !oldLinks.includes(l));
-
-    await Promise.all([
-      noteDB.update(currentNote.id, { content }),
-      noteDB.updateLinks(currentNote.id, links)
-    ]);
-
     const affectedIds = new Set([...removedLinks, ...addedLinks]);
 
+    // Only update if something changed
+    const contentChanged = currentNote.content !== content;
+    const linksChanged = affectedIds.size > 0;
+
+    if (!contentChanged && !linksChanged) return;
+
+    await noteDB.update(currentNote.id, { content });
+    if (linksChanged) {
+      await noteDB.updateLinks(currentNote.id, links);
+    }
+
     setNotes(prev => {
-      if (affectedIds.size === 0) {
-        const current = prev.find(n => n.id === currentNote.id);
-        if (current && current.content === content) {
-          const linksEqual = current.links.length === links.length &&
-            current.links.every(l => links.includes(l));
-          if (linksEqual) return prev;
+      if (!linksChanged) {
+        return prev.map(n => n.id === currentNote.id ? { ...n, content } : n);
+      }
+
+      return prev.map(n => {
+        if (n.id === currentNote.id) {
+          return { ...n, content, links };
         }
-      }
-
-      const noteMap = new Map(prev.map(n => [n.id, n]));
-      const current = noteMap.get(currentNote.id);
-      if (current) {
-        noteMap.set(currentNote.id, { ...current, content, links });
-      }
-
-      for (const id of affectedIds) {
-        const note = noteMap.get(id);
-        if (!note) continue;
-
-        if (removedLinks.includes(id)) {
-          noteMap.set(id, { ...note, backlinks: (note.backlinks || []).filter(b => b !== currentNote.id) });
-        } else if (addedLinks.includes(id)) {
-          noteMap.set(id, { ...note, backlinks: [...(note.backlinks || []), currentNote.id] });
+        if (removedLinks.includes(n.id)) {
+          return { ...n, backlinks: (n.backlinks || []).filter(b => b !== currentNote.id) };
         }
-      }
-
-      return Array.from(noteMap.values());
+        if (addedLinks.includes(n.id)) {
+          return { ...n, backlinks: [...(n.backlinks || []), currentNote.id] };
+        }
+        return n;
+      });
     });
 
     setCurrentNote(prev => prev ? { ...prev, content, links } : null);
   }, [currentNote, notes]);
 
-  const handleUpdateTitle = useCallback(async (title: string) => {
+  const titleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleUpdateTitle = useCallback((title: string) => {
     if (!currentNote) return;
-    await noteDB.update(currentNote.id, { title });
-    setNotes(prev => prev.map(n => n.id === currentNote.id ? { ...n, title } : n));
-    setCurrentNote(prev => prev ? { ...prev, title } : null);
-  }, [currentNote]);
+
+    if (titleTimerRef.current) {
+      clearTimeout(titleTimerRef.current);
+    }
+
+    titleTimerRef.current = setTimeout(async () => {
+      if (!currentNote) return;
+      const oldTitle = currentNote.title;
+
+      // Update note title
+      await noteDB.update(currentNote.id, { title });
+
+      // Update links in other notes that reference this note by title
+      if (oldTitle !== title) {
+        const linkRegex = /\[\[([^\]]+)\]\]/g;
+        const updatedNotes: Note[] = [];
+
+        for (const note of notes) {
+          if (note.id === currentNote.id) continue;
+
+          let newContent = note.content;
+          let hasChanges = false;
+
+          // Replace [[oldTitle]] with [[title]] in content
+          newContent = newContent.replace(linkRegex, (match, linkText) => {
+            if (linkText === oldTitle) {
+              hasChanges = true;
+              return `[[${title}]]`;
+            }
+            return match;
+          });
+
+          if (hasChanges) {
+            await noteDB.update(note.id, { content: newContent });
+            updatedNotes.push({ ...note, content: newContent });
+          }
+        }
+
+        // Refresh notes to get updated content
+        if (updatedNotes.length > 0) {
+          reloadData();
+        }
+      }
+
+      setNotes(prev => prev.map(n => n.id === currentNote.id ? { ...n, title } : n));
+      setCurrentNote(prev => prev ? { ...prev, title } : null);
+    }, 500);
+  }, [currentNote, notes, reloadData]);
 
   const handleToggleTag = useCallback((tag: string) => {
     setSelectedTags(prev =>

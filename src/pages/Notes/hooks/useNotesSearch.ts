@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { noteDB, Note } from '../../../db';
 
 export function useNotesSearch(
@@ -18,47 +18,48 @@ export function useNotesSearch(
     };
   }, []);
 
-  const debouncedSearch = useMemo(() => {
-    return async (query: string) => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+  const performSearch = useCallback(async (query: string) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
 
-      return new Promise<void>((resolve) => {
-        timerRef.current = setTimeout(async () => {
-          if (cancelledRef.current) {
-            resolve();
-            return;
-          }
+    timerRef.current = setTimeout(async () => {
+      if (cancelledRef.current) return;
 
-          if (!query.trim()) {
-            const allNotes = await noteDB.getAll();
-            if (!cancelledRef.current) {
-              setNotes(allNotes);
-            }
-          } else {
-            const results = await noteDB.search(query);
-            if (!cancelledRef.current) {
-              setNotes(results);
-            }
+      setIsSearching(true);
+
+      try {
+        if (!query.trim()) {
+          const allNotes = await noteDB.getAll();
+          if (!cancelledRef.current) {
+            setNotes(allNotes);
           }
-          resolve();
-        }, 300);
-      });
-    };
+        } else {
+          const results = await noteDB.search(query);
+          if (!cancelledRef.current) {
+            setNotes(results);
+          }
+        }
+      } finally {
+        if (!cancelledRef.current) {
+          setIsSearching(false);
+        }
+      }
+    }, 300);
   }, [setNotes]);
 
-  const handleSearch = useCallback(async () => {
-    await debouncedSearch(searchQuery);
-  }, [searchQuery, debouncedSearch]);
-
   useEffect(() => {
-    debouncedSearch(searchQuery);
-  }, [searchQuery, debouncedSearch]);
+    performSearch(searchQuery);
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, [searchQuery, performSearch]);
 
   return {
     searchQuery,
     isSearching,
     setSearchQuery,
     setIsSearching,
-    handleSearch,
+    handleSearch: () => performSearch(searchQuery),
   };
 }

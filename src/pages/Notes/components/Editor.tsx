@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useRef } from 'react';
+import React, { useCallback, useState, useRef, useEffect } from 'react';
 import CodeMirror, { ReactCodeMirrorRef } from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import { Extension } from '@codemirror/state';
@@ -6,7 +6,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { vim } from '@replit/codemirror-vim';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Bold, Italic, Strikethrough, Heading, List, ListOrdered, Quote, Code, Link, CheckSquare, Maximize2, Minimize2 } from 'lucide-react';
+import { Bold, Italic, Strikethrough, Heading, List, ListOrdered, Quote, Code, Link, CheckSquare, Maximize2, Minimize2, Save, Check } from 'lucide-react';
 import { useTheme } from '../../../contexts/ThemeContext';
 
 interface EditorProps {
@@ -16,6 +16,8 @@ interface EditorProps {
   onToggleVim: () => void;
 }
 
+type SaveStatus = 'idle' | 'saving' | 'saved';
+
 export const Editor: React.FC<EditorProps> = ({
   content,
   onChange,
@@ -24,8 +26,12 @@ export const Editor: React.FC<EditorProps> = ({
 }) => {
   const [mode, setMode] = useState<'edit' | 'split' | 'preview'>('edit');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedContentRef = useRef(content);
 
   const insertText = useCallback((before: string, after: string = '') => {
     const view = editorRef.current?.view;
@@ -45,22 +51,123 @@ export const Editor: React.FC<EditorProps> = ({
     }
 
     view.dispatch({
-      changes: {
-        from,
-        to,
-        insert: newText
-      },
-      selection: {
-        anchor: cursorPos,
-        head: cursorPos
-      }
+      changes: { from, to, insert: newText },
+      selection: { anchor: cursorPos, head: cursorPos }
     });
   }, []);
+
+  // Auto-save with debounce
+  useEffect(() => {
+    if (content === lastSavedContentRef.current) return;
+
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+
+    setSaveStatus('saving');
+
+    saveTimerRef.current = setTimeout(() => {
+      lastSavedContentRef.current = content;
+      onChange(content);
+      setSaveStatus('saved');
+
+      setTimeout(() => {
+        setSaveStatus('idle');
+      }, 1500);
+    }, 800);
+
+    return () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+    };
+  }, [content, onChange]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!editorRef.current?.view) return;
+
+      const view = editorRef.current.view;
+      const isMod = e.metaKey || e.ctrlKey;
+
+      if (isMod && e.key === 'b') {
+        e.preventDefault();
+        insertText('**', '**');
+      } else if (isMod && e.key === 'i') {
+        e.preventDefault();
+        insertText('*', '*');
+      } else if (isMod && e.key === 'u') {
+        e.preventDefault();
+        insertText('~~', '~~');
+      } else if (isMod && e.key === 's') {
+        e.preventDefault();
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        lastSavedContentRef.current = content;
+        onChange(content);
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 1500);
+      } else if (isMod && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: view.state.doc.toString() } });
+        // Use history extension if available
+        const historyExt = view.state.field('history' as any, false);
+        if (historyExt) {
+          view.dispatch({ undo: true } as any);
+        }
+      } else if (isMod && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        view.dispatch({ redo: true } as any);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [content, onChange, insertText]);
+
+  // Editor scroll sync for split mode
+  useEffect(() => {
+    if (mode !== 'split' || !previewRef.current || !editorRef.current?.view) return;
+
+    const view = editorRef.current.view;
+    const editorScroll = view.scrollDOM;
+
+    const handleScroll = () => {
+      if (mode !== 'split' || !previewRef.current) return;
+      const scrollTop = editorScroll.scrollTop;
+      const scrollHeight = editorScroll.scrollHeight - editorScroll.clientHeight;
+      const scrollPercentage = scrollHeight > 0 ? scrollTop / scrollHeight : 0;
+      const previewScrollHeight = previewRef.current.scrollHeight - previewRef.current.clientHeight;
+      previewRef.current.scrollTop = scrollPercentage * previewScrollHeight;
+    };
+
+    editorScroll.addEventListener('scroll', handleScroll, { passive: true });
+    return () => editorScroll.removeEventListener('scroll', handleScroll);
+  }, [mode]);
 
   const extensions: Extension[] = [markdown()];
   if (isVimMode) {
     extensions.push(vim());
   }
+
+  const renderSaveStatus = () => {
+    if (saveStatus === 'idle') return null;
+    return (
+      <div className="flex items-center gap-1 text-xs">
+        {saveStatus === 'saving' ? (
+          <>
+            <Save className="w-3 h-3 animate-pulse" />
+            <span className="text-text-muted">保存中...</span>
+          </>
+        ) : (
+          <>
+            <Check className="w-3 h-3 text-success" />
+            <span className="text-success">已保存</span>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className={`flex flex-col h-full ${isFullscreen ? 'fixed inset-0 z-50' : ''} bg-bg-primary`}>
@@ -70,21 +177,21 @@ export const Editor: React.FC<EditorProps> = ({
           <button
             onClick={() => insertText('**', '**')}
             className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
-            title="粗体"
+            title="粗体 (Ctrl+B)"
           >
             <Bold className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('*', '*')}
             className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
-            title="斜体"
+            title="斜体 (Ctrl+I)"
           >
             <Italic className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('~~', '~~')}
             className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
-            title="删除线"
+            title="删除线 (Ctrl+U)"
           >
             <Strikethrough className="w-4 h-4" />
           </button>
@@ -141,6 +248,7 @@ export const Editor: React.FC<EditorProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {renderSaveStatus()}
           <div className="flex rounded-lg bg-bg-tertiary p-0.5">
             <button
               onClick={() => setMode('edit')}
@@ -209,6 +317,7 @@ export const Editor: React.FC<EditorProps> = ({
               highlightActiveLineGutter: true,
               highlightActiveLine: true,
               foldGutter: false,
+              history: true,
             }}
           />
         )}
@@ -228,10 +337,14 @@ export const Editor: React.FC<EditorProps> = ({
                   lineNumbers: true,
                   highlightActiveLineGutter: true,
                   highlightActiveLine: true,
+                  history: true,
                 }}
               />
             </div>
-            <div className="w-1/2 overflow-y-auto p-4 text-text-primary bg-bg-primary">
+            <div
+              ref={previewRef}
+              className="w-1/2 overflow-y-auto p-4 text-text-primary bg-bg-primary"
+            >
               <div className="markdown-body">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
               </div>

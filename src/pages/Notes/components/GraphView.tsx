@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import * as d3 from 'd3';
-import { Share2, ZoomIn, ZoomOut, RotateCcw, Filter, Maximize2 } from 'lucide-react';
+import { Share2 } from 'lucide-react';
 import { Note } from '../../../db';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { GraphNode, GraphLink, COLORS } from './GraphView/types';
+import { GraphControls, GraphStats, NodeTooltip } from './GraphView/GraphControls';
 
 interface GraphViewProps {
   notes: Note[];
@@ -10,34 +12,7 @@ interface GraphViewProps {
   onSelectNote: (note: Note) => void;
 }
 
-interface GraphNode {
-  id: string;
-  title: string;
-  radius: number;
-  linkCount: number;
-  outLinks: number;
-  inLinks: number;
-  tags: string[];
-  cluster?: number;
-  x?: number;
-  y?: number;
-  fx?: number | null;
-  fy?: number | null;
-}
-
-interface GraphLink {
-  source: string | GraphNode;
-  target: string | GraphNode;
-}
-
 type FilterMode = 'all' | 'connected' | 'local';
-
-const COLORS = {
-  cluster: [
-    '#165DFF', '#00B42A', '#FF7D00', '#F53F3F', '#757575',
-    '#8B5CF6', '#06B6D4', '#84CC16', '#F97316', '#6366F1'
-  ]
-};
 
 export const GraphView: React.FC<GraphViewProps> = ({
   notes,
@@ -256,6 +231,9 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
     nodeSelectionRef.current = node;
 
+    const linkSelection = link;
+    const nodeSelection = node;
+
     node.append('circle')
       .attr('r', (d: GraphNode) => d.radius)
       .attr('fill', (d: GraphNode) => {
@@ -377,12 +355,19 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return () => {
       simulation.stop();
       simulation.on('tick', null);
-      node.on('click', null);
-      node.on('mouseenter', null);
-      node.on('mouseleave', null);
+
+      if (nodeSelection) {
+        nodeSelection.on('click', null);
+        nodeSelection.on('mouseenter', null);
+        nodeSelection.on('mouseleave', null);
+      }
+
       svg.on('.zoom', null);
+      svg.selectAll('*').remove();
+
       nodeSelectionRef.current = null;
       linkSelectionRef.current = null;
+      simulationRef.current = null;
     };
   }, [filteredData, notes, theme, showLabels]);
 
@@ -454,60 +439,17 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
   return (
     <div className="p-3 h-full flex flex-col">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
-          知识图谱
-        </h3>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setShowLabels(!showLabels)}
-            className={`p-1 rounded transition-colors ${showLabels ? 'bg-bg-tertiary text-text-primary' : 'text-text-muted hover:bg-bg-tertiary'}`}
-            title={showLabels ? '隐藏标签' : '显示标签'}
-          >
-            <span className="text-xs font-medium">Aa</span>
-          </button>
-          <div className="w-px h-4 bg-border-primary mx-1" />
-          <button
-            onClick={() => handleZoom(-0.2)}
-            className="p-1 rounded hover:bg-bg-tertiary text-text-muted transition-colors"
-            title="缩小"
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-          <span className="text-xs text-text-muted w-10 text-center">{Math.round(zoom * 100)}%</span>
-          <button
-            onClick={() => handleZoom(0.2)}
-            className="p-1 rounded hover:bg-bg-tertiary text-text-muted transition-colors"
-            title="放大"
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleReset}
-            className="p-1 rounded hover:bg-bg-tertiary text-text-muted transition-colors"
-            title="重置视图"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex gap-1 mb-2">
-        {(['all', 'connected', 'local'] as FilterMode[]).map(mode => (
-          <button
-            key={mode}
-            onClick={() => setFilterMode(mode)}
-            disabled={mode === 'local' && !currentNote}
-            className={`px-2 py-0.5 text-xs rounded transition-colors ${
-              filterMode === mode
-                ? 'bg-primary text-white'
-                : 'bg-bg-tertiary text-text-muted hover:bg-bg-secondary'
-            } ${mode === 'local' && !currentNote ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            {mode === 'all' ? '全部' : mode === 'connected' ? '已连接' : '局部'}
-          </button>
-        ))}
-      </div>
+      <GraphControls
+        zoom={zoom}
+        showLabels={showLabels}
+        filterMode={filterMode}
+        canUseLocalFilter={!!currentNote}
+        onZoomIn={() => handleZoom(0.2)}
+        onZoomOut={() => handleZoom(-0.2)}
+        onReset={handleReset}
+        onToggleLabels={() => setShowLabels(!showLabels)}
+        onFilterChange={setFilterMode}
+      />
 
       <div className="flex-1 min-h-0 relative" ref={containerRef}>
         {filteredData.nodes.length === 0 ? (
@@ -520,29 +462,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
         ) : (
           <>
             <svg ref={svgRef} className="w-full h-full" />
-            <div className="absolute bottom-2 left-2 text-xs text-text-muted bg-bg-card/90 backdrop-blur-sm px-2 py-1 rounded shadow-sm">
-              {filteredData.nodes.length} 笔记 · {filteredData.links.length} 连接
-              {isolatedCount > 0 && filterMode === 'all' && (
-                <span className="text-amber-500 dark:text-amber-400 ml-1">({isolatedCount} 孤立)</span>
-              )}
-            </div>
-            {hoveredNode && (
-              <div className="absolute top-2 right-2 text-xs bg-bg-card/95 backdrop-blur-sm px-3 py-2 rounded-lg shadow-lg border border-border-primary">
-                <div className="font-medium text-text-primary mb-1">{hoveredNode.title}</div>
-                <div className="text-text-muted">
-                  出链: {hoveredNode.outLinks} · 入链: {hoveredNode.inLinks}
-                </div>
-                {hoveredNode.tags.length > 0 && (
-                  <div className="flex gap-1 mt-1 flex-wrap">
-                    {hoveredNode.tags.slice(0, 3).map(tag => (
-                      <span key={tag} className="px-1.5 py-0.5 bg-bg-tertiary rounded text-text-muted">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            <GraphStats
+              nodeCount={filteredData.nodes.length}
+              linkCount={filteredData.links.length}
+              isolatedCount={isolatedCount}
+              filterMode={filterMode}
+            />
+            {hoveredNode && <NodeTooltip node={hoveredNode} />}
           </>
         )}
       </div>
@@ -551,7 +477,19 @@ export const GraphView: React.FC<GraphViewProps> = ({
 };
 
 function adjustColorForDark(color: string): string {
-  return color;
+  const darken: Record<string, string> = {
+    '#165DFF': '#1E40AF',
+    '#00B42A': '#15803D',
+    '#FF7D00': '#C2410C',
+    '#F53F3F': '#B91C1C',
+    '#757575': '#525252',
+    '#8B5CF6': '#6D28D9',
+    '#06B6D4': '#0E7490',
+    '#84CC16': '#4D7C0F',
+    '#F97316': '#C2410C',
+    '#6366F1': '#4338CA'
+  };
+  return darken[color] || color;
 }
 
 function adjustColorForLight(color: string): string {

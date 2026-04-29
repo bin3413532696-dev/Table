@@ -9,7 +9,9 @@
       "Bash(curl -s http://localhost:3266/)",
       "Bash(curl *)",
       "Bash(npx tsc *)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(dir \"D:\\\\project\\\\Table\\\\data\\\\notes\")",
+      "Bash(cat C:\\\\\\\\Users\\\\\\\\MyPC\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\D--project-Table\\\\\\\\dce8b0d8-cb36-4c3e-b2c5-65729acd56ce\\\\\\\\tasks\\\\\\\\bkbjs4pr5.output)"
     ]
   }
 }
