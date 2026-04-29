@@ -350,7 +350,7 @@ const TreeNode: React.FC<{
             }}
             className={`p-0.5 rounded transition-colors ${
               isSelected
-                ? 'hover:bg-blue-500 text-white'
+                ? 'hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-300'
                 : 'hover:bg-bg-tertiary text-text-muted'
             }`}
             aria-label={isExpanded ? '折叠文件夹' : '展开文件夹'}
@@ -372,7 +372,7 @@ const TreeNode: React.FC<{
             <Folder
               className={`w-4 h-4 flex-shrink-0 ${
                 isSelected
-                  ? 'text-white'
+                  ? 'text-blue-600 dark:text-blue-300'
                   : isParent
                     ? 'text-blue-600 dark:text-blue-300'
                     : 'text-blue-400 dark:text-blue-300'
@@ -400,7 +400,7 @@ const TreeNode: React.FC<{
             <span
               onClick={() => onSelectFolder(folder.id)}
               className={`flex-1 text-sm truncate ${
-                isSelected ? 'font-semibold text-white' : 'text-text-secondary'
+                isSelected ? 'font-semibold text-blue-700 dark:text-blue-300' : 'text-text-secondary'
               }`}
             >
               {folder.name}

@@ -48,19 +48,19 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+    <div className="min-h-screen flex items-center justify-center bg-bg-secondary">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         className="w-full max-w-md p-8"
       >
-        <div className="bg-white/10 backdrop-blur-lg rounded-3xl p-8 shadow-2xl border border-white/20">
+        <div className="bg-bg-card rounded-2xl p-8 shadow-xl border border-border-primary">
           <div className="text-center mb-8">
             <div className="w-16 h-16 mx-auto mb-4 bg-blue-500/20 rounded-full flex items-center justify-center">
-              <Lock className="w-8 h-8 text-blue-400" />
+              <Lock className="w-8 h-8 text-blue-500 dark:text-blue-400" />
             </div>
-            <h1 className="text-2xl font-bold text-white mb-2">验证 PIN 码</h1>
-            <p className="text-slate-400">请输入您的访问密码</p>
+            <h1 className="text-2xl font-bold text-text-primary mb-2">验证 PIN 码</h1>
+            <p className="text-text-muted">请输入您的访问密码</p>
           </div>
 
           <AnimatePresence>
@@ -69,7 +69,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="flex items-center gap-2 mb-6 p-3 bg-rose-500/20 rounded-lg text-rose-400"
+                className="flex items-center gap-2 mb-6 p-3 bg-rose-50 dark:bg-rose-900/30 rounded-lg text-rose-600 dark:text-rose-300"
               >
                 <AlertCircle className="w-4 h-4" />
                 <span className="text-sm">
@@ -87,7 +87,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
                   className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center transition-all ${
                     pin[i]
                       ? 'bg-blue-500 border-blue-400'
-                      : 'border-white/30 bg-white/5'
+                      : 'border-border-primary bg-bg-secondary'
                   }`}
                 >
                   {pin[i] && (
@@ -112,10 +112,10 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
                   disabled={disabled}
                   className={`p-4 rounded-xl font-semibold text-lg transition-all ${
                     num === 'delete'
-                      ? 'bg-slate-600/50 text-slate-300 hover:bg-slate-500/50'
+                      ? 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'
                       : num === ''
                       ? 'bg-transparent cursor-default'
-                      : 'bg-white/10 text-white hover:bg-white/20'
+                      : 'bg-bg-secondary text-text-primary hover:bg-bg-tertiary border border-border-primary'
                   } disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   {num === 'delete' ? (
@@ -133,7 +133,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
               localStorage.removeItem('security_pin');
               onSuccess();
             }}
-            className="w-full mt-6 text-center text-sm text-slate-500 hover:text-slate-300 transition-colors"
+            className="w-full mt-6 text-center text-sm text-text-muted hover:text-text-secondary transition-colors"
           >
             忘记密码？移除保护
           </button>

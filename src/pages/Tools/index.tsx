@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Wrench, Calculator, Palette, FileJson, Clock, QrCode, Copy, Check, RefreshCw } from 'lucide-react';
+import { Wrench, Calculator, Palette, FileJson, Copy, Check, RefreshCw } from 'lucide-react';
 
 const tools = [
   { icon: Calculator, label: '计算器', desc: '快速计算', color: 'bg-blue-500' },
@@ -315,13 +315,15 @@ export default function Tools() {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         className="flex items-center gap-3 mb-6"
       >
-        <Wrench className="w-8 h-8 text-blue-500" />
+        <div className="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+          <Wrench className="w-5 h-5 text-white" />
+        </div>
         <h1 className="text-2xl font-bold text-text-primary">工具箱</h1>
       </motion.div>
 

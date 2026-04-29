@@ -100,21 +100,23 @@ export default function Notes() {
       linkTexts.push(match[1]);
     }
 
-    // 将文本链接转换为 ID 链接
     const links: string[] = [];
+    const processedIds = new Set<string>();
+
     for (const linkText of linkTexts) {
-      // 首先检查是否已经是 ID（长度较长且没有空格）
+      let targetNote: Note | undefined;
+
       if (linkText.length > 10 && !linkText.includes(' ')) {
-        const noteWithId = notes.find(n => n.id === linkText);
-        if (noteWithId) {
-          links.push(linkText);
-          continue;
-        }
+        targetNote = notes.find(n => n.id === linkText);
       }
-      // 否则按标题查找
-      const note = notes.find(n => n.title === linkText);
-      if (note) {
-        links.push(note.id);
+
+      if (!targetNote) {
+        targetNote = notes.find(n => n.title === linkText);
+      }
+
+      if (targetNote && !processedIds.has(targetNote.id)) {
+        links.push(targetNote.id);
+        processedIds.add(targetNote.id);
       }
     }
 
@@ -122,25 +124,43 @@ export default function Notes() {
     const removedLinks = oldLinks.filter(l => !links.includes(l));
     const addedLinks = links.filter(l => !oldLinks.includes(l));
 
-    await noteDB.update(currentNote.id, { content });
-    await noteDB.updateLinks(currentNote.id, links);
+    await Promise.all([
+      noteDB.update(currentNote.id, { content }),
+      noteDB.updateLinks(currentNote.id, links)
+    ]);
 
-    setNotes(prev => prev.map(note => {
-      if (note.id === currentNote.id) {
-        return { ...note, content, links };
+    const affectedIds = new Set([...removedLinks, ...addedLinks]);
+
+    setNotes(prev => {
+      if (affectedIds.size === 0) {
+        const current = prev.find(n => n.id === currentNote.id);
+        if (current && current.content === content) {
+          const linksEqual = current.links.length === links.length &&
+            current.links.every(l => links.includes(l));
+          if (linksEqual) return prev;
+        }
       }
-      
-      if (removedLinks.includes(note.id)) {
-        return { ...note, backlinks: (note.backlinks || []).filter(b => b !== currentNote.id) };
+
+      const noteMap = new Map(prev.map(n => [n.id, n]));
+      const current = noteMap.get(currentNote.id);
+      if (current) {
+        noteMap.set(currentNote.id, { ...current, content, links });
       }
-      
-      if (addedLinks.includes(note.id)) {
-        return { ...note, backlinks: [...(note.backlinks || []), currentNote.id] };
+
+      for (const id of affectedIds) {
+        const note = noteMap.get(id);
+        if (!note) continue;
+
+        if (removedLinks.includes(id)) {
+          noteMap.set(id, { ...note, backlinks: (note.backlinks || []).filter(b => b !== currentNote.id) });
+        } else if (addedLinks.includes(id)) {
+          noteMap.set(id, { ...note, backlinks: [...(note.backlinks || []), currentNote.id] });
+        }
       }
-      
-      return note;
-    }));
-    
+
+      return Array.from(noteMap.values());
+    });
+
     setCurrentNote(prev => prev ? { ...prev, content, links } : null);
   }, [currentNote, notes]);
 
@@ -159,7 +179,8 @@ export default function Notes() {
 
   const handleDeleteNote = useCallback(async (noteId: string) => {
     await noteDB.delete(noteId);
-  }, []);
+    reloadData();
+  }, [reloadData]);
 
   const handleNotesChanged = useCallback((updatedNotes: Note[]) => {
     if (!isSearching) setNotes(updatedNotes);

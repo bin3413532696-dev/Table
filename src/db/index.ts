@@ -189,15 +189,15 @@ async function performSync(): Promise<SyncResult> {
   try {
     syncStatus = 'syncing';
     syncRetryCount = 0;
-    
+
     const response = await fetch('/api/sync-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        notes: noteRecords,
-        folders: folderRecords,
-        tasks: taskRecords,
-        finance: financeRecords
+        notes: noteStore.getAll(),
+        folders: folderStore.getAll(),
+        tasks: taskStore.getAll(),
+        finance: financeStore.getAll()
       })
     });
 
@@ -309,10 +309,6 @@ class Store<T extends { id: string }> {
     }
   }
 
-  get recordsRef(): T[] {
-    return this.records;
-  }
-
   setDelayedSave(delayed: boolean): void {
     this.delayedSave = delayed;
   }
@@ -415,13 +411,8 @@ const taskStore = new Store<Task>(STORAGE_KEYS.tasks, 'tasks', isValidTask);
 const noteStore = new Store<Note>(STORAGE_KEYS.notes, 'notes', isValidNote);
 const folderStore = new Store<Folder>(STORAGE_KEYS.folders, 'folders', isValidFolder);
 
-const financeRecords = financeStore.recordsRef;
-const taskRecords = taskStore.recordsRef;
-const noteRecords = noteStore.recordsRef;
-const folderRecords = folderStore.recordsRef;
-
 export const initDB = async () => {
-  await migrateLinksFromTitleToId(noteRecords);
+  await migrateLinksFromTitleToId(noteStore.getAll());
   return true;
 };
 
@@ -717,8 +708,9 @@ export const folderDB = {
 
   async delete(id: string): Promise<void> {
     return runInTransaction(() => {
+      const allFolders = folderStore.getAll();
       const childMap = new Map<string, string[]>();
-      for (const folder of folderRecords) {
+      for (const folder of allFolders) {
         const key = folder.parentId || '';
         if (!childMap.has(key)) {
           childMap.set(key, []);
@@ -728,7 +720,7 @@ export const folderDB = {
 
       const descendantIds: string[] = [];
       const stack = [id];
-      
+
       while (stack.length > 0) {
         const currentId = stack.pop()!;
         const children = childMap.get(currentId) || [];
@@ -740,15 +732,14 @@ export const folderDB = {
 
       const allToDelete = new Set([id, ...descendantIds]);
 
-      let notesMovedToRoot = 0;
-      const updatedNotes = noteRecords.map(n => {
+      const allNotes = noteStore.getAll();
+      const updatedNotes = allNotes.map(n => {
         if (allToDelete.has(n.folderId || '')) {
-          notesMovedToRoot++;
           return { ...n, folderId: null };
         }
         return n;
       });
-      const updatedFolders = folderRecords.filter(f => !allToDelete.has(f.id));
+      const updatedFolders = allFolders.filter(f => !allToDelete.has(f.id));
 
       folderStore.replaceAll(updatedFolders);
       noteStore.replaceAll(updatedNotes);
@@ -780,10 +771,10 @@ export const dataManager = {
   exportAll(): string {
     const data = {
       version: 1,
-      finance: financeRecords,
-      tasks: taskRecords,
-      notes: noteRecords,
-      folders: folderRecords,
+      finance: financeStore.getAll(),
+      tasks: taskStore.getAll(),
+      notes: noteStore.getAll(),
+      folders: folderStore.getAll(),
       exportTime: new Date().toISOString()
     };
     return JSON.stringify(data, null, 2);
@@ -823,7 +814,7 @@ export const dataManager = {
           stores[key].replaceAll(validRecords);
         }
       }
-      migrateLinksFromTitleToId(noteStore.recordsRef);
+      migrateLinksFromTitleToId(noteStore.getAll());
       return true;
     } catch {
       return false;
@@ -838,13 +829,17 @@ export const dataManager = {
   },
 
   getStats() {
-    const financeData = { finance: financeRecords, tasks: taskRecords, notes: noteRecords, folders: folderRecords };
     return {
       finance: financeStore.length,
       tasks: taskStore.length,
       notes: noteStore.length,
       folders: folderStore.length,
-      totalSize: JSON.stringify(financeData).length
+      totalSize: JSON.stringify({
+        finance: financeStore.getAll(),
+        tasks: taskStore.getAll(),
+        notes: noteStore.getAll(),
+        folders: folderStore.getAll()
+      }).length
     };
   },
 

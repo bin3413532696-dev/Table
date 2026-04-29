@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { noteDB, Note } from '../../../db';
 
 export function useNotesSearch(
@@ -6,21 +6,39 @@ export function useNotesSearch(
 ) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const cancelledRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      cancelledRef.current = true;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
 
   const debouncedSearch = useMemo(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
     return async (query: string) => {
-      if (timer) clearTimeout(timer);
+      if (timerRef.current) clearTimeout(timerRef.current);
 
       return new Promise<void>((resolve) => {
-        timer = setTimeout(async () => {
+        timerRef.current = setTimeout(async () => {
+          if (cancelledRef.current) {
+            resolve();
+            return;
+          }
+
           if (!query.trim()) {
             const allNotes = await noteDB.getAll();
-            setNotes(allNotes);
+            if (!cancelledRef.current) {
+              setNotes(allNotes);
+            }
           } else {
             const results = await noteDB.search(query);
-            setNotes(results);
+            if (!cancelledRef.current) {
+              setNotes(results);
+            }
           }
           resolve();
         }, 300);

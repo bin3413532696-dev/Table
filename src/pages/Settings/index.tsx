@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Bell, Shield, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, FileText, Lock, Eye, EyeOff, Mail, MessageSquare, Calendar, Check, Sun, Moon } from 'lucide-react';
+import { User, Bell, Shield, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, FileText, Lock, Eye, EyeOff, Mail, MessageSquare, Calendar, Check, Sun, Moon, Settings as SettingsIcon } from 'lucide-react';
 import { dataManager, noteDB, folderDB, Note, Folder } from '../../db';
 import { useTheme } from '../../contexts/ThemeContext';
 
@@ -468,14 +468,17 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <motion.h1
+    <div className="p-8 max-w-6xl mx-auto min-h-screen bg-bg-secondary">
+      <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="text-3xl font-bold mb-8 text-text-primary"
+        className="flex items-center gap-3 mb-8"
       >
-        设置
-      </motion.h1>
+        <div className="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+          <SettingsIcon className="w-5 h-5 text-white" />
+        </div>
+        <h1 className="text-2xl font-bold text-text-primary">设置</h1>
+      </motion.div>
 
       <div className="flex gap-8">
         <motion.div
