@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Command, PanelLeft, PanelRight, X } from 'lucide-react';
 import { FileTree } from './components/FileTree';
@@ -7,38 +7,54 @@ import { Backlinks } from './components/Backlinks';
 import { TagCloud } from './components/TagCloud';
 import { GraphView } from './components/GraphView';
 import { CommandPalette } from './components/CommandPalette';
-import { noteDB, folderDB, Note, Folder } from '../../db';
+import { noteDB, folderDB, Note, Folder, createUseDB } from '../../db';
+import { useNotesLayout } from './hooks/useNotesLayout';
+import { useNotesSearch } from './hooks/useNotesSearch';
+import Loading from '../../components/Loading';
 
 type RightPanelType = 'backlinks' | 'tags' | 'graph';
 type EditorMode = 'edit' | 'split' | 'preview';
 
-const MIN_LEFT_WIDTH = 200;
-const MIN_RIGHT_WIDTH = 200;
-const DEFAULT_LEFT_WIDTH = 280;
-const DEFAULT_RIGHT_WIDTH = 300;
+const useDB = createUseDB(React);
 
 export default function Notes() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
-  const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
-  const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
-  const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
   const [rightPanel, setRightPanel] = useState<RightPanelType>('backlinks');
   const [isVimMode, setIsVimMode] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const leftResizeRef = useRef<HTMLDivElement>(null);
-  const rightResizeRef = useRef<HTMLDivElement>(null);
-  const isResizingLeft = useRef(false);
-  const isResizingRight = useRef(false);
+  const {
+    leftWidth, rightWidth, leftCollapsed, rightCollapsed,
+    setLeftCollapsed, setRightCollapsed,
+    leftResizeRef, rightResizeRef,
+    startResizeLeft, startResizeRight,
+  } = useNotesLayout();
 
-  const loadData = useCallback(async () => {
+  const { searchQuery, isSearching, setSearchQuery, setIsSearching, handleSearch }
+    = useNotesSearch(setNotes);
+
+  const { data } = useDB(async () => {
+    const [allNotes, allFolders] = await Promise.all([
+      noteDB.getAll(),
+      folderDB.getAll()
+    ]);
+    return { allNotes, allFolders };
+  }, []);
+
+  useEffect(() => {
+    if (data && loading) {
+      setNotes(data.allNotes);
+      setFolders(data.allFolders);
+      setLoading(false);
+    }
+  }, [data, loading]);
+
+  const reloadData = useCallback(async () => {
     const [allNotes, allFolders] = await Promise.all([
       noteDB.getAll(),
       folderDB.getAll()
@@ -46,10 +62,6 @@ export default function Notes() {
     setNotes(allNotes);
     setFolders(allFolders);
   }, []);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -78,44 +90,59 @@ export default function Notes() {
     setSelectedFolderId(null);
   }, []);
 
-  const handleCreateFolder = useCallback(async (parentId: string | null = null) => {
-    const newFolder = await folderDB.add({
-      name: '新建文件夹',
-      parentId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-    setFolders(prev => [newFolder, ...prev]);
-  }, []);
-
-  const handleDeleteFolder = useCallback(async (folderId: string) => {
-    await folderDB.delete(folderId);
-    setFolders(prev => prev.filter(f => f.id !== folderId));
-    setNotes(prev => prev.map(n => n.folderId === folderId ? { ...n, folderId: null } : n));
-  }, []);
-
-  const handleRenameFolder = useCallback(async (folderId: string, newName: string) => {
-    await folderDB.update(folderId, { name: newName });
-    setFolders(prev => prev.map(f => f.id === folderId ? { ...f, name: newName } : f));
-  }, []);
-
   const handleUpdateNote = useCallback(async (content: string) => {
     if (!currentNote) return;
 
     const linkRegex = /\[\[([^\]]+)\]\]/g;
-    const links: string[] = [];
+    const linkTexts: string[] = [];
     let match;
     while ((match = linkRegex.exec(content)) !== null) {
-      links.push(match[1]);
+      linkTexts.push(match[1]);
     }
+
+    // 将文本链接转换为 ID 链接
+    const links: string[] = [];
+    for (const linkText of linkTexts) {
+      // 首先检查是否已经是 ID（长度较长且没有空格）
+      if (linkText.length > 10 && !linkText.includes(' ')) {
+        const noteWithId = notes.find(n => n.id === linkText);
+        if (noteWithId) {
+          links.push(linkText);
+          continue;
+        }
+      }
+      // 否则按标题查找
+      const note = notes.find(n => n.title === linkText);
+      if (note) {
+        links.push(note.id);
+      }
+    }
+
+    const oldLinks = currentNote.links || [];
+    const removedLinks = oldLinks.filter(l => !links.includes(l));
+    const addedLinks = links.filter(l => !oldLinks.includes(l));
 
     await noteDB.update(currentNote.id, { content });
     await noteDB.updateLinks(currentNote.id, links);
 
-    const updatedNotes = await noteDB.getAll();
-    setNotes(updatedNotes);
+    setNotes(prev => prev.map(note => {
+      if (note.id === currentNote.id) {
+        return { ...note, content, links };
+      }
+      
+      if (removedLinks.includes(note.id)) {
+        return { ...note, backlinks: (note.backlinks || []).filter(b => b !== currentNote.id) };
+      }
+      
+      if (addedLinks.includes(note.id)) {
+        return { ...note, backlinks: [...(note.backlinks || []), currentNote.id] };
+      }
+      
+      return note;
+    }));
+    
     setCurrentNote(prev => prev ? { ...prev, content, links } : null);
-  }, [currentNote]);
+  }, [currentNote, notes]);
 
   const handleUpdateTitle = useCallback(async (title: string) => {
     if (!currentNote) return;
@@ -130,73 +157,41 @@ export default function Notes() {
     );
   }, []);
 
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      const allNotes = await noteDB.getAll();
-      setNotes(allNotes);
-      return;
-    }
-    const results = await noteDB.search(searchQuery);
-    setNotes(results);
-  }, [searchQuery]);
-
   const handleDeleteNote = useCallback(async (noteId: string) => {
     await noteDB.delete(noteId);
-    setNotes(prev => prev.filter(n => n.id !== noteId));
-    setCurrentNote(prev => prev?.id === noteId ? null : prev);
   }, []);
 
-  const handleMoveNote = useCallback(async (noteId: string, folderId: string | null) => {
-    await noteDB.update(noteId, { folderId });
-    setNotes(prev => prev.map(n => n.id === noteId ? { ...n, folderId } : n));
-    setCurrentNote(prev => prev?.id === noteId ? { ...prev, folderId } : prev);
+  const handleNotesChanged = useCallback((updatedNotes: Note[]) => {
+    if (!isSearching) setNotes(updatedNotes);
+  }, [isSearching]);
+
+  const handleFoldersChanged = useCallback((updatedFolders: Folder[]) => {
+    setFolders(updatedFolders);
   }, []);
+
+  useEffect(() => {
+    if (currentNote && !notes.find(n => n.id === currentNote.id)) {
+      setCurrentNote(null);
+    }
+  }, [notes, currentNote]);
 
   const filteredNotes = selectedTags.length > 0
     ? notes.filter(n => selectedTags.some(tag => n.tags?.includes(tag)))
     : notes;
 
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isResizingLeft.current) {
-        const newWidth = e.clientX;
-        if (newWidth >= MIN_LEFT_WIDTH && newWidth <= 400) {
-          setLeftWidth(newWidth);
-        }
-      }
-      if (isResizingRight.current) {
-        const containerWidth = window.innerWidth;
-        const newWidth = containerWidth - e.clientX;
-        if (newWidth >= MIN_RIGHT_WIDTH && newWidth <= 500) {
-          setRightWidth(newWidth);
-        }
-      }
-    };
 
-    const handleMouseUp = () => {
-      isResizingLeft.current = false;
-      isResizingRight.current = false;
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
-
-  const startResizeLeft = () => { isResizingLeft.current = true; };
-  const startResizeRight = () => { isResizingRight.current = true; };
+  if (loading) {
+    return <Loading />;
+  }
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
-      <div className="flex items-center justify-between px-5 py-2.5 border-b border-gray-200 bg-white/80 backdrop-blur-xl">
+    <div className="h-full flex flex-col bg-bg-secondary">
+      <div className="flex items-center justify-between px-5 py-2.5 border-b border-border-primary bg-bg-primary/80 backdrop-blur-xl">
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setLeftCollapsed(!leftCollapsed)}
             className={`p-2 rounded-lg transition-colors ${
-              leftCollapsed ? 'bg-gray-100 text-gray-900' : 'hover:bg-gray-100 text-gray-500'
+              leftCollapsed ? 'bg-bg-tertiary text-text-primary' : 'hover:bg-bg-tertiary text-text-secondary'
             }`}
           >
             <PanelLeft className="w-4 h-4" />
@@ -209,12 +204,12 @@ export default function Notes() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 placeholder="搜索笔记..."
-                className="px-3 py-1.5 text-sm rounded-lg outline-none w-64 bg-gray-100 text-gray-900 placeholder-gray-400"
+                className="px-3 py-1.5 text-sm rounded-lg outline-none w-64 bg-bg-tertiary text-text-primary placeholder-text-muted"
                 autoFocus
               />
               <button
                 onClick={handleSearch}
-                className="p-2 rounded-lg transition-colors hover:bg-gray-100 text-gray-500"
+                className="p-2 rounded-lg transition-colors hover:bg-bg-tertiary text-text-secondary"
               >
                 <Search className="w-4 h-4" />
               </button>
@@ -222,9 +217,9 @@ export default function Notes() {
                 onClick={() => {
                   setIsSearching(false);
                   setSearchQuery('');
-                  loadData();
+                  reloadData();
                 }}
-                className="p-2 rounded-lg transition-colors hover:bg-gray-100 text-gray-500"
+                className="p-2 rounded-lg transition-colors hover:bg-bg-tertiary text-text-secondary"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -233,16 +228,16 @@ export default function Notes() {
             <>
               <button
                 onClick={() => setIsSearching(true)}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-gray-100 text-gray-500"
+                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-bg-tertiary text-text-secondary"
               >
                 <Search className="w-4 h-4" />
               </button>
               <button
                 onClick={() => setIsCommandPaletteOpen(true)}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-gray-100 text-gray-500"
+                className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-bg-tertiary text-text-secondary"
               >
                 <Command className="w-4 h-4" />
-                <span className="text-xs px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-400 border border-gray-200">⌘K</span>
+                <span className="text-xs px-1.5 py-0.5 rounded-md bg-bg-tertiary text-text-muted border border-border-primary">⌘K</span>
               </button>
             </>
           )}
@@ -254,13 +249,13 @@ export default function Notes() {
               type="text"
               value={currentNote.title}
               onChange={(e) => handleUpdateTitle(e.target.value)}
-              className="px-3 py-1.5 text-sm font-medium rounded-lg outline-none transition-colors bg-transparent text-gray-900 hover:bg-gray-100 focus:bg-gray-100 text-center"
+              className="px-3 py-1.5 text-sm font-medium rounded-lg outline-none transition-colors bg-transparent text-text-primary hover:bg-bg-tertiary focus:bg-bg-tertiary text-center"
             />
           )}
         </div>
 
         <div className="flex items-center gap-1.5">
-          <div className="flex rounded-lg bg-gray-100 p-0.5">
+          <div className="flex rounded-lg bg-bg-tertiary p-0.5">
             {(['backlinks', 'tags', 'graph'] as RightPanelType[]).map((panel, i) => (
               <button
                 key={panel}
@@ -270,8 +265,8 @@ export default function Notes() {
                 }}
                 className={`px-3 py-1.5 text-sm rounded-md transition-all ${
                   rightPanel === panel && !rightCollapsed
-                    ? 'bg-white text-gray-900 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-bg-card text-text-primary shadow-sm'
+                    : 'text-text-secondary hover:text-text-secondary'
                 }`}
               >
                 {panel === 'backlinks' && '反向链接'}
@@ -283,7 +278,7 @@ export default function Notes() {
           <button
             onClick={() => setRightCollapsed(!rightCollapsed)}
             className={`p-2 rounded-lg transition-colors ${
-              rightCollapsed ? 'bg-gray-100 text-gray-900' : 'hover:bg-gray-100 text-gray-500'
+              rightCollapsed ? 'bg-bg-tertiary text-text-primary' : 'hover:bg-bg-tertiary text-text-secondary'
             }`}
           >
             <PanelRight className="w-4 h-4" />
@@ -299,7 +294,7 @@ export default function Notes() {
               animate={{ width: leftWidth, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="border-r overflow-hidden border-gray-200 bg-white"
+              className="border-r overflow-hidden border-border-primary bg-bg-card"
             >
               <FileTree
                 folders={folders}
@@ -308,18 +303,16 @@ export default function Notes() {
                 selectedFolderId={selectedFolderId}
                 onSelectNote={setCurrentNote}
                 onSelectFolder={setSelectedFolderId}
-                onCreateFolder={handleCreateFolder}
                 onCreateNote={handleCreateNote}
-                onDeleteFolder={handleDeleteFolder}
-                onRenameFolder={handleRenameFolder}
                 onDeleteNote={handleDeleteNote}
-                onMoveNote={handleMoveNote}
+                onNotesChanged={handleNotesChanged}
+                onFoldersChanged={handleFoldersChanged}
               />
             </motion.div>
             <div
               ref={leftResizeRef}
               onMouseDown={startResizeLeft}
-              className="w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-400 transition-all bg-gray-100 shrink-0"
+              className="w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-400 transition-all bg-bg-tertiary shrink-0"
             />
           </>
         )}
@@ -334,14 +327,14 @@ export default function Notes() {
             />
           ) : (
             <div className="h-full flex flex-col items-center justify-center">
-              <div className="w-20 h-20 rounded-2xl mb-5 flex items-center justify-center bg-white shadow-sm border border-gray-200">
-                <Search className="w-8 h-8 text-gray-300" />
+              <div className="w-20 h-20 rounded-2xl mb-5 flex items-center justify-center bg-bg-card shadow-sm border border-border-primary">
+                <Search className="w-8 h-8 text-text-muted" />
               </div>
-              <p className="text-base font-medium text-gray-700 mb-1">选择一个笔记开始编辑</p>
-              <p className="text-sm text-gray-400 mb-6">或者创建一个新笔记</p>
+              <p className="text-base font-medium text-text-secondary mb-1">选择一个笔记开始编辑</p>
+              <p className="text-sm text-text-muted mb-6">或者创建一个新笔记</p>
               <button
                 onClick={() => handleCreateNote()}
-                className="px-5 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-900 hover:bg-gray-800 text-white"
+                className="px-5 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-900 hover:bg-gray-800 text-white dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"
               >
                 新建笔记
               </button>
@@ -354,14 +347,14 @@ export default function Notes() {
             <div
               ref={rightResizeRef}
               onMouseDown={startResizeRight}
-              className="w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-400 transition-all bg-gray-100 shrink-0"
+              className="w-1 cursor-col-resize hover:w-1.5 hover:bg-blue-400 transition-all bg-bg-tertiary shrink-0"
             />
             <motion.div
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: rightWidth, opacity: 1 }}
               exit={{ width: 0, opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="border-l overflow-hidden border-gray-200 bg-white"
+              className="border-l overflow-hidden border-border-primary bg-bg-card"
             >
               {rightPanel === 'backlinks' && (
                 <Backlinks

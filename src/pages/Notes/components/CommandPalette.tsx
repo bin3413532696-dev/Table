@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, FileText, Folder, Command, X } from 'lucide-react';
+import Fuse from 'fuse.js';
 import { Note, Folder as FolderType } from '../../../db';
 
 interface CommandPaletteProps {
@@ -33,6 +34,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const commands = useMemo<CommandItem[]>(() => {
     const items: CommandItem[] = [];
@@ -80,14 +84,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     return items;
   }, [notes, folders, onSelectNote, onSelectFolder, onCreateNote, onClose]);
 
+  const commandFuse = useMemo(() => new Fuse(commands, {
+    keys: [
+      { name: 'title', weight: 2 },
+      { name: 'subtitle', weight: 1 }
+    ],
+    threshold: 0.4,
+    includeScore: true,
+    minMatchCharLength: 1
+  }), [commands]);
+
   const filteredCommands = useMemo(() => {
     if (!query.trim()) return commands;
-    const lowerQuery = query.toLowerCase();
-    return commands.filter(cmd =>
-      cmd.title.toLowerCase().includes(lowerQuery) ||
-      cmd.subtitle?.toLowerCase().includes(lowerQuery)
-    );
-  }, [commands, query]);
+    return commandFuse.search(query).map(r => r.item);
+  }, [commands, query, commandFuse]);
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -116,6 +126,27 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           e.preventDefault();
           onClose();
           break;
+        case 'Tab':
+          e.preventDefault();
+          if (!modalRef.current) return;
+          const focusableElements = modalRef.current.querySelectorAll(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusableElements.length === 0) return;
+          
+          const firstElement = focusableElements[0] as HTMLElement;
+          const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+          
+          if (e.shiftKey) {
+            if (document.activeElement === firstElement) {
+              lastElement.focus();
+            }
+          } else {
+            if (document.activeElement === lastElement) {
+              firstElement.focus();
+            }
+          }
+          break;
       }
     };
 
@@ -125,8 +156,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      previousFocusRef.current = document.activeElement as HTMLElement;
       setQuery('');
       setSelectedIndex(0);
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    } else {
+      previousFocusRef.current?.focus();
     }
   }, [isOpen]);
 
@@ -142,28 +179,34 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             onClick={onClose}
           />
           <motion.div
+            ref={modalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="命令面板"
             initial={{ opacity: 0, scale: 0.95, y: -20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className="fixed top-20 left-1/2 -translate-x-1/2 w-full max-w-2xl z-50 rounded-xl shadow-2xl overflow-hidden bg-white border border-gray-200"
+            className="fixed top-20 left-1/2 -translate-x-1/2 w-full max-w-2xl z-50 rounded-xl shadow-2xl overflow-hidden bg-bg-card border border-border-primary"
           >
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200">
-              <Search className="w-5 h-5 text-gray-400" />
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-border-primary">
+              <Search className="w-5 h-5 text-text-muted" />
               <input
+                ref={inputRef}
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="搜索笔记、文件夹或输入命令..."
-                className="flex-1 outline-none text-base text-gray-900 placeholder-gray-400"
+                className="flex-1 outline-none text-base text-text-primary placeholder-text-muted"
                 autoFocus
               />
-              <div className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-gray-100 text-gray-500">
+              <div className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-bg-tertiary text-text-secondary">
                 <Command className="w-3 h-3" />
                 <span>K</span>
               </div>
               <button
                 onClick={onClose}
-                className="p-1 rounded transition-colors hover:bg-gray-100 text-gray-400"
+                className="p-1 rounded transition-colors hover:bg-bg-tertiary text-text-muted"
+                aria-label="关闭命令面板"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -178,24 +221,24 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       onClick={cmd.action}
                       onMouseEnter={() => setSelectedIndex(index)}
                       className={`w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors ${
-                        index === selectedIndex ? 'bg-blue-50' : ''
+                        index === selectedIndex ? 'bg-blue-50 dark:bg-blue-900/30' : ''
                       }`}
                     >
-                      <div className="p-1.5 rounded bg-gray-100 text-gray-500">
+                      <div className="p-1.5 rounded bg-bg-tertiary text-text-secondary">
                         {cmd.icon}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate text-gray-900">
+                        <div className="font-medium truncate text-text-primary">
                           {cmd.title}
                         </div>
                         {cmd.subtitle && (
-                          <div className="text-sm truncate text-gray-400">
+                          <div className="text-sm truncate text-text-muted">
                             {cmd.subtitle}
                           </div>
                         )}
                       </div>
                       {cmd.type === 'action' && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-600">
+                        <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
                           动作
                         </span>
                       )}
@@ -203,14 +246,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   ))}
                 </div>
               ) : (
-                <div className="py-8 text-center text-gray-400">
+                <div className="py-8 text-center text-text-muted">
                   <Search className="w-8 h-8 mx-auto mb-2 opacity-50" />
                   <p>未找到匹配的结果</p>
                 </div>
               )}
             </div>
 
-            <div className="flex items-center justify-between px-4 py-2 text-xs border-t border-gray-200 text-gray-400">
+            <div className="flex items-center justify-between px-4 py-2 text-xs border-t border-border-primary text-text-muted">
               <div className="flex items-center gap-4">
                 <span>↑↓ 选择</span>
                 <span>↵ 确认</span>

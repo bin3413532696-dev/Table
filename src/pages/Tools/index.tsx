@@ -85,8 +85,8 @@ function CalculatorTool() {
   ];
 
   return (
-    <div className="p-6 rounded-2xl bg-white border border-gray-200">
-      <div className="p-4 rounded-xl mb-4 text-right text-3xl font-mono bg-gray-100 text-gray-900">
+    <div className="p-6 rounded-2xl bg-bg-card border border-border-primary">
+      <div className="p-4 rounded-xl mb-4 text-right text-3xl font-mono bg-bg-tertiary text-text-primary">
         {display}
       </div>
       <div className="grid grid-cols-4 gap-2">
@@ -98,10 +98,10 @@ function CalculatorTool() {
               btn.className.includes('bg-blue-500') 
                 ? 'bg-blue-500 text-white hover:bg-blue-600' 
                 : btn.label === 'C'
-                  ? 'bg-rose-100 text-rose-600 hover:bg-rose-200'
+                  ? 'bg-rose-100 text-rose-600 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/50'
                   : ['+', '-', '×', '÷', '='].includes(btn.label)
-                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
+                    : 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'
             } ${btn.className}`}
           >
             {btn.label}
@@ -147,34 +147,34 @@ function ColorPickerTool() {
   const rgb = hexToRgb(color);
 
   return (
-    <div className="p-6 rounded-2xl bg-white border border-gray-200">
+    <div className="p-6 rounded-2xl bg-bg-card border border-border-primary">
       <div className="flex gap-6 mb-6">
         <div 
           className="w-32 h-32 rounded-2xl shadow-lg"
           style={{ backgroundColor: color }}
         />
         <div className="flex-1 space-y-3">
-          <div className="p-3 rounded-lg bg-gray-50">
-            <div className="text-xs mb-1 text-gray-500">HEX</div>
+          <div className="p-3 rounded-lg bg-bg-secondary">
+            <div className="text-xs mb-1 text-text-muted">HEX</div>
             <div className="flex items-center gap-2">
-              <span className="font-mono text-lg text-gray-900">{color.toUpperCase()}</span>
+              <span className="font-mono text-lg text-text-primary">{color.toUpperCase()}</span>
               <button 
                 onClick={() => copyToClipboard(color.toUpperCase())}
-                className="p-1 rounded hover:bg-gray-200"
+                className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
               >
-                {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-gray-500" />}
+                {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-text-muted" />}
               </button>
             </div>
           </div>
-          <div className="p-3 rounded-lg bg-gray-50">
-            <div className="text-xs mb-1 text-gray-500">RGB</div>
-            <span className="font-mono text-lg text-gray-900">{rgb.r}, {rgb.g}, {rgb.b}</span>
+          <div className="p-3 rounded-lg bg-bg-secondary">
+            <div className="text-xs mb-1 text-text-muted">RGB</div>
+            <span className="font-mono text-lg text-text-primary">{rgb.r}, {rgb.g}, {rgb.b}</span>
           </div>
         </div>
       </div>
       
       <div className="mb-4">
-        <label className="block text-sm font-medium mb-2 text-gray-700">自定义颜色</label>
+        <label className="block text-sm font-medium mb-2 text-text-secondary">自定义颜色</label>
         <input
           type="color"
           value={color}
@@ -238,14 +238,14 @@ function JsonFormatterTool() {
   };
 
   return (
-    <div className="p-6 rounded-2xl bg-white border border-gray-200">
+    <div className="p-6 rounded-2xl bg-bg-card border border-border-primary">
       <div className="grid grid-cols-2 gap-4 mb-4">
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-sm font-medium text-gray-700">输入 JSON</label>
+            <label className="text-sm font-medium text-text-secondary">输入 JSON</label>
             <button 
               onClick={clearAll}
-              className="text-xs flex items-center gap-1 text-gray-500 hover:text-gray-700"
+              className="text-xs flex items-center gap-1 text-text-muted hover:text-text-secondary"
             >
               <RefreshCw className="w-3 h-3" /> 清空
             </button>
@@ -254,16 +254,16 @@ function JsonFormatterTool() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder='{"key": "value"}'
-            className="w-full h-48 p-3 rounded-lg font-mono text-sm resize-none bg-gray-50 border border-gray-200 text-gray-900"
+            className="w-full h-48 p-3 rounded-lg font-mono text-sm resize-none bg-bg-secondary border border-border-primary text-text-primary"
           />
         </div>
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-sm font-medium text-gray-700">格式化结果</label>
+            <label className="text-sm font-medium text-text-secondary">格式化结果</label>
             {output && (
               <button 
                 onClick={copyOutput}
-                className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700"
+                className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
               >
                 {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} 
                 {copied ? '已复制' : '复制'}
@@ -273,13 +273,13 @@ function JsonFormatterTool() {
           <textarea
             value={output}
             readOnly
-            className="w-full h-48 p-3 rounded-lg font-mono text-sm resize-none bg-gray-50 border border-gray-200 text-gray-900"
+            className="w-full h-48 p-3 rounded-lg font-mono text-sm resize-none bg-bg-secondary border border-border-primary text-text-primary"
           />
         </div>
       </div>
 
       {error && (
-        <div className="p-3 rounded-lg mb-4 bg-rose-50 text-rose-700">
+        <div className="p-3 rounded-lg mb-4 bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
           {error}
         </div>
       )}
@@ -293,7 +293,7 @@ function JsonFormatterTool() {
         </button>
         <button
           onClick={minifyJson}
-          className="flex-1 py-2 rounded-lg transition-colors bg-gray-100 text-gray-700 hover:bg-gray-200"
+          className="flex-1 py-2 rounded-lg transition-colors bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700"
         >
           压缩
         </button>
@@ -322,7 +322,7 @@ export default function Tools() {
         className="flex items-center gap-3 mb-6"
       >
         <Wrench className="w-8 h-8 text-blue-500" />
-        <h1 className="text-2xl font-bold text-gray-800">工具箱</h1>
+        <h1 className="text-2xl font-bold text-text-primary">工具箱</h1>
       </motion.div>
 
       {activeTool ? (
@@ -332,7 +332,7 @@ export default function Tools() {
         >
           <button
             onClick={() => setActiveTool(null)}
-            className="mb-4 text-sm flex items-center gap-1 text-gray-500 hover:text-gray-700"
+            className="mb-4 text-sm flex items-center gap-1 text-text-muted hover:text-text-secondary"
           >
             ← 返回工具列表
           </button>
@@ -348,13 +348,13 @@ export default function Tools() {
               transition={{ delay: index * 0.1 }}
               whileHover={{ scale: 1.02, y: -4 }}
               onClick={() => setActiveTool(tool.label)}
-              className="rounded-xl p-5 cursor-pointer transition-all bg-white shadow-sm border border-gray-100 hover:shadow-md"
+              className="rounded-xl p-5 cursor-pointer transition-all bg-bg-card shadow-sm border border-border-primary hover:shadow-md"
             >
               <div className={`w-12 h-12 ${tool.color} rounded-xl flex items-center justify-center mb-4`}>
                 <tool.icon className="w-6 h-6 text-white" />
               </div>
-              <h3 className="font-semibold mb-1 text-gray-800">{tool.label}</h3>
-              <p className="text-sm text-gray-500">{tool.desc}</p>
+              <h3 className="font-semibold mb-1 text-text-primary">{tool.label}</h3>
+              <p className="text-sm text-text-muted">{tool.desc}</p>
             </motion.div>
           ))}
         </div>

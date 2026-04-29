@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
 import { Share2 } from 'lucide-react';
 import { Note } from '../../../db';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 interface GraphViewProps {
   notes: Note[];
@@ -31,6 +32,13 @@ export const GraphView: React.FC<GraphViewProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<GraphNode, GraphLink> | null>(null);
+  const nodeSelectionRef = useRef<d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown> | null>(null);
+  const onSelectNoteRef = useRef(onSelectNote);
+  const { theme } = useTheme();
+
+  useEffect(() => {
+    onSelectNoteRef.current = onSelectNote;
+  }, [onSelectNote]);
 
   const { nodes, links } = useMemo(() => {
     const nodeMap = new Map<string, GraphNode>();
@@ -40,17 +48,16 @@ export const GraphView: React.FC<GraphViewProps> = ({
       nodeMap.set(note.id, {
         id: note.id,
         title: note.title,
-        radius: note.id === currentNote?.id ? 25 : 15 + (note.links?.length || 0) * 2
+        radius: 15 + (note.links?.length || 0) * 2
       });
     });
 
     notes.forEach(note => {
-      (note.links || []).forEach(linkedTitle => {
-        const linkedNote = notes.find(n => n.title === linkedTitle);
-        if (linkedNote && nodeMap.has(linkedNote.id)) {
+      (note.links || []).forEach(linkedNoteId => {
+        if (nodeMap.has(linkedNoteId)) {
           linkList.push({
             source: note.id,
-            target: linkedNote.id
+            target: linkedNoteId
           });
         }
       });
@@ -60,11 +67,12 @@ export const GraphView: React.FC<GraphViewProps> = ({
       nodes: Array.from(nodeMap.values()),
       links: linkList
     };
-  }, [notes, currentNote]);
+  }, [notes]);
 
   useEffect(() => {
     if (!svgRef.current || nodes.length === 0) return;
 
+    const isDark = theme === 'dark';
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
 
@@ -80,7 +88,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
     simulationRef.current = simulation;
 
     const link = svg.append('g')
-      .attr('stroke', '#9CA3AF')
+      .attr('stroke', isDark ? '#475569' : '#9CA3AF')
       .attr('stroke-opacity', 0.6)
       .selectAll('line')
       .data(links)
@@ -92,6 +100,8 @@ export const GraphView: React.FC<GraphViewProps> = ({
       .data(nodes)
       .join('g')
       .attr('cursor', 'pointer') as unknown as d3.Selection<SVGGElement, GraphNode, SVGGElement, unknown>;
+
+    nodeSelectionRef.current = node;
 
     node.call(d3.drag<SVGGElement, GraphNode>()
         .on('start', (event: d3.D3DragEvent<SVGGElement, GraphNode, GraphNode>, d: GraphNode) => {
@@ -111,27 +121,21 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
     node.append('circle')
       .attr('r', (d: GraphNode) => d.radius)
-      .attr('fill', (d: GraphNode) => {
-        if (d.id === currentNote?.id) return '#2563EB';
-        return '#E5E7EB';
-      })
-      .attr('stroke', (d: GraphNode) => {
-        if (d.id === currentNote?.id) return '#3B82F6';
-        return '#9CA3AF';
-      })
-      .attr('stroke-width', (d: GraphNode) => d.id === currentNote?.id ? 3 : 1);
+      .attr('fill', isDark ? '#334155' : '#E5E7EB')
+      .attr('stroke', isDark ? '#475569' : '#9CA3AF')
+      .attr('stroke-width', 1);
 
     node.append('text')
       .text((d: GraphNode) => d.title.length > 10 ? d.title.slice(0, 10) + '...' : d.title)
       .attr('text-anchor', 'middle')
       .attr('dy', (d: GraphNode) => d.radius + 14)
       .attr('font-size', '11px')
-      .attr('fill', '#374151')
+      .attr('fill', isDark ? '#cbd5e1' : '#374151')
       .attr('pointer-events', 'none');
 
     node.on('click', (event: MouseEvent, d: GraphNode) => {
       const note = notes.find(n => n.id === d.id);
-      if (note) onSelectNote(note);
+      if (note) onSelectNoteRef.current(note);
     });
 
     simulation.on('tick', () => {
@@ -147,11 +151,23 @@ export const GraphView: React.FC<GraphViewProps> = ({
     return () => {
       simulation.stop();
     };
-  }, [nodes, links, notes, currentNote, onSelectNote]);
+  }, [nodes, links, notes]);
+
+  useEffect(() => {
+    if (!nodeSelectionRef.current || !currentNote) return;
+
+    const isDark = theme === 'dark';
+    nodeSelectionRef.current.selectAll('circle')
+      .transition()
+      .duration(200)
+      .attr('fill', (d: GraphNode) => d.id === currentNote?.id ? '#2563EB' : isDark ? '#334155' : '#E5E7EB')
+      .attr('stroke', (d: GraphNode) => d.id === currentNote?.id ? '#3B82F6' : isDark ? '#475569' : '#9CA3AF')
+      .attr('stroke-width', (d: GraphNode) => d.id === currentNote?.id ? 3 : 1);
+  }, [currentNote]);
 
   if (nodes.length === 0) {
     return (
-      <div className="p-4 text-center text-gray-400">
+      <div className="p-4 text-center text-text-muted">
         <Share2 className="w-8 h-8 mx-auto mb-2 opacity-50" />
         <p className="text-sm">暂无笔记数据</p>
       </div>
@@ -160,7 +176,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
 
   return (
     <div className="p-3 h-full flex flex-col">
-      <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 text-gray-500">
+      <h3 className="text-xs font-semibold uppercase tracking-wider mb-3 text-text-muted">
         知识图谱
       </h3>
       <div className="flex-1 min-h-0">

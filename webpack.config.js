@@ -128,12 +128,7 @@ module.exports = (env, argv) => {
           { from: /^\/_p\/\d+\//, to: '/index.html' }
         ]
       },
-      static: [
-        {
-          directory: path.join(__dirname, 'node_modules/sql.js/dist'),
-          publicPath: '/node_modules/sql.js/dist'
-        }
-      ],
+      
       setupMiddlewares(middlewares, devServer) {
         // API: 接收数据同步请求，写入 data/ 目录
         devServer.app.post('/api/sync-data', (req, res) => {

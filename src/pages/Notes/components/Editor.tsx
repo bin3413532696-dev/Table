@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
+import { EditorView } from '@codemirror/view';
 import { Extension } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
 import { vim } from '@replit/codemirror-vim';
@@ -33,6 +34,21 @@ const markdownStyles = `
 .markdown-body img { max-width: 100%; border-radius: 0.5rem; }
 .markdown-body hr { margin: 1.5rem 0; border: none; border-top: 2px solid #e5e7eb; }
 .markdown-body input[type="checkbox"] { margin-right: 0.5rem; }
+
+.dark .markdown-body h1,
+.dark .markdown-body h2,
+.dark .markdown-body h3,
+.dark .markdown-body h4 { color: #f1f5f9; border-bottom-color: #334155; }
+.dark .markdown-body p,
+.dark .markdown-body li { color: #cbd5e1; }
+.dark .markdown-body code { background-color: #334155; color: #f1f5f9; }
+.dark .markdown-body pre { background-color: #0f172a; }
+.dark .markdown-body pre code { color: #e2e8f0; }
+.dark .markdown-body blockquote { color: #94a3b8; border-left-color: #475569; }
+.dark .markdown-body th,
+.dark .markdown-body td { border-color: #334155; }
+.dark .markdown-body th { background-color: #1e293b; }
+.dark .markdown-body hr { border-top-color: #334155; }
 `;
 
 export const Editor: React.FC<EditorProps> = ({
@@ -43,20 +59,30 @@ export const Editor: React.FC<EditorProps> = ({
 }) => {
   const [mode, setMode] = useState<'edit' | 'split' | 'preview'>('edit');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const editorRef = useRef<EditorView>();
 
   const insertText = useCallback((before: string, after: string = '') => {
-    const textarea = document.querySelector('.cm-content') as HTMLElement;
-    if (!textarea) return;
-    const selection = window.getSelection();
-    if (!selection) return;
-    const selectedText = selection.toString();
+    const view = editorRef.current;
+    if (!view) return;
+    
+    const selection = view.state.selection.main;
+    const from = selection.from;
+    const to = selection.to;
+    const selectedText = view.state.doc.sliceString(from, to);
     const newText = before + selectedText + after;
-    const start = content.indexOf(selectedText);
-    if (start !== -1) {
-      const newContent = content.slice(0, start) + newText + content.slice(start + selectedText.length);
-      onChange(newContent);
-    }
-  }, [content, onChange]);
+    
+    view.dispatch({
+      changes: {
+        from,
+        to,
+        insert: newText
+      },
+      selection: {
+        anchor: from + before.length + selectedText.length,
+        head: from + before.length + selectedText.length
+      }
+    });
+  }, []);
 
   const extensions: Extension[] = [markdown()];
   if (isVimMode) {
@@ -64,7 +90,7 @@ export const Editor: React.FC<EditorProps> = ({
   }
 
   return (
-    <div className={`flex flex-col h-full ${isFullscreen ? 'fixed inset-0 z-50' : ''} bg-white`}>
+    <div className={`flex flex-col h-full ${isFullscreen ? 'fixed inset-0 z-50' : ''} bg-bg-primary`}>
       <style>{markdownStyles}</style>
       <style>{`
         .cm-editor {
@@ -111,77 +137,87 @@ export const Editor: React.FC<EditorProps> = ({
         .cm-lineNumbers {
           color: #9ca3af !important;
         }
+        .dark .cm-editor { background-color: #1e293b !important; }
+        .dark .cm-scroller { background-color: #1e293b !important; }
+        .dark .cm-content { background-color: #1e293b !important; color: #f1f5f9 !important; }
+        .dark .cm-line { color: #f1f5f9 !important; }
+        .dark .cm-gutters { background-color: #0f172a !important; border-right-color: #334155 !important; }
+        .dark .cm-activeLineGutter { background-color: #334155 !important; }
+        .dark .cm-activeLine { background-color: #1e293b !important; }
+        .dark .cm-selectionBackground { background-color: #3b82f6 !important; }
+        .dark .cm-cursor { border-left-color: #f1f5f9 !important; }
+        .dark .cm-lineNumbers { color: #64748b !important; }
       `}</style>
 
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 bg-white/80 backdrop-blur-xl">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary bg-bg-primary/80 backdrop-blur-xl">
         <div className="flex items-center gap-0.5">
           <button
             onClick={() => insertText('**', '**')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="粗体"
           >
             <Bold className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('*', '*')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="斜体"
           >
             <Italic className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('~~', '~~')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="删除线"
           >
             <Strikethrough className="w-4 h-4" />
           </button>
-          <div className="w-px h-5 mx-1 bg-gray-200" />
+          <div className="w-px h-5 mx-1 bg-border-primary" />
           <button
             onClick={() => insertText('## ', '')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="标题"
           >
             <Heading className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('- ', '')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="无序列表"
           >
             <List className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('1. ', '')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="有序列表"
           >
             <ListOrdered className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('> ', '')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="引用"
           >
             <Quote className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('```\n', '\n```')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="代码块"
           >
             <Code className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('[', '](url)')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="链接"
           >
             <Link className="w-4 h-4" />
           </button>
           <button
             onClick={() => insertText('- [ ] ', '')}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
             title="任务列表"
           >
             <CheckSquare className="w-4 h-4" />
@@ -189,13 +225,13 @@ export const Editor: React.FC<EditorProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex rounded-lg bg-gray-100 p-0.5">
+          <div className="flex rounded-lg bg-bg-tertiary p-0.5">
             <button
               onClick={() => setMode('edit')}
               className={`px-3 py-1.5 text-sm rounded-md transition-all ${
                 mode === 'edit'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-bg-card text-text-primary shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
               }`}
             >
               编辑
@@ -204,8 +240,8 @@ export const Editor: React.FC<EditorProps> = ({
               onClick={() => setMode('split')}
               className={`px-3 py-1.5 text-sm rounded-md transition-all ${
                 mode === 'split'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-bg-card text-text-primary shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
               }`}
             >
               分屏
@@ -214,8 +250,8 @@ export const Editor: React.FC<EditorProps> = ({
               onClick={() => setMode('preview')}
               className={`px-3 py-1.5 text-sm rounded-md transition-all ${
                 mode === 'preview'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-bg-card text-text-primary shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary'
               }`}
             >
               预览
@@ -226,8 +262,8 @@ export const Editor: React.FC<EditorProps> = ({
             onClick={onToggleVim}
             className={`px-2 py-1.5 text-sm rounded-md transition-colors ${
               isVimMode
-                ? 'bg-green-100 text-green-700'
-                : 'text-gray-500 hover:bg-gray-100'
+                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                : 'text-text-secondary hover:bg-bg-tertiary'
             }`}
           >
             Vim
@@ -235,7 +271,7 @@ export const Editor: React.FC<EditorProps> = ({
 
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
-            className="p-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-500"
+            className="p-1.5 rounded-md transition-colors hover:bg-bg-tertiary text-text-secondary"
           >
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
@@ -245,6 +281,7 @@ export const Editor: React.FC<EditorProps> = ({
       <div className="flex-1 overflow-hidden">
         {mode === 'edit' && (
           <CodeMirror
+            ref={editorRef}
             value={content}
             height="100%"
             theme="light"
@@ -262,8 +299,9 @@ export const Editor: React.FC<EditorProps> = ({
 
         {mode === 'split' && (
           <div className="flex h-full">
-            <div className="w-1/2 border-r border-gray-200">
+            <div className="w-1/2 border-r border-border-primary">
               <CodeMirror
+                ref={editorRef}
                 value={content}
                 height="100%"
                 theme="light"
@@ -277,7 +315,7 @@ export const Editor: React.FC<EditorProps> = ({
                 }}
               />
             </div>
-            <div className="w-1/2 overflow-y-auto p-4 text-gray-900 bg-white">
+            <div className="w-1/2 overflow-y-auto p-4 text-text-primary bg-bg-primary">
               <div className="markdown-body">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
               </div>
@@ -286,7 +324,7 @@ export const Editor: React.FC<EditorProps> = ({
         )}
 
         {mode === 'preview' && (
-          <div className="h-full overflow-y-auto p-4 text-gray-900 bg-white">
+          <div className="h-full overflow-y-auto p-4 text-text-primary bg-bg-primary">
             <div className="markdown-body max-w-3xl mx-auto">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             </div>

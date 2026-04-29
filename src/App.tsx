@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
+import { PinLock } from './components/PinLock';
 import Dashboard from './pages/Dashboard';
 import Notes from './pages/Notes';
 import Tasks from './pages/Tasks';
@@ -9,6 +10,33 @@ import Finance from './pages/Finance';
 import Settings from './pages/Settings';
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [checkingPin, setCheckingPin] = useState(true);
+
+  useEffect(() => {
+    const savedPin = localStorage.getItem('security_pin');
+    if (!savedPin || savedPin.length < 4) {
+      setIsAuthenticated(true);
+    }
+    setCheckingPin(false);
+  }, []);
+
+  const handlePinSuccess = () => {
+    setIsAuthenticated(true);
+  };
+
+  if (checkingPin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <PinLock onSuccess={handlePinSuccess} />;
+  }
+
   return (
     <HashRouter>
       <Routes>
