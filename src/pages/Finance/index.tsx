@@ -12,6 +12,7 @@ import {
 import { financeDB, FinanceRecord, createUseDB } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
+import { Button, EmptyState } from '../../components/ui';
 
 const DEFAULT_CATEGORIES = {
   income: ['API调用收入', '服务收入', '其他收入'],
@@ -22,7 +23,7 @@ const DEFAULT_MODELS = ['GPT-4', 'GPT-3.5', 'Claude', 'Gemini', '其他'];
 
 const MAX_DESCRIPTION_LENGTH = 100;
 
-const CHART_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
+const CHART_COLORS = ['#165DFF', '#00B42A', '#FF7D00', '#F53F3F', '#757575', '#8B5CF6', '#06B6D4', '#84CC16'];
 
 const useDB = createUseDB(React);
 
@@ -279,7 +280,7 @@ export default function Finance() {
           {record.type === 'income' ? '+' : '-'}¥{record.amount.toLocaleString()}
         </span>
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button onClick={() => handleEdit(record)} className="p-2 rounded-lg transition-colors text-text-muted hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/20"><Edit3 size={16} /></button>
+          <button onClick={() => handleEdit(record)} className="p-2 rounded-lg transition-colors text-text-muted hover:text-primary hover:bg-primary-50 dark:hover:bg-primary-900/20"><Edit3 size={16} /></button>
           <button onClick={() => setShowDeleteConfirm(record.id)} className="p-2 rounded-lg transition-colors text-text-muted hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20"><Trash2 size={16} /></button>
         </div>
       </div>
@@ -394,16 +395,16 @@ export default function Finance() {
               </div>
               <div className="flex gap-2">
                 {filteredRecords.length > 0 && (
-                  <button onClick={() => setShowBatchActions(!showBatchActions)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showBatchActions ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400' : 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'}`}><CheckSquare className="w-4 h-4" />批量</button>
+                  <button onClick={() => setShowBatchActions(!showBatchActions)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showBatchActions ? 'bg-primary-50 text-primary dark:bg-primary-900/20' : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'}`}><CheckSquare className="w-4 h-4" />批量</button>
                 )}
-                <button onClick={() => setShowFilters(!showFilters)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showFilters || hasFilters ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400' : 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'}`}><Filter className="w-4 h-4" />筛选</button>
-                <button onClick={() => setShowForm(true)} className="px-4 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1 shadow-sm"><Plus className="w-4 h-4" />添加</button>
+                <button onClick={() => setShowFilters(!showFilters)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showFilters || hasFilters ? 'bg-primary-50 text-primary dark:bg-primary-900/20' : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'}`}><Filter className="w-4 h-4" />筛选</button>
+                <Button variant="primary" size="sm" onClick={() => setShowForm(true)} icon={<Plus className="w-4 h-4" />}>添加</Button>
               </div>
             </div>
 
             <div className="flex gap-2 mb-4">
               {(['all', 'income', 'expense'] as const).map((f) => (
-                <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === f ? 'bg-gray-900 dark:bg-white dark:text-gray-900 text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'}`}>
+                <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === f ? 'bg-primary text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'}`}>
                   {f === 'all' ? '全部' : f === 'income' ? '收入' : '支出'}
                 </button>
               ))}
@@ -437,14 +438,12 @@ export default function Finance() {
 
           <div className="divide-y divide-border-primary min-h-[100px]">
             {filteredRecords.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16">
-                <div className="w-16 h-16 rounded-2xl mb-4 flex items-center justify-center bg-bg-tertiary">
-                  <Wallet className="w-8 h-8 text-text-muted" />
-                </div>
-                <p className="text-text-secondary font-medium mb-1">暂无记录</p>
-                <p className="text-text-muted text-sm mb-4">点击"添加"按钮创建第一条记录</p>
-                <button onClick={() => setShowForm(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors flex items-center gap-1"><Plus className="w-4 h-4" />添加记录</button>
-              </div>
+              <EmptyState
+                icon={Wallet}
+                title="暂无记录"
+                description='点击"添加"按钮创建第一条记录'
+                action={{ label: '添加记录', onClick: () => setShowForm(true) }}
+              />
             ) : filteredRecords.length > 20 ? (
               <VirtualList<FinanceRecord> items={filteredRecords} itemHeight={72} containerHeight={400} renderItem={(record) => recordItem(record)} />
             ) : (

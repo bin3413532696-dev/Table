@@ -34,8 +34,8 @@ type FilterMode = 'all' | 'connected' | 'local';
 
 const COLORS = {
   cluster: [
-    '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
-    '#EC4899', '#06B6D4', '#84CC16', '#F97316', '#6366F1'
+    '#165DFF', '#00B42A', '#FF7D00', '#F53F3F', '#757575',
+    '#8B5CF6', '#06B6D4', '#84CC16', '#F97316', '#6366F1'
   ]
 };
 
@@ -500,7 +500,7 @@ export const GraphView: React.FC<GraphViewProps> = ({
             disabled={mode === 'local' && !currentNote}
             className={`px-2 py-0.5 text-xs rounded transition-colors ${
               filterMode === mode
-                ? 'bg-blue-500 text-white'
+                ? 'bg-primary text-white'
                 : 'bg-bg-tertiary text-text-muted hover:bg-bg-secondary'
             } ${mode === 'local' && !currentNote ? 'opacity-50 cursor-not-allowed' : ''}`}
           >

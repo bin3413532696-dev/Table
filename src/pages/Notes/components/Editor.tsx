@@ -7,6 +7,7 @@ import { vim } from '@replit/codemirror-vim';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Bold, Italic, Strikethrough, Heading, List, ListOrdered, Quote, Code, Link, CheckSquare, Maximize2, Minimize2 } from 'lucide-react';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 interface EditorProps {
   content: string;
@@ -24,6 +25,7 @@ export const Editor: React.FC<EditorProps> = ({
   const [mode, setMode] = useState<'edit' | 'split' | 'preview'>('edit');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const { theme } = useTheme();
 
   const insertText = useCallback((before: string, after: string = '') => {
     const view = editorRef.current?.view;
@@ -198,7 +200,7 @@ export const Editor: React.FC<EditorProps> = ({
             ref={editorRef}
             value={content}
             height="100%"
-            theme="light"
+            theme={theme}
             extensions={extensions}
             onChange={onChange}
             className="h-full"
@@ -218,7 +220,7 @@ export const Editor: React.FC<EditorProps> = ({
                 ref={editorRef}
                 value={content}
                 height="100%"
-                theme="light"
+                theme={theme}
                 extensions={extensions}
                 onChange={onChange}
                 className="h-full"

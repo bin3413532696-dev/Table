@@ -4,6 +4,7 @@ import { CheckCircle, Circle, Plus, Trash2, Calendar, Edit2, Clock, ListTodo, Ch
 import { taskDB, Task, createUseDB } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
+import { Button, EmptyState } from '../../components/ui';
 
 type FilterType = 'all' | 'pending' | 'completed';
 type SortType = 'created' | 'priority' | 'dueDate' | 'title';
@@ -152,9 +153,9 @@ const Tasks: React.FC = () => {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-800';
-      case 'medium': return 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800';
-      default: return 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800';
+      case 'high': return 'bg-error-light text-error border-error/30 dark:bg-error/20 dark:text-error';
+      case 'medium': return 'bg-warning-light text-warning border-warning/30 dark:bg-warning/20 dark:text-warning';
+      default: return 'bg-success-light text-success border-success/30 dark:bg-success/20 dark:text-success';
     }
   };
 
@@ -163,7 +164,25 @@ const Tasks: React.FC = () => {
   };
 
   const getPriorityBar = (priority: string) => {
-    switch (priority) { case 'high': return 'bg-rose-500'; case 'medium': return 'bg-amber-500'; default: return 'bg-emerald-500'; }
+    switch (priority) { case 'high': return 'bg-error'; case 'medium': return 'bg-warning'; default: return 'bg-success'; }
+  };
+
+  const getPriorityButtonStyle = (priority: string, isSelected: boolean) => {
+    const base = 'px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 flex items-center gap-1';
+    if (!isSelected) return `${base} bg-bg-secondary text-text-secondary hover:bg-bg-tertiary border border-border-primary`;
+    switch (priority) {
+      case 'high': return `${base} bg-error text-white shadow-sm`;
+      case 'medium': return `${base} bg-warning text-white shadow-sm`;
+      default: return `${base} bg-success text-white shadow-sm`;
+    }
+  };
+
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case 'high': return <AlertTriangle size={14} />;
+      case 'medium': return <AlertCircle size={14} />;
+      default: return <CheckCircle size={14} />;
+    }
   };
 
   const isOverdue = (dueDate?: string, completed?: boolean) => {
@@ -227,7 +246,7 @@ const Tasks: React.FC = () => {
       <button
         onClick={() => toggleTask(task.id)}
         className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
-          task.completed ? 'bg-emerald-500 text-white' : 'border-2 border-border-secondary hover:border-blue-500'
+          task.completed ? 'bg-success text-white' : 'border-2 border-border-secondary hover:border-primary'
         }`}
       >
         {task.completed && <CheckCircle size={14} />}
@@ -235,24 +254,35 @@ const Tasks: React.FC = () => {
 
       <div className="flex-1 min-w-0">
         {editingId === task.id ? (
-          <div className="space-y-2">
+          <div className="space-y-3">
             <input
               type="text"
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value.slice(0, MAX_TITLE_LENGTH))}
               onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
-              className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
+              className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-primary bg-bg-card border-border-primary text-text-primary"
               autoFocus
             />
             <div className="flex gap-2 text-xs text-text-muted">
               ({editTitle.length}/{MAX_TITLE_LENGTH})
             </div>
-            <div className="flex gap-2">
-              <select value={editPriority} onChange={(e) => setEditPriority(e.target.value as typeof editPriority)} className="px-2 py-1 border rounded text-sm bg-bg-card border-border-primary text-text-secondary">
-                <option value="low">低</option><option value="medium">中</option><option value="high">高</option>
-              </select>
+            <div className="flex gap-2 items-center">
+              <div className="flex gap-1">
+                {(['low', 'medium', 'high'] as const).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setEditPriority(p)}
+                    className={`px-2 py-1 rounded text-xs font-medium transition-all duration-150 ${editPriority === p
+                      ? p === 'high' ? 'bg-error text-white' : p === 'medium' ? 'bg-warning text-white' : 'bg-success text-white'
+                      : 'bg-bg-secondary text-text-secondary hover:bg-bg-tertiary border border-border-primary'
+                    }`}
+                  >
+                    {getPriorityLabel(p)}
+                  </button>
+                ))}
+              </div>
               <input type="date" value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} className="px-2 py-1 border rounded text-sm bg-bg-card border-border-primary text-text-secondary" />
-              <button onClick={saveEdit} className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">保存</button>
+              <button onClick={saveEdit} className="px-3 py-1 bg-primary text-white rounded text-sm hover:bg-primary-600 transition-colors">保存</button>
               <button onClick={cancelEdit} className="px-3 py-1 border rounded text-sm border-border-primary text-text-secondary hover:bg-bg-tertiary">取消</button>
             </div>
           </div>
@@ -275,7 +305,7 @@ const Tasks: React.FC = () => {
 
       {editingId !== task.id && (
         <div className="flex gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
-          <button onClick={() => startEdit(task)} className="p-2 rounded-lg transition-all cursor-pointer text-text-muted hover:text-blue-600 hover:bg-blue-50 dark:hover:text-blue-400 dark:hover:bg-blue-900/20" title="编辑"><Edit2 size={16} /></button>
+          <button onClick={() => startEdit(task)} className="p-2 rounded-lg transition-all cursor-pointer text-text-muted hover:text-primary hover:bg-primary-50 dark:hover:bg-primary-900/20" title="编辑"><Edit2 size={16} /></button>
           <button onClick={() => setShowDeleteConfirm(task.id)} className="p-2 rounded-lg transition-all cursor-pointer text-text-muted hover:text-rose-500 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-900/20" title="删除"><Trash2 size={16} /></button>
         </div>
       )}
@@ -307,13 +337,22 @@ const Tasks: React.FC = () => {
               onChange={(e) => setNewTask(e.target.value.slice(0, MAX_TITLE_LENGTH))}
               onKeyDown={(e) => e.key === 'Enter' && addTask()}
               placeholder="添加新任务..."
-              className="flex-1 px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-bg-secondary border-border-primary text-text-primary placeholder-text-muted"
+              className="flex-1 px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-bg-secondary border-border-primary text-text-primary placeholder-text-muted"
             />
-            <select value={newTaskPriority} onChange={(e) => setNewTaskPriority(e.target.value as typeof newTaskPriority)} className="px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-bg-card border-border-primary text-text-secondary">
-              <option value="low">低优先级</option><option value="medium">中优先级</option><option value="high">高优先级</option>
-            </select>
-            <input type="date" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} className="px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-bg-card border-border-primary text-text-secondary" />
-            <button onClick={addTask} className="px-5 py-2.5 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors flex items-center gap-1 dark:bg-white dark:text-gray-900 dark:hover:bg-gray-100"><Plus size={18} />添加</button>
+            <div className="flex gap-1">
+              {(['low', 'medium', 'high'] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setNewTaskPriority(p)}
+                  className={getPriorityButtonStyle(p, newTaskPriority === p)}
+                >
+                  {getPriorityIcon(p)}
+                  {getPriorityLabel(p)}
+                </button>
+              ))}
+            </div>
+            <input type="date" value={newTaskDueDate} onChange={(e) => setNewTaskDueDate(e.target.value)} className="px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:border-primary bg-bg-card border-border-primary text-text-secondary" />
+            <Button variant="primary" onClick={addTask} icon={<Plus size={18} />}>添加</Button>
           </div>
           {newTask.length > 0 && <div className="text-xs text-text-muted text-right">{newTask.length}/{MAX_TITLE_LENGTH}</div>}
         </div>
@@ -345,7 +384,7 @@ const Tasks: React.FC = () => {
                 {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-secondary"><X size={14} /></button>}
               </div>
               {sortedTasks.length > 0 && (
-                <button onClick={() => setShowBatchActions(!showBatchActions)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showBatchActions ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400' : 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'}`}><CheckSquare size={14} />批量</button>
+                <button onClick={() => setShowBatchActions(!showBatchActions)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showBatchActions ? 'bg-primary-50 text-primary dark:bg-primary-900/20' : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'}`}><CheckSquare size={14} />批量</button>
               )}
             </>
           )}
@@ -365,8 +404,8 @@ const Tasks: React.FC = () => {
             </AnimatePresence>
           </div>
           {filterButtons.map(btn => (
-            <button key={btn.key} onClick={() => setFilter(btn.key)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === btn.key ? 'bg-blue-600 text-white' : 'bg-bg-card text-text-secondary border border-border-primary hover:bg-bg-secondary'}`}>
-              <btn.icon size={14} />{btn.label}<span className={`text-xs ${filter === btn.key ? 'text-blue-200' : 'text-text-muted'}`}>{getFilterCount(btn.key)}</span>
+            <button key={btn.key} onClick={() => setFilter(btn.key)} className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === btn.key ? 'bg-primary text-white' : 'bg-bg-card text-text-secondary border border-border-primary hover:bg-bg-secondary'}`}>
+              <btn.icon size={14} />{btn.label}<span className={`text-xs ${filter === btn.key ? 'text-primary-100' : 'text-text-muted'}`}>{getFilterCount(btn.key)}</span>
             </button>
           ))}
         </div>
@@ -375,17 +414,9 @@ const Tasks: React.FC = () => {
       <div className="min-h-[200px]">
         {sortedTasks.length === 0 ? (
           tasks.length === 0 ? (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16 text-text-muted">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center bg-bg-tertiary"><Circle className="w-8 h-8 text-text-muted" /></div>
-              <p className="text-base font-medium text-text-muted mb-1">还没有任务</p>
-              <p className="text-sm">在上方输入框添加第一个任务吧</p>
-            </motion.div>
+            <EmptyState icon={Circle} title="还没有任务" description="在上方输入框添加第一个任务吧" />
           ) : (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16 text-text-muted">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center bg-bg-tertiary"><CheckCheck className="w-8 h-8 text-text-muted" /></div>
-              <p className="text-base font-medium text-text-muted mb-1">{filter === 'completed' ? '还没有已完成的任务' : searchQuery ? '未找到匹配的任务' : '没有待办任务'}</p>
-              <p className="text-sm">{filter === 'completed' ? '完成任务后会显示在这里' : searchQuery ? '尝试其他关键词' : '所有任务都已完成，干得漂亮！'}</p>
-            </motion.div>
+            <EmptyState icon={CheckCheck} title={filter === 'completed' ? '还没有已完成的任务' : searchQuery ? '未找到匹配的任务' : '没有待办任务'} description={filter === 'completed' ? '完成任务后会显示在这里' : searchQuery ? '尝试其他关键词' : '所有任务都已完成，干得漂亮！'} />
           )
         ) : sortedTasks.length > 20 ? (
           <VirtualList<Task> items={sortedTasks} itemHeight={72} containerHeight={480} renderItem={(task) => taskItem(task)} />

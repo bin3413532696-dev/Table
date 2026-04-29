@@ -234,7 +234,7 @@ const NoteItem: React.FC<{
         onClick={() => onSelectNote(note)}
         className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer transition-colors ${
           isSelected
-            ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+            ? 'bg-primary-50 text-primary dark:bg-primary-900/20'
             : 'hover:bg-bg-secondary text-text-secondary'
         }`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
@@ -329,9 +329,9 @@ const TreeNode: React.FC<{
         <div
           className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer transition-colors ${
             isSelected
-              ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+              ? 'bg-primary-50 text-primary dark:bg-primary-900/20'
               : dragOver
-                ? 'bg-blue-50 text-blue-700 ring-2 ring-blue-400 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-600'
+                ? 'bg-primary-50 text-primary ring-2 ring-primary dark:bg-primary-900/20'
                 : 'hover:bg-bg-secondary text-text-secondary'
           }`}
           style={{ paddingLeft: `${level * 16 + 8}px` }}
@@ -340,7 +340,7 @@ const TreeNode: React.FC<{
           onDrop={handleDrop}
         >
           {isSelected && (
-            <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-blue-500" />
+            <div className="absolute left-0 top-1 bottom-1 w-0.5 rounded-full bg-primary" />
           )}
 
           <button
@@ -350,7 +350,7 @@ const TreeNode: React.FC<{
             }}
             className={`p-0.5 rounded transition-colors ${
               isSelected
-                ? 'hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-300'
+                ? 'hover:bg-primary-100 dark:hover:bg-primary-900/20 text-primary'
                 : 'hover:bg-bg-tertiary text-text-muted'
             }`}
             aria-label={isExpanded ? '折叠文件夹' : '展开文件夹'}
@@ -365,17 +365,17 @@ const TreeNode: React.FC<{
           {isExpanded ? (
             <FolderOpen
               className={`w-4 h-4 flex-shrink-0 ${
-                isSelected ? 'text-blue-600 dark:text-blue-300' : 'text-blue-400 dark:text-blue-300'
+                isSelected ? 'text-primary' : 'text-primary-400 dark:text-primary-300'
               }`}
             />
           ) : (
             <Folder
               className={`w-4 h-4 flex-shrink-0 ${
                 isSelected
-                  ? 'text-blue-600 dark:text-blue-300'
+                  ? 'text-primary'
                   : isParent
-                    ? 'text-blue-600 dark:text-blue-300'
-                    : 'text-blue-400 dark:text-blue-300'
+                    ? 'text-primary'
+                    : 'text-primary-400 dark:text-primary-300'
               }`}
             />
           )}
@@ -400,7 +400,7 @@ const TreeNode: React.FC<{
             <span
               onClick={() => onSelectFolder(folder.id)}
               className={`flex-1 text-sm truncate ${
-                isSelected ? 'font-semibold text-blue-700 dark:text-blue-300' : 'text-text-secondary'
+                isSelected ? 'font-semibold text-primary' : 'text-text-secondary'
               }`}
             >
               {folder.name}
@@ -415,7 +415,7 @@ const TreeNode: React.FC<{
               }}
               className={`p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity ${
                 isSelected
-                  ? 'text-blue-400 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/20'
+                  ? 'text-primary-400 hover:bg-primary-100 dark:text-primary-300 dark:hover:bg-primary-900/20'
                   : 'hover:bg-bg-tertiary text-text-muted'
               }`}
               aria-label="文件夹操作菜单"
@@ -614,15 +614,15 @@ export const FileTree: React.FC<FileTreeProps> = ({
             onDrop={handleRootDrop}
             className={`flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded transition-colors mb-1 ${
               selectedFolderId === null && !selectedNoteId
-                ? 'bg-blue-50 text-blue-700 font-medium'
+                ? 'bg-primary-50 text-primary font-medium'
                 : dragOverRoot
-                  ? 'bg-blue-50 text-blue-700 ring-2 ring-blue-400 dark:bg-blue-900/30 dark:text-blue-300 dark:ring-blue-600'
+                  ? 'bg-primary-50 text-primary ring-2 ring-primary dark:bg-primary-900/20'
                   : 'hover:bg-bg-secondary text-text-secondary'
             }`}
           >
             <FileText className="w-4 h-4" />
             <span className="text-sm">全部笔记</span>
-            <span className={`text-xs ${selectedFolderId === null && !selectedNoteId ? 'text-blue-400 dark:text-blue-300' : 'text-text-muted'}`}>({notes.length})</span>
+            <span className={`text-xs ${selectedFolderId === null && !selectedNoteId ? 'text-primary-400 dark:text-primary-300' : 'text-text-muted'}`}>({notes.length})</span>
           </div>
 
           {rootFolders.map(folder => (

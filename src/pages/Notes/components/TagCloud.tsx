@@ -53,7 +53,7 @@ export const TagCloud: React.FC<TagCloudProps> = ({
             onClick={() => onToggleTag(tag)}
             className={`px-2 py-1 rounded-full text-sm transition-all ${
               selectedTags.includes(tag)
-                ? 'bg-blue-600 text-white'
+                ? 'bg-primary text-white'
                 : 'bg-bg-tertiary text-text-secondary hover:bg-border-primary'
             }`}
             style={{ fontSize: `${getTagSize(count)}px` }}

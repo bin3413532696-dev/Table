@@ -221,7 +221,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       onClick={cmd.action}
                       onMouseEnter={() => setSelectedIndex(index)}
                       className={`w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors ${
-                        index === selectedIndex ? 'bg-blue-50 dark:bg-blue-900/30' : ''
+                        index === selectedIndex ? 'bg-primary-50 dark:bg-primary-900/20' : ''
                       }`}
                     >
                       <div className="p-1.5 rounded bg-bg-tertiary text-text-secondary">
@@ -238,7 +238,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         )}
                       </div>
                       {cmd.type === 'action' && (
-                        <span className="text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+                        <span className="text-xs px-2 py-0.5 rounded bg-primary-100 text-primary dark:bg-primary-900/20">
                           动作
                         </span>
                       )}

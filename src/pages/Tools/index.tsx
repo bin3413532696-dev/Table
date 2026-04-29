@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Wrench, Calculator, Palette, FileJson, Copy, Check, RefreshCw } from 'lucide-react';
 
 const tools = [
-  { icon: Calculator, label: '计算器', desc: '快速计算', color: 'bg-blue-500' },
+  { icon: Calculator, label: '计算器', desc: '快速计算', color: 'bg-primary' },
   { icon: Palette, label: '取色器', desc: '颜色工具', color: 'bg-purple-500' },
   { icon: FileJson, label: 'JSON格式化', desc: '数据处理', color: 'bg-green-500' },
 ];
@@ -79,7 +79,7 @@ function CalculatorTool() {
     { label: '1', action: () => inputNumber('1'), className: '' },
     { label: '2', action: () => inputNumber('2'), className: '' },
     { label: '3', action: () => inputNumber('3'), className: '' },
-    { label: '=', action: performCalculation, className: 'row-span-2 bg-blue-500 hover:bg-blue-600' },
+    { label: '=', action: performCalculation, className: 'row-span-2 bg-primary hover:bg-primary-600' },
     { label: '0', action: () => inputNumber('0'), className: 'col-span-2' },
     { label: '.', action: () => inputNumber('.'), className: '' },
   ];
@@ -95,13 +95,13 @@ function CalculatorTool() {
             key={btn.label}
             onClick={btn.action}
             className={`p-4 rounded-xl font-semibold transition-all ${
-              btn.className.includes('bg-blue-500') 
-                ? 'bg-blue-500 text-white hover:bg-blue-600' 
+              btn.className.includes('bg-primary')
+                ? 'bg-primary text-white hover:bg-primary-600'
                 : btn.label === 'C'
                   ? 'bg-rose-100 text-rose-600 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:hover:bg-rose-900/50'
                   : ['+', '-', '×', '÷', '='].includes(btn.label)
-                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
-                    : 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'
+                    ? 'bg-primary-100 text-primary hover:bg-primary-200 dark:bg-primary-900/30 dark:text-primary-300 dark:hover:bg-primary-900/50'
+                    : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'
             } ${btn.className}`}
           >
             {btn.label}
@@ -287,13 +287,13 @@ function JsonFormatterTool() {
       <div className="flex gap-3">
         <button
           onClick={formatJson}
-          className="flex-1 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+          className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-primary-600 transition-colors"
         >
           格式化
         </button>
         <button
           onClick={minifyJson}
-          className="flex-1 py-2 rounded-lg transition-colors bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700"
+          className="flex-1 py-2 rounded-lg transition-colors bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700"
         >
           压缩
         </button>

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { financeDB, taskDB, noteDB, Note, Task, createUseDB } from '../../db';
 import Loading from '../../components/Loading';
+import { Button, EmptyState } from '../../components/ui';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -47,17 +48,17 @@ export default function Dashboard() {
       icon: CheckSquare,
       label: '待办任务',
       count: taskStats.pending,
-      color: 'bg-blue-500',
-      bgColor: 'bg-blue-50 dark:bg-blue-900/20',
-      borderColor: 'border-blue-200 dark:border-blue-800',
-      textColor: 'text-blue-600 dark:text-blue-400',
+      color: 'bg-primary',
+      bgColor: 'bg-primary-50 dark:bg-primary-900/20',
+      borderColor: 'border-primary-200 dark:border-primary-800',
+      textColor: 'text-primary dark:text-primary-400',
       path: '/tasks'
     },
     {
       icon: FileText,
       label: '笔记',
       count: notes.length,
-      color: 'bg-gray-700',
+      color: 'bg-gray-600 dark:bg-gray-400',
       bgColor: 'bg-bg-secondary',
       borderColor: 'border-border-primary',
       textColor: 'text-text-secondary',
@@ -79,7 +80,7 @@ export default function Dashboard() {
       icon: Calendar,
       label: '今日',
       count: new Date().toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }),
-      color: 'bg-gray-500',
+      color: 'bg-gray-500 dark:bg-gray-500',
       bgColor: 'bg-bg-secondary',
       borderColor: 'border-border-primary',
       textColor: 'text-text-secondary',
@@ -100,7 +101,7 @@ export default function Dashboard() {
           className="mb-8"
         >
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
               <LayoutDashboard className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -155,7 +156,7 @@ export default function Dashboard() {
             </div>
             <button
               onClick={() => navigate('/tasks')}
-              className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium flex items-center gap-1 group"
+              className="text-sm text-primary hover:text-primary-600 font-medium flex items-center gap-1 group"
             >
               查看全部
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -170,12 +171,11 @@ export default function Dashboard() {
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.4 + index * 0.1 }}
-                  whileHover={{ backgroundColor: 'var(--bg-tertiary)' }}
                   onClick={() => navigate('/tasks')}
-                  className="flex items-center justify-between p-4 rounded-xl transition-all duration-200 cursor-pointer border border-border-primary hover:border-border-primary hover:shadow-sm"
+                  className="flex items-center justify-between p-4 rounded-xl transition-colors duration-150 cursor-pointer border border-border-primary hover:bg-bg-tertiary hover:shadow-sm"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <div className="w-2 h-2 bg-primary rounded-full"></div>
                     <span className="font-medium text-text-primary">{task.title}</span>
                   </div>
                   <span className="text-xs text-text-muted">
@@ -185,12 +185,11 @@ export default function Dashboard() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-12 text-text-muted">
-              <div className="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center bg-bg-tertiary">
-                <CheckSquare className="w-8 h-8 text-text-muted" />
-              </div>
-              <p>暂无待办任务</p>
-            </div>
+            <EmptyState
+              icon={CheckSquare}
+              title="暂无待办任务"
+              action={{ label: '添加任务', onClick: () => navigate('/tasks') }}
+            />
           )}
         </motion.div>
 
@@ -224,9 +223,8 @@ export default function Dashboard() {
                   initial={{ opacity: 0, x: 20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.5 + index * 0.1 }}
-                  whileHover={{ backgroundColor: 'var(--bg-tertiary)' }}
                   onClick={() => navigate('/notes')}
-                  className="p-4 rounded-xl transition-all duration-200 cursor-pointer border border-border-primary hover:border-border-primary hover:shadow-sm"
+                  className="p-4 rounded-xl transition-colors duration-150 cursor-pointer border border-border-primary hover:bg-bg-tertiary hover:shadow-sm"
                 >
                   <h3 className="font-medium mb-1 truncate text-text-primary">{note.title}</h3>
                   <p className="text-sm line-clamp-2 text-text-muted">{note.content || '无内容'}</p>
@@ -238,12 +236,11 @@ export default function Dashboard() {
               ))}
             </div>
           ) : (
-            <div className="text-center py-12 text-text-muted">
-              <div className="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center bg-bg-tertiary">
-                <FileText className="w-8 h-8 text-text-muted" />
-              </div>
-              <p>暂无笔记</p>
-            </div>
+            <EmptyState
+              icon={FileText}
+              title="暂无笔记"
+              action={{ label: '新建笔记', onClick: () => navigate('/notes') }}
+            />
           )}
         </motion.div>
       </div>
@@ -259,12 +256,9 @@ export default function Dashboard() {
             <h3 className="text-lg font-bold mb-1">费用概览</h3>
             <p className="text-sm text-text-muted">本月收支情况</p>
           </div>
-          <button
-            onClick={() => navigate('/finance')}
-            className="px-4 py-2 bg-gray-900 dark:bg-white dark:text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
-          >
-            查看详情
-          </button>
+          <Button variant="primary" onClick={() => navigate('/finance')}>
+              查看详情
+            </Button>
         </div>
         <div className="grid grid-cols-3 gap-4 mt-6">
           <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">

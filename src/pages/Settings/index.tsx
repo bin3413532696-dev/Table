@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { User, Bell, Shield, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, FileText, Lock, Eye, EyeOff, Mail, MessageSquare, Calendar, Check, Sun, Moon, Settings as SettingsIcon } from 'lucide-react';
 import { dataManager, noteDB, folderDB, Note, Folder } from '../../db';
 import { useTheme } from '../../contexts/ThemeContext';
+import { Button, Toggle } from '../../components/ui';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User },
@@ -82,13 +83,9 @@ function ProfileSettings() {
         </div>
       </div>
 
-      <button
-        onClick={handleSave}
-        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-      >
-        {saved ? <Check className="w-4 h-4" /> : null}
+      <Button variant="primary" onClick={handleSave} icon={saved ? <Check className="w-4 h-4" /> : undefined}>
         保存设置
-      </button>
+      </Button>
     </div>
   );
 }
@@ -132,12 +129,10 @@ function NotificationSettings() {
               <div className="text-sm text-text-muted">{item.desc}</div>
             </div>
           </div>
-          <button
-            onClick={() => toggle(item.key as keyof typeof settings)}
-            className={`w-12 h-6 rounded-full transition-colors ${settings[item.key as keyof typeof settings] ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-          >
-            <div className={`w-5 h-5 bg-bg-card rounded-full shadow-sm transition-transform ${settings[item.key as keyof typeof settings] ? 'translate-x-6' : 'translate-x-0.5'} mt-0.5`} />
-          </button>
+          <Toggle
+            checked={settings[item.key as keyof typeof settings]}
+            onChange={() => toggle(item.key as keyof typeof settings)}
+          />
         </div>
       ))}
     </div>
@@ -205,19 +200,9 @@ function SecuritySettings() {
             </button>
           </div>
           {!enabled ? (
-            <button
-              onClick={handleSavePin}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              启用
-            </button>
+            <Button variant="primary" onClick={handleSavePin}>启用</Button>
           ) : (
-            <button
-              onClick={handleClearPin}
-              className="px-4 py-2 border rounded-lg transition-colors border-border-primary text-text-secondary hover:bg-bg-secondary"
-            >
-              关闭
-            </button>
+            <Button variant="secondary" onClick={handleClearPin}>关闭</Button>
           )}
         </div>
         {enabled && <p className="text-sm text-emerald-500 dark:text-emerald-400">密码保护已启用</p>}
@@ -235,12 +220,10 @@ function SecuritySettings() {
               <div className="text-sm text-text-muted">{theme === 'dark' ? '暗色模式' : '浅色模式'}</div>
             </div>
           </div>
-          <button
-            onClick={toggleTheme}
-            className={`w-12 h-6 rounded-full transition-colors ${theme === 'dark' ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-          >
-            <div className={`w-5 h-5 bg-bg-card rounded-full shadow-sm transition-transform ${theme === 'dark' ? 'translate-x-6' : 'translate-x-0.5'} mt-0.5`} />
-          </button>
+          <Toggle
+            checked={theme === 'dark'}
+            onChange={toggleTheme}
+          />
         </div>
       </div>
     </div>
@@ -493,8 +476,8 @@ export default function Settings() {
                 onClick={() => setActiveTab(tab.id)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all duration-200 ${
                   activeTab === tab.id
-                    ? 'bg-blue-500 text-white shadow-md'
-                    : 'text-text-secondary hover:bg-slate-50 dark:hover:bg-slate-800'
+                    ? 'bg-primary text-white shadow-md'
+                    : 'text-text-secondary hover:bg-bg-secondary'
                 }`}
               >
                 <tab.icon className="w-5 h-5" />
