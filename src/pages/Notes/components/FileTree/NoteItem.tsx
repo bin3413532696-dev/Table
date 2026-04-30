@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, MoreVertical, GripVertical } from 'lucide-react';
 import { useFileTreeContext } from '../FileTree';
-import { Note } from '../../../db';
+import { Note } from '../../../../db';
 import { NoteContextMenu } from './NoteContextMenu';
 
 interface NoteItemProps {

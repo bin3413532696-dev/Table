@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Folder, FolderOpen, ChevronRight, ChevronDown, MoreVertical, Edit3 } from 'lucide-react';
-import { Folder as FolderType, Note } from '../../../db';
+import { Folder as FolderType, Note } from '../../../../db';
 import { useFileTreeContext } from '../FileTree';
 import { FolderContextMenu } from './FolderContextMenu';
 import { NoteItem } from './NoteItem';

@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Note } from '../../../db';
+import { Note } from '../../../../db';
 import { GraphNode, GraphLink, COLORS } from './types';
 
 export function useGraphData(notes: Note[]) {
@@ -26,7 +26,7 @@ export function useGraphData(notes: Note[]) {
     });
 
     const tagRegex = /#(\S+)/g;
-    const tagMap = new Map<string, number[]>();
+    const tagMap = new Map<string, string[]>();
     notes.forEach(note => {
       const tags = new Set<string>();
       const tagMatches = note.content?.matchAll(tagRegex) || [];

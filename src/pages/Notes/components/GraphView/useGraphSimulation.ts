@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import { Note } from '../../../db';
+import { Note } from '../../../../db';
 import { GraphNode, GraphLink, COLORS } from './types';
 
 interface UseGraphSimulationProps {

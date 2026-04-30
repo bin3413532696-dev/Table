@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Command, PanelLeft, PanelRight, X } from 'lucide-react';
 import { FileTree } from './components/FileTree';
-import { Editor } from './components/Editor';
+import { Editor } from './components/Editor/index';
 import { Backlinks } from './components/Backlinks';
 import { TagCloud } from './components/TagCloud';
 import { GraphView } from './components/GraphView';
@@ -13,7 +13,6 @@ import { useNotesSearch } from './hooks/useNotesSearch';
 import Loading from '../../components/Loading';
 
 type RightPanelType = 'backlinks' | 'tags' | 'graph';
-type EditorMode = 'edit' | 'split' | 'preview';
 
 const useDB = createUseDB(React);
 
@@ -21,6 +20,7 @@ export default function Notes() {
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
+  const [secondNote, setSecondNote] = useState<Note | null>(null); // 分屏模式第二个笔记
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [rightPanel, setRightPanel] = useState<RightPanelType>('backlinks');
   const [isVimMode, setIsVimMode] = useState(false);
@@ -158,6 +158,16 @@ export default function Notes() {
     setCurrentNote(prev => prev ? { ...prev, content, links } : null);
   }, [currentNote, notes]);
 
+  // 第二个笔记的内容更新
+  const handleUpdateSecondNote = useCallback(async (content: string) => {
+    if (!secondNote) return;
+
+    await noteDB.update(secondNote.id, { content });
+
+    setNotes(prev => prev.map(n => n.id === secondNote.id ? { ...n, content } : n));
+    setSecondNote(prev => prev ? { ...prev, content } : null);
+  }, [secondNote]);
+
   const titleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleUpdateTitle = useCallback((title: string) => {
@@ -234,7 +244,16 @@ export default function Notes() {
     if (currentNote && !notes.find(n => n.id === currentNote.id)) {
       setCurrentNote(null);
     }
-  }, [notes, currentNote]);
+    if (secondNote && !notes.find(n => n.id === secondNote.id)) {
+      setSecondNote(null);
+    }
+  }, [notes, currentNote, secondNote]);
+
+  // 处理笔记选择
+  const handleSelectNote = useCallback((note: Note) => {
+    setCurrentNote(note);
+    setSelectedFolderId(null);
+  }, []);
 
   const filteredNotes = selectedTags.length > 0
     ? notes.filter(n => selectedTags.some(tag => n.tags?.includes(tag)))
@@ -362,7 +381,7 @@ export default function Notes() {
                 notes={filteredNotes}
                 selectedNoteId={currentNote?.id || null}
                 selectedFolderId={selectedFolderId}
-                onSelectNote={setCurrentNote}
+                onSelectNote={handleSelectNote}
                 onSelectFolder={setSelectedFolderId}
                 onCreateNote={handleCreateNote}
                 onDeleteNote={handleDeleteNote}
@@ -385,6 +404,9 @@ export default function Notes() {
               onChange={handleUpdateNote}
               isVimMode={isVimMode}
               onToggleVim={() => setIsVimMode(!isVimMode)}
+              secondNote={secondNote}
+              secondContent={secondNote?.content || ''}
+              onSecondChange={handleUpdateSecondNote}
             />
           ) : (
             <div className="h-full flex flex-col items-center justify-center">
@@ -421,7 +443,7 @@ export default function Notes() {
                 <Backlinks
                   currentNote={currentNote}
                   notes={notes}
-                  onSelectNote={setCurrentNote}
+                  onSelectNote={handleSelectNote}
                 />
               )}
               {rightPanel === 'tags' && (
@@ -435,7 +457,7 @@ export default function Notes() {
                 <GraphView
                   notes={notes}
                   currentNote={currentNote}
-                  onSelectNote={setCurrentNote}
+                  onSelectNote={handleSelectNote}
                 />
               )}
             </motion.div>
@@ -448,7 +470,7 @@ export default function Notes() {
         onClose={() => setIsCommandPaletteOpen(false)}
         notes={notes}
         folders={folders}
-        onSelectNote={setCurrentNote}
+        onSelectNote={handleSelectNote}
         onSelectFolder={setSelectedFolderId}
         onCreateNote={() => handleCreateNote()}
       />
