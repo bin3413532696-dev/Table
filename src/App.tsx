@@ -4,7 +4,6 @@ import { Layout } from './components/Layout';
 import { PinLock } from './components/PinLock';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
-import Notes from './pages/Notes';
 import Tasks from './pages/Tasks';
 import Tools from './pages/Tools';
 import Finance from './pages/Finance';
@@ -15,8 +14,8 @@ function App() {
   const [checkingPin, setCheckingPin] = useState(true);
 
   useEffect(() => {
-    const savedPin = localStorage.getItem('security_pin');
-    if (!savedPin || savedPin.length < 4) {
+    const savedPin = localStorage.getItem('security_pin_hashed');
+    if (!savedPin) {
       setIsAuthenticated(true);
     }
     setCheckingPin(false);
@@ -45,7 +44,6 @@ function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
-            <Route path="notes" element={<Notes />} />
             <Route path="tasks" element={<Tasks />} />
             <Route path="tools" element={<Tools />} />
             <Route path="finance" element={<Finance />} />

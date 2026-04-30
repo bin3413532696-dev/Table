@@ -336,20 +336,20 @@ const Tasks: React.FC = () => {
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
+    <div className="p-4 md:p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
       {/* 页面标题 */}
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 md:mb-8">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
             <ListTodo className="w-5 h-5 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-text-primary">任务管理</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-text-primary">任务管理</h1>
         </div>
         <p className="text-sm text-text-muted ml-13">高效管理你的日常任务</p>
       </motion.div>
 
       {/* 统计卡片 */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-3 gap-4 mb-6">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-3 gap-3 md:gap-4 mb-6">
         <div className="rounded-lg p-4 bg-bg-card border border-border-primary">
           <div className="flex items-center gap-2 mb-2">
             <Flag className="w-4 h-4 text-text-muted" />
@@ -374,8 +374,8 @@ const Tasks: React.FC = () => {
       </motion.div>
 
       {/* 添加任务表单 */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg shadow-card border p-5 mb-6 bg-bg-card border-border-primary">
-        <div className="flex gap-3 items-center">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg shadow-card border p-4 md:p-5 mb-6 bg-bg-card border-border-primary">
+        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
           <input
             type="text"
             value={newTask}
@@ -384,7 +384,7 @@ const Tasks: React.FC = () => {
             placeholder="输入任务内容..."
             className="flex-1 px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-bg-secondary border-border-primary text-text-primary placeholder-text-muted"
           />
-          <div className="flex gap-1">
+          <div className="flex gap-1 justify-center">
             {(['low', 'medium', 'high'] as const).map(p => (
               <PriorityButton key={p} priority={p} selected={newTaskPriority === p} onClick={() => setNewTaskPriority(p)} />
             ))}
@@ -403,7 +403,7 @@ const Tasks: React.FC = () => {
       </motion.div>
 
       {/* 工具栏 */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
           {/* 批量操作模式 */}
           {selectedIds.size > 0 ? (

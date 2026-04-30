@@ -1,23 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Bell, Shield, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, FileText, Lock, Eye, EyeOff, Mail, MessageSquare, Calendar, Check, Sun, Moon, Settings as SettingsIcon } from 'lucide-react';
-import { dataManager, noteDB, folderDB, Note, Folder } from '../../db';
+import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon } from 'lucide-react';
+import { dataManager, hashPin } from '../../db';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Button, Toggle } from '../../components/ui';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User },
-  { id: 'notifications', label: '通知设置', icon: Bell },
-  { id: 'security', label: '安全隐私', icon: Shield },
+  { id: 'security', label: '安全隐私', icon: Lock },
   { id: 'data', label: '数据管理', icon: Database },
 ];
 
 const tabContent: Record<string, { title: string; desc: string }> = {
   profile: { title: '个人资料', desc: '管理您的个人信息和账户设置' },
-  notifications: { title: '通知设置', desc: '自定义您接收通知的方式' },
   security: { title: '安全隐私', desc: '保护您的账户和数据安全' },
   data: { title: '数据管理', desc: '浏览数据统计，导入导出备份，自动同步到文件系统' },
 };
+
+function isValidEmail(email: string): boolean {
+  if (!email) return true;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
 
 function ProfileSettings() {
   const [profile, setProfile] = useState({
@@ -27,6 +31,7 @@ function ProfileSettings() {
     avatar: ''
   });
   const [saved, setSaved] = useState(false);
+  const [emailError, setEmailError] = useState('');
 
   useEffect(() => {
     const saved = localStorage.getItem('user_profile');
@@ -34,6 +39,11 @@ function ProfileSettings() {
   }, []);
 
   const handleSave = () => {
+    if (profile.email && !isValidEmail(profile.email)) {
+      setEmailError('请输入有效的邮箱地址');
+      return;
+    }
+    setEmailError('');
     localStorage.setItem('user_profile', JSON.stringify(profile));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -58,6 +68,7 @@ function ProfileSettings() {
             type="text"
             value={profile.name}
             onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+            maxLength={50}
             className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
           />
         </div>
@@ -66,20 +77,23 @@ function ProfileSettings() {
           <input
             type="email"
             value={profile.email}
-            onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+            onChange={(e) => { setProfile({ ...profile, email: e.target.value }); setEmailError(''); }}
             placeholder="your@email.com"
-            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
+            className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card text-text-primary ${emailError ? 'border-rose-500' : 'border-border-primary'}`}
           />
+          {emailError && <p className="text-rose-500 text-xs mt-1">{emailError}</p>}
         </div>
         <div>
           <label className="block text-sm font-medium mb-1 text-text-secondary">个人简介</label>
           <textarea
             value={profile.bio}
-            onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
+            onChange={(e) => setProfile({ ...profile, bio: e.target.value.slice(0, 200) })}
             placeholder="介绍一下自己..."
             rows={3}
+            maxLength={200}
             className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none bg-bg-card border-border-primary text-text-primary"
           />
+          <p className="text-xs text-text-muted text-right mt-1">{profile.bio.length}/200</p>
         </div>
       </div>
 
@@ -90,79 +104,42 @@ function ProfileSettings() {
   );
 }
 
-function NotificationSettings() {
-  const [settings, setSettings] = useState({
-    taskReminder: true,
-    weeklyReport: false,
-    budgetAlert: true,
-    emailNotification: false
-  });
-
-  useEffect(() => {
-    const saved = localStorage.getItem('notification_settings');
-    if (saved) setSettings(JSON.parse(saved));
-  }, []);
-
-  const toggle = (key: keyof typeof settings) => {
-    const updated = { ...settings, [key]: !settings[key] };
-    setSettings(updated);
-    localStorage.setItem('notification_settings', JSON.stringify(updated));
-  };
-
-  const items = [
-    { key: 'taskReminder', label: '任务提醒', desc: '任务截止日期前提醒', icon: Calendar },
-    { key: 'budgetAlert', label: '预算预警', desc: '费用支出超过设定阈值时提醒', icon: AlertCircle },
-    { key: 'weeklyReport', label: '周报', desc: '每周生成数据汇总报告', icon: Mail },
-    { key: 'emailNotification', label: '邮件通知', desc: '接收邮件形式的通知', icon: MessageSquare },
-  ];
-
-  return (
-    <div className="space-y-4">
-      {items.map((item) => (
-        <div key={item.key} className="flex items-center justify-between p-4 rounded-xl bg-bg-secondary">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-bg-card">
-              <item.icon className="w-5 h-5 text-text-secondary" />
-            </div>
-            <div>
-              <div className="font-medium text-text-primary">{item.label}</div>
-              <div className="text-sm text-text-muted">{item.desc}</div>
-            </div>
-          </div>
-          <Toggle
-            checked={settings[item.key as keyof typeof settings]}
-            onChange={() => toggle(item.key as keyof typeof settings)}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function SecuritySettings() {
   const [showPassword, setShowPassword] = useState(false);
   const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
   const [enabled, setEnabled] = useState(false);
+  const [pinError, setPinError] = useState('');
   const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
-    const saved = localStorage.getItem('security_pin');
-    if (saved) {
-      setPin(saved);
+    const hashedPin = localStorage.getItem('security_pin_hashed');
+    if (hashedPin) {
       setEnabled(true);
     }
   }, []);
 
-  const handleSavePin = () => {
-    if (pin.length >= 4) {
-      localStorage.setItem('security_pin', pin);
-      setEnabled(true);
+  const handleSavePin = async () => {
+    if (pin.length < 4) {
+      setPinError('密码至少需要4位');
+      return;
     }
+    if (pin !== confirmPin) {
+      setPinError('两次输入的密码不一致');
+      return;
+    }
+    setPinError('');
+    const hashedPin = await hashPin(pin);
+    localStorage.setItem('security_pin_hashed', hashedPin);
+    setEnabled(true);
+    setPin('');
+    setConfirmPin('');
   };
 
   const handleClearPin = () => {
-    localStorage.removeItem('security_pin');
+    localStorage.removeItem('security_pin_hashed');
     setPin('');
+    setConfirmPin('');
     setEnabled(false);
   };
 
@@ -182,30 +159,41 @@ function SecuritySettings() {
 
       <div className="space-y-4">
         <h4 className="font-medium text-text-primary">访问密码</h4>
-        <div className="flex gap-3">
-          <div className="flex-1 relative">
+        {!enabled ? (
+          <div className="space-y-3">
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={pin}
+                onChange={(e) => { setPin(e.target.value.replace(/\D/g, '').slice(0, 6)); setPinError(''); }}
+                placeholder="设置4-6位数字密码"
+                className="w-full px-4 py-2 pr-10 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
+              />
+              <button
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
             <input
               type={showPassword ? 'text' : 'password'}
-              value={pin}
-              onChange={(e) => setPin(e.target.value)}
-              placeholder="设置4位数字密码"
-              maxLength={6}
+              value={confirmPin}
+              onChange={(e) => { setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6)); setPinError(''); }}
+              placeholder="再次输入密码确认"
               className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
             />
-            <button
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted"
-            >
-              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
+            {pinError && <p className="text-rose-500 text-xs">{pinError}</p>}
+            <Button variant="primary" onClick={handleSavePin}>启用密码保护</Button>
           </div>
-          {!enabled ? (
-            <Button variant="primary" onClick={handleSavePin}>启用</Button>
-          ) : (
-            <Button variant="secondary" onClick={handleClearPin}>关闭</Button>
-          )}
-        </div>
-        {enabled && <p className="text-sm text-emerald-500 dark:text-emerald-400">密码保护已启用</p>}
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-emerald-500 dark:text-emerald-400 flex items-center gap-2">
+              <Check className="w-4 h-4" /> 密码保护已启用
+            </p>
+            <Button variant="secondary" onClick={handleClearPin}>关闭密码保护</Button>
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -233,18 +221,7 @@ function SecuritySettings() {
 function DataManager() {
   const [importStatus, setImportStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [exportStatus, setExportStatus] = useState<'idle' | 'exporting' | 'done'>('idle');
-  const [allNotes, setAllNotes] = useState<Note[]>([]);
-  const [allFolders, setAllFolders] = useState<Folder[]>([]);
   const stats = dataManager.getStats();
-
-  useEffect(() => {
-    noteDB.getAll().then(setAllNotes);
-    folderDB.getAll().then(setAllFolders);
-  }, []);
-
-  const sanitizeFileName = (name: string) =>
-    name.replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, ' ').trim() || 'untitled';
 
   const handleExport = () => {
     const data = dataManager.exportAll();
@@ -285,48 +262,6 @@ function DataManager() {
     window.location.reload();
   };
 
-  const handleExportNotes = async () => {
-    setExportStatus('exporting');
-    const notes = await noteDB.getAll();
-    const folders = await folderDB.getAll();
-    const folderMap: Record<string, string> = {};
-    folders.forEach(f => { folderMap[f.id] = f.name; });
-
-    notes.forEach((note, index) => {
-      const tags = note.tags?.length
-        ? `tags: [${note.tags.map(t => `"${t}"`).join(', ')}]`
-        : 'tags: []';
-
-      const frontMatter = `---
-title: "${note.title}"
-created: ${note.createdAt}
-updated: ${note.updatedAt}
-${tags}
----
-
-`;
-
-      const content = frontMatter + (note.content || '');
-      const fileName = sanitizeFileName(note.title) + '.md';
-      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-
-      setTimeout(() => {
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        if (index === notes.length - 1) {
-          setExportStatus('done');
-          setTimeout(() => setExportStatus('idle'), 3000);
-        }
-      }, index * 300);
-    });
-  };
-
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
@@ -338,16 +273,12 @@ ${tags}
       <div className="flex items-center gap-6 text-sm text-text-secondary">
         <span>费用记录 <strong className="text-text-primary">{stats.finance}</strong></span>
         <span>任务 <strong className="text-text-primary">{stats.tasks}</strong></span>
-        <span>笔记 <strong className="text-text-primary">{stats.notes}</strong></span>
-        <span>文件夹 <strong className="text-text-primary">{stats.folders}</strong></span>
         <span className="ml-auto text-xs text-text-muted">{formatSize(stats.totalSize)}</span>
       </div>
 
       <div className="flex items-center gap-2 text-xs text-text-muted bg-bg-secondary rounded-lg px-3 py-2">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shrink-0" />
-        自动同步到 <code className="px-1 bg-bg-card rounded border text-xs">data/</code>
-        <span className="text-text-muted mx-1">|</span>
-        变更后 1.5s 同步 · 笔记存为 .md
+        导出备份包含：业务数据、用户资料、主题设置
       </div>
 
       <div className="space-y-1">
@@ -355,7 +286,7 @@ ${tags}
           <Download className="w-4 h-4 text-blue-500 shrink-0" />
           <div>
             <div className="text-sm font-medium text-text-primary">导出数据</div>
-            <div className="text-xs text-text-muted">备份为 JSON 文件</div>
+            <div className="text-xs text-text-muted">备份所有数据和设置</div>
           </div>
         </button>
 
@@ -367,22 +298,6 @@ ${tags}
           </div>
           <input type="file" accept=".json" onChange={handleImport} className="hidden" />
         </label>
-
-        <button
-          onClick={handleExportNotes}
-          disabled={exportStatus === 'exporting' || allNotes.length === 0}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-bg-secondary transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <FileText className={'w-4 h-4 shrink-0 ' + (exportStatus === 'done' ? 'text-emerald-500 dark:text-emerald-400' : 'text-violet-500')} />
-          <div>
-            <div className="text-sm font-medium text-text-primary">
-              {exportStatus === 'exporting' ? '正在导出...' : exportStatus === 'done' ? '导出完成' : '导出笔记为 Markdown'}
-            </div>
-            <div className="text-xs text-text-muted">
-              {allNotes.length === 0 ? '暂无笔记' : allNotes.length + ' 篇笔记'}
-            </div>
-          </div>
-        </button>
       </div>
 
       {importStatus !== 'idle' && (
@@ -423,7 +338,7 @@ ${tags}
             >
               <h3 className="text-lg font-bold text-text-primary mb-3">确认清空</h3>
               <p className="text-sm text-text-secondary mb-6">
-                此操作将删除所有本地数据（费用、任务、笔记、文件夹），不可恢复。建议先导出备份。
+                此操作将删除所有数据（费用、任务、用户资料、设置），不可恢复。建议先导出备份。
               </p>
               <div className="flex gap-3">
                 <button onClick={() => setShowClearConfirm(false)} className="flex-1 py-2 border rounded-lg text-sm text-text-secondary hover:bg-bg-secondary transition-colors">取消</button>
@@ -443,7 +358,6 @@ export default function Settings() {
   const renderContent = () => {
     switch (activeTab) {
       case 'profile': return <ProfileSettings />;
-      case 'notifications': return <NotificationSettings />;
       case 'security': return <SecuritySettings />;
       case 'data': return <DataManager />;
       default: return null;
@@ -451,25 +365,25 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto min-h-screen bg-bg-secondary">
+    <div className="p-4 md:p-8 max-w-6xl mx-auto min-h-screen bg-bg-secondary">
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-center gap-3 mb-8"
+        className="flex items-center gap-3 mb-6 md:mb-8"
       >
         <div className="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-lg flex items-center justify-center">
           <SettingsIcon className="w-5 h-5 text-white" />
         </div>
-        <h1 className="text-2xl font-bold text-text-primary">设置</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-text-primary">设置</h1>
       </motion.div>
 
-      <div className="flex gap-8">
+      <div className="flex flex-col lg:flex-row gap-4 md:gap-8">
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="w-64 flex-shrink-0"
+          className="w-full lg:w-64 flex-shrink-0"
         >
-          <div className="rounded-2xl p-2 bg-bg-card shadow-sm border border-border-primary">
+          <div className="rounded-xl md:rounded-2xl p-2 bg-bg-card shadow-sm border border-border-primary">
             {settingsTabs.map((tab) => (
               <button
                 key={tab.id}
@@ -490,7 +404,7 @@ export default function Settings() {
         <motion.div
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="flex-1 rounded-2xl p-8 bg-bg-card shadow-sm border border-border-primary"
+          className="flex-1 rounded-xl md:rounded-2xl p-4 md:p-8 bg-bg-card shadow-sm border border-border-primary"
         >
           <AnimatePresence mode="wait">
             <motion.div

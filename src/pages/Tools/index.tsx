@@ -315,7 +315,7 @@ export default function Tools() {
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
+    <div className="p-4 md:p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -324,7 +324,7 @@ export default function Tools() {
         <div className="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-lg flex items-center justify-center">
           <Wrench className="w-5 h-5 text-white" />
         </div>
-        <h1 className="text-2xl font-bold text-text-primary">工具箱</h1>
+        <h1 className="text-xl md:text-2xl font-bold text-text-primary">工具箱</h1>
       </motion.div>
 
       {activeTool ? (
@@ -341,7 +341,7 @@ export default function Tools() {
           {renderTool()}
         </motion.div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {tools.map((tool, index) => (
             <motion.div
               key={tool.label}

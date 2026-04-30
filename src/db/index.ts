@@ -1,10 +1,21 @@
-import Fuse from 'fuse.js';
-
 function generateId(): string {
   const timestamp = Date.now().toString(36);
   const random = Math.random().toString(36).substring(2, 9);
   const counter = Math.floor(Math.random() * 1000).toString(36).padStart(3, '0');
   return `${timestamp}-${random}-${counter}`;
+}
+
+async function hashPin(pin: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(pin);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function verifyPin(pin: string, hashedPin: string): Promise<boolean> {
+  const hashedInput = await hashPin(pin);
+  return hashedInput === hashedPin;
 }
 
 function isValidId(id: string): boolean {
@@ -43,35 +54,6 @@ function isValidTask(record: unknown): record is Task {
   );
 }
 
-function isValidFolder(record: unknown): record is Folder {
-  if (typeof record !== 'object' || record === null) return false;
-  const r = record as Folder;
-  return (
-    isValidId(r.id) &&
-    typeof r.name === 'string' &&
-    (r.parentId === null || isValidId(r.parentId)) &&
-    isValidDate(r.createdAt) &&
-    isValidDate(r.updatedAt) &&
-    typeof r.noteCount === 'number' && r.noteCount >= 0
-  );
-}
-
-function isValidNote(record: unknown): record is Note {
-  if (typeof record !== 'object' || record === null) return false;
-  const r = record as Note;
-  return (
-    isValidId(r.id) &&
-    typeof r.title === 'string' &&
-    typeof r.content === 'string' &&
-    (r.folderId === null || isValidId(r.folderId)) &&
-    isValidDate(r.createdAt) &&
-    isValidDate(r.updatedAt) &&
-    Array.isArray(r.tags) && r.tags.every(t => typeof t === 'string') &&
-    Array.isArray(r.links) && r.links.every(l => typeof l === 'string') &&
-    Array.isArray(r.backlinks) && r.backlinks.every(b => typeof b === 'string')
-  );
-}
-
 interface FinanceRecord {
   id: string;
   type: 'income' | 'expense';
@@ -91,35 +73,12 @@ interface Task {
   dueDate?: string;
 }
 
-interface Folder {
-  id: string;
-  name: string;
-  parentId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  noteCount: number;
-}
-
-interface Note {
-  id: string;
-  title: string;
-  content: string;
-  folderId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  tags: string[];
-  links: string[];
-  backlinks: string[];
-}
-
 const STORAGE_KEYS = {
   finance: 'finance_records',
-  tasks: 'tasks_records',
-  notes: 'notes_records',
-  folders: 'folders_records'
+  tasks: 'tasks_records'
 };
 
-type CollectionType = 'finance' | 'tasks' | 'notes' | 'folders';
+type CollectionType = 'finance' | 'tasks';
 type Listener = (collection: CollectionType) => void;
 
 const listeners = new Set<Listener>();
@@ -153,16 +112,14 @@ function saveToStorage<T>(key: string, records: T[]) {
     console.error('[DB] Failed to save to localStorage:', storageError);
     return;
   }
-  
+
   scheduleSync();
-  
+
   const collectionMap: Record<string, CollectionType> = {
     [STORAGE_KEYS.finance]: 'finance',
-    [STORAGE_KEYS.tasks]: 'tasks',
-    [STORAGE_KEYS.notes]: 'notes',
-    [STORAGE_KEYS.folders]: 'folders'
+    [STORAGE_KEYS.tasks]: 'tasks'
   };
-  
+
   const collection = collectionMap[key];
   if (collection) {
     notifyChange(collection);
@@ -194,8 +151,6 @@ async function performSync(): Promise<SyncResult> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        notes: noteStore.getAll(),
-        folders: folderStore.getAll(),
         tasks: taskStore.getAll(),
         finance: financeStore.getAll()
       })
@@ -212,17 +167,17 @@ async function performSync(): Promise<SyncResult> {
     const err = error instanceof Error ? error : new Error('Unknown sync error');
     lastSyncError = err;
     syncStatus = 'error';
-    
+
     if (syncRetryCount < MAX_RETRY_COUNT) {
       syncRetryCount++;
       const delay = Math.pow(2, syncRetryCount) * 1000;
       setTimeout(performSync, delay);
     }
-    
+
     if (process.env.NODE_ENV !== 'production') {
       console.warn('[DB Sync] Failed to sync data to disk:', err.message);
     }
-    
+
     return { success: false, timestamp: new Date().toISOString(), error: err.message };
   }
 }
@@ -393,14 +348,15 @@ class Transaction {
 
 const transaction = new Transaction();
 
+const financeStore = new Store<FinanceRecord>(STORAGE_KEYS.finance, 'finance', isValidFinanceRecord);
+const taskStore = new Store<Task>(STORAGE_KEYS.tasks, 'tasks', isValidTask);
+
 export async function runInTransaction<T>(fn: () => T | Promise<T>): Promise<T> {
   transaction.begin();
   try {
-    transaction.registerStore(noteStore);
-    transaction.registerStore(folderStore);
     transaction.registerStore(taskStore);
     transaction.registerStore(financeStore);
-    
+
     const result = await fn();
     transaction.commit();
     return result;
@@ -410,13 +366,7 @@ export async function runInTransaction<T>(fn: () => T | Promise<T>): Promise<T> 
   }
 }
 
-const financeStore = new Store<FinanceRecord>(STORAGE_KEYS.finance, 'finance', isValidFinanceRecord);
-const taskStore = new Store<Task>(STORAGE_KEYS.tasks, 'tasks', isValidTask);
-const noteStore = new Store<Note>(STORAGE_KEYS.notes, 'notes', isValidNote);
-const folderStore = new Store<Folder>(STORAGE_KEYS.folders, 'folders', isValidFolder);
-
 export const initDB = async () => {
-  await migrateLinksFromTitleToId(noteStore.getAll());
   return true;
 };
 
@@ -487,314 +437,18 @@ export const taskDB = {
   }
 };
 
-async function migrateLinksFromTitleToId(notes: Note[]): Promise<void> {
-  let needsMigration = false;
-
-  for (const note of notes) {
-    if ((note.links || []).length > 0) {
-      const hasTitleLink = note.links.some(l => l.includes(' ') || l.length < 5);
-      if (hasTitleLink) {
-        needsMigration = true;
-        break;
-      }
-    }
-    if ((note.backlinks || []).length > 0) {
-      const hasTitleBacklink = note.backlinks.some(l => l.includes(' ') || l.length < 5);
-      if (hasTitleBacklink) {
-        needsMigration = true;
-        break;
-      }
-    }
-  }
-  
-  if (!needsMigration) return;
-
-  const titleToId = new Map<string, string>();
-  const idToNote = new Map<string, Note>();
-
-  for (const note of notes) {
-    titleToId.set(note.title, note.id);
-    idToNote.set(note.id, note);
-  }
-
-  const migratedRecords = notes.map(note => {
-    const newLinks: string[] = [];
-    for (const link of (note.links || [])) {
-      if (idToNote.has(link)) {
-        newLinks.push(link);
-      } else if (titleToId.has(link)) {
-        newLinks.push(titleToId.get(link)!);
-      }
-    }
-    
-    const newBacklinks: string[] = [];
-    for (const backlink of (note.backlinks || [])) {
-      if (idToNote.has(backlink)) {
-        newBacklinks.push(backlink);
-      } else if (titleToId.has(backlink)) {
-        newBacklinks.push(titleToId.get(backlink)!);
-      }
-    }
-    
-    return { ...note, links: newLinks, backlinks: newBacklinks };
-  });
-  
-  noteStore.replaceAll(migratedRecords);
-}
-
-let fuseCache: { notes: Note[]; fuse: Fuse<Note> } | null = null;
-
-function getFuseInstance(notes: Note[]): Fuse<Note> {
-  if (fuseCache && fuseCache.notes === notes) {
-    return fuseCache.fuse;
-  }
-  const fuse = new Fuse(notes, {
-    keys: [
-      { name: 'title', weight: 2 },
-      { name: 'content', weight: 1 }
-    ],
-    threshold: 0.4,
-    includeScore: true,
-    minMatchCharLength: 1
-  });
-  fuseCache = { notes, fuse };
-  return fuse;
-}
-
-export const noteDB = {
-  async getAll(): Promise<Note[]> {
-    return noteStore.getAll().sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  },
-
-  async getByFolder(folderId: string | null): Promise<Note[]> {
-    return noteStore.filter(n => n.folderId === folderId).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  },
-
-  async add(record: Omit<Note, 'id'>): Promise<Note> {
-    return runInTransaction(() => {
-      const now = new Date().toISOString();
-      const folderId = record.folderId || null;
-
-      const newNote = noteStore.add({
-        ...record,
-        tags: record.tags || [],
-        links: record.links || [],
-        backlinks: record.backlinks || [],
-        folderId,
-        createdAt: record.createdAt || now,
-        updatedAt: record.updatedAt || now
-      });
-
-      if (folderId) {
-        const folder = folderStore.getById(folderId);
-        if (folder) {
-          folderStore.update(folderId, { noteCount: folder.noteCount + 1 });
-        }
-      }
-
-      fuseCache = null;
-      return newNote;
-    });
-  },
-
-  async update(id: string, updates: Partial<Note>): Promise<void> {
-    if ('folderId' in updates) {
-      return runInTransaction(() => {
-        const note = noteStore.getById(id);
-        if (!note) return;
-
-        const oldFolderId = note.folderId;
-        const newFolderId = updates.folderId || null;
-
-        if (oldFolderId !== newFolderId) {
-          if (oldFolderId) {
-            const oldFolder = folderStore.getById(oldFolderId);
-            if (oldFolder) {
-              folderStore.update(oldFolderId, { noteCount: Math.max(0, oldFolder.noteCount - 1) });
-            }
-          }
-
-          if (newFolderId) {
-            const newFolder = folderStore.getById(newFolderId);
-            if (newFolder) {
-              folderStore.update(newFolderId, { noteCount: newFolder.noteCount + 1 });
-            }
-          }
-        }
-
-        noteStore.update(id, { ...updates, updatedAt: new Date().toISOString() });
-        fuseCache = null;
-      });
-    } else {
-      noteStore.update(id, { ...updates, updatedAt: new Date().toISOString() });
-      fuseCache = null;
-    }
-  },
-
-  async delete(id: string): Promise<void> {
-    return runInTransaction(() => {
-      const note = noteStore.getById(id);
-      if (!note) return;
-
-      const folderId = note.folderId;
-      if (folderId) {
-        const folder = folderStore.getById(folderId);
-        if (folder) {
-          folderStore.update(folderId, { noteCount: Math.max(0, folder.noteCount - 1) });
-        }
-      }
-
-      for (const other of noteStore.filter(n => (n.backlinks || []).includes(id))) {
-        noteStore.update(other.id, {
-          backlinks: (other.backlinks || []).filter(b => b !== id)
-        });
-      }
-
-      noteStore.delete(id);
-      fuseCache = null;
-    });
-  },
-
-  async search(query: string): Promise<Note[]> {
-    if (!query.trim()) return this.getAll();
-
-    const allNotes = noteStore.getAll();
-    const fuse = getFuseInstance(allNotes);
-    return fuse.search(query).map(r => r.item);
-  },
-
-  async updateLinks(noteId: string, links: string[]): Promise<void> {
-    const note = noteStore.getById(noteId);
-    if (!note) return;
-
-    const oldLinks = note.links || [];
-    const removedLinks = oldLinks.filter(l => !links.includes(l));
-    const addedLinks = links.filter(l => !oldLinks.includes(l));
-
-    return runInTransaction(() => {
-      noteStore.update(noteId, { links });
-
-      for (const removedId of removedLinks) {
-        const target = noteStore.getById(removedId);
-        if (target) {
-          noteStore.update(removedId, {
-            backlinks: (target.backlinks || []).filter(b => b !== noteId)
-          });
-        }
-      }
-
-      for (const addedId of addedLinks) {
-        const target = noteStore.getById(addedId);
-        if (target) {
-          noteStore.update(addedId, {
-            backlinks: [...(target.backlinks || []), noteId]
-          });
-        }
-      }
-      fuseCache = null;
-    });
-  },
-
-  async getBacklinks(noteId: string): Promise<Note[]> {
-    return noteStore.filter(n => (n.links || []).includes(noteId));
-  }
-};
-
-type FolderTreeNode = Folder & { children: FolderTreeNode[] };
-
-export const folderDB = {
-  async getAll(): Promise<Folder[]> {
-    return folderStore.getAll().sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  },
-
-  async getByParent(parentId: string | null): Promise<Folder[]> {
-    return folderStore.filter(f => f.parentId === parentId).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  },
-
-  async add(record: Omit<Folder, 'id'>): Promise<Folder> {
-    const now = new Date().toISOString();
-    return folderStore.add({
-      ...record,
-      parentId: record.parentId || null,
-      createdAt: record.createdAt || now,
-      updatedAt: record.updatedAt || now,
-      noteCount: record.noteCount || 0
-    });
-  },
-
-  async update(id: string, updates: Partial<Folder>): Promise<void> {
-    folderStore.update(id, { ...updates, updatedAt: new Date().toISOString() });
-  },
-
-  async delete(id: string): Promise<void> {
-    return runInTransaction(() => {
-      const allFolders = folderStore.getAll();
-      const childMap = new Map<string, string[]>();
-      for (const folder of allFolders) {
-        const key = folder.parentId || '';
-        if (!childMap.has(key)) {
-          childMap.set(key, []);
-        }
-        childMap.get(key)!.push(folder.id);
-      }
-
-      const descendantIds: string[] = [];
-      const stack = [id];
-
-      while (stack.length > 0) {
-        const currentId = stack.pop()!;
-        const children = childMap.get(currentId) || [];
-        for (const childId of children) {
-          descendantIds.push(childId);
-          stack.push(childId);
-        }
-      }
-
-      const allToDelete = new Set([id, ...descendantIds]);
-
-      const allNotes = noteStore.getAll();
-      const updatedNotes = allNotes.map(n => {
-        if (allToDelete.has(n.folderId || '')) {
-          return { ...n, folderId: null };
-        }
-        return n;
-      });
-      const updatedFolders = allFolders.filter(f => !allToDelete.has(f.id));
-
-      folderStore.replaceAll(updatedFolders);
-      noteStore.replaceAll(updatedNotes);
-    });
-  },
-
-  async getTree(): Promise<FolderTreeNode[]> {
-    const allFolders = folderStore.getAll();
-    const folderMap = new Map<string, FolderTreeNode>();
-    const roots: FolderTreeNode[] = [];
-
-    for (const f of allFolders) {
-      folderMap.set(f.id, { ...f, children: [] });
-    }
-
-    for (const node of folderMap.values()) {
-      if (node.parentId && folderMap.has(node.parentId)) {
-        folderMap.get(node.parentId)!.children.push(node);
-      } else {
-        roots.push(node);
-      }
-    }
-
-    return roots;
-  }
-};
-
 export const dataManager = {
   exportAll(): string {
     const data = {
-      version: 1,
+      version: 2,
       finance: financeStore.getAll(),
       tasks: taskStore.getAll(),
-      notes: noteStore.getAll(),
-      folders: folderStore.getAll(),
+      userSettings: {
+        profile: localStorage.getItem('user_profile'),
+        theme: localStorage.getItem('theme'),
+        notificationSettings: localStorage.getItem('notification_settings'),
+        securityPin: localStorage.getItem('security_pin_hashed'),
+      },
       exportTime: new Date().toISOString()
     };
     return JSON.stringify(data, null, 2);
@@ -805,36 +459,37 @@ export const dataManager = {
       const data = JSON.parse(jsonString);
       const validators = {
         finance: isValidFinanceRecord,
-        tasks: isValidTask,
-        notes: isValidNote,
-        folders: isValidFolder
+        tasks: isValidTask
       };
       const stores = {
         finance: financeStore,
-        tasks: taskStore,
-        notes: noteStore,
-        folders: folderStore
+        tasks: taskStore
       };
 
-      for (const key of ['finance', 'tasks', 'notes', 'folders'] as const) {
+      for (const key of ['finance', 'tasks'] as const) {
         if (key in data) {
           if (!Array.isArray(data[key])) return false;
-          
-          let processedRecords = data[key];
-          
-          if (key === 'folders') {
-            processedRecords = data[key].map((folder: any) => ({
-              ...folder,
-              noteCount: folder.noteCount || 0
-            }));
-          }
-          
-          const validRecords = processedRecords.filter(validators[key]);
-          if (validRecords.length !== processedRecords.length) return false;
+          const validRecords = data[key].filter(validators[key]);
+          if (validRecords.length !== data[key].length) return false;
           stores[key].replaceAll(validRecords);
         }
       }
-      migrateLinksFromTitleToId(noteStore.getAll());
+
+      if (data.userSettings) {
+        if (data.userSettings.profile) {
+          localStorage.setItem('user_profile', data.userSettings.profile);
+        }
+        if (data.userSettings.theme) {
+          localStorage.setItem('theme', data.userSettings.theme);
+        }
+        if (data.userSettings.notificationSettings) {
+          localStorage.setItem('notification_settings', data.userSettings.notificationSettings);
+        }
+        if (data.userSettings.securityPin) {
+          localStorage.setItem('security_pin_hashed', data.userSettings.securityPin);
+        }
+      }
+
       return true;
     } catch {
       return false;
@@ -844,21 +499,19 @@ export const dataManager = {
   clearAll(): void {
     financeStore.replaceAll([]);
     taskStore.replaceAll([]);
-    noteStore.replaceAll([]);
-    folderStore.replaceAll([]);
+    localStorage.removeItem('user_profile');
+    localStorage.removeItem('theme');
+    localStorage.removeItem('notification_settings');
+    localStorage.removeItem('security_pin_hashed');
   },
 
   getStats() {
     return {
       finance: financeStore.length,
       tasks: taskStore.length,
-      notes: noteStore.length,
-      folders: folderStore.length,
       totalSize: JSON.stringify({
         finance: financeStore.getAll(),
-        tasks: taskStore.getAll(),
-        notes: noteStore.getAll(),
-        folders: folderStore.getAll()
+        tasks: taskStore.getAll()
       }).length
     };
   },
@@ -884,7 +537,8 @@ export const dataManager = {
   }
 };
 
-export type { FinanceRecord, Task, Note, Folder, FolderTreeNode };
+export type { FinanceRecord, Task };
+export { hashPin };
 
 export function createUseDB(React: typeof import('react')) {
   return function useDB<T>(

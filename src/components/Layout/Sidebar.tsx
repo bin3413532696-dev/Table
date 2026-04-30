@@ -1,12 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Home, CheckSquare, FileText, Calendar, Settings, Wallet } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X } from 'lucide-react';
 
 const menuItems = [
   { path: '/dashboard', icon: Home, label: '首页' },
   { path: '/tasks', icon: CheckSquare, label: '任务' },
-  { path: '/notes', icon: FileText, label: '笔记' },
   { path: '/finance', icon: Wallet, label: '费用统计' },
   { path: '/tools', icon: Calendar, label: '工具' },
   { path: '/settings', icon: Settings, label: '设置' },
@@ -14,81 +13,136 @@ const menuItems = [
 
 export const Sidebar: React.FC = () => {
   const location = useLocation();
+  const [collapsed, setCollapsed] = useState(false);
+  const [profile, setProfile] = useState({ name: '个人用户', bio: '' });
+
+  useEffect(() => {
+    const savedProfile = localStorage.getItem('user_profile');
+    if (savedProfile) {
+      try {
+        const parsed = JSON.parse(savedProfile);
+        setProfile({ name: parsed.name || '个人用户', bio: parsed.bio || '' });
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  // 监听窗口大小，移动端自动折叠
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setCollapsed(true);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
-    <aside className="w-64 h-screen flex flex-col fixed left-0 top-0 z-50 bg-[#18181B]">
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="p-6 border-b border-[#3F3F46]/50"
-      >
-        <h1 className="text-xl font-bold flex items-center gap-3 text-white">
+    <>
+      {/* 移动端遮罩层 */}
+      <AnimatePresence>
+        {!collapsed && (
           <motion.div
-            whileHover={{ scale: 1.05, rotate: 5 }}
-            className="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center"
-          >
-            <span className="text-white font-bold text-lg">W</span>
-          </motion.div>
-          <span className="tracking-tight">工作站</span>
-        </h1>
-      </motion.div>
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 z-40 md:hidden"
+            onClick={() => setCollapsed(true)}
+          />
+        )}
+      </AnimatePresence>
 
-      <nav className="flex-1 p-4 space-y-1">
-        {menuItems.map((item, index) => {
-          const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
-          return (
-            <motion.div
-              key={item.path}
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: index * 0.05 }}
-            >
-              <NavLink
-                to={item.path}
-                className="relative flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group"
-              >
-                {isActive && (
-                  <motion.div
-                    layoutId="activeTab"
-                    className="absolute inset-0 bg-gray-700 rounded-lg"
-                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                  />
-                )}
-                <span className={`relative z-10 transition-colors duration-200 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'}`}>
-                  <item.icon size={20} />
-                </span>
-                <span className={`relative z-10 font-medium transition-colors duration-200 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'}`}>
-                  {item.label}
-                </span>
-                {!isActive && (
-                  <motion.div
-                    className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-colors duration-200 bg-[#3F3F46]/50"
-                    transition={{ duration: 0.2 }}
-                  />
-                )}
-              </NavLink>
-            </motion.div>
-          );
-        })}
-      </nav>
-
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-        className="p-4 border-t border-[#3F3F46]/50"
+      {/* 移动端折叠按钮 */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="fixed top-4 left-4 z-50 p-2 rounded-lg bg-bg-card border border-border-primary shadow-sm md:hidden"
       >
-        <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[#3F3F46]/30">
-          <div className="w-9 h-9 bg-gray-600 rounded-full flex items-center justify-center">
-            <span className="text-sm font-medium text-white">我</span>
+        {collapsed ? <Menu size={20} className="text-text-primary" /> : <X size={20} className="text-text-primary" />}
+      </button>
+
+      <motion.aside
+        animate={{ width: collapsed ? 0 : 256, x: collapsed ? -256 : 0 }}
+        transition={{ duration: 0.2 }}
+        className="h-screen flex flex-col fixed left-0 top-0 z-50 bg-[#18181B] overflow-hidden"
+        style={{ minWidth: collapsed ? 0 : 256 }}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="p-6 border-b border-[#3F3F46]/50"
+        >
+          <h1 className="text-xl font-bold flex items-center gap-3 text-white">
+            <motion.div
+              whileHover={{ scale: 1.05, rotate: 5 }}
+              className="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center"
+            >
+              <span className="text-white font-bold text-lg">W</span>
+            </motion.div>
+            <span className="tracking-tight">工作站</span>
+          </h1>
+        </motion.div>
+
+        <nav className="flex-1 p-4 space-y-1">
+          {menuItems.map((item, index) => {
+            const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+            return (
+              <motion.div
+                key={item.path}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
+              >
+                <NavLink
+                  to={item.path}
+                  onClick={() => window.innerWidth < 768 && setCollapsed(true)}
+                  className="relative flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group"
+                >
+                  {isActive && (
+                    <motion.div
+                      layoutId="activeTab"
+                      className="absolute inset-0 bg-gray-700 rounded-lg"
+                      transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                    />
+                  )}
+                  <span className={`relative z-10 transition-colors duration-200 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'}`}>
+                    <item.icon size={20} />
+                  </span>
+                  <span className={`relative z-10 font-medium transition-colors duration-200 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'}`}>
+                    {item.label}
+                  </span>
+                  {!isActive && (
+                    <motion.div
+                      className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-colors duration-200 bg-[#3F3F46]/50"
+                      transition={{ duration: 0.2 }}
+                    />
+                  )}
+                </NavLink>
+              </motion.div>
+            );
+          })}
+        </nav>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="p-4 border-t border-[#3F3F46]/50"
+        >
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[#3F3F46]/30">
+            <div className="w-9 h-9 bg-gray-600 rounded-full flex items-center justify-center">
+              <span className="text-sm font-medium text-white">{profile.name.charAt(0)}</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate text-white">{profile.name}</p>
+              <p className="text-xs truncate text-gray-500">{profile.bio || '在线'}</p>
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate text-white">个人用户</p>
-            <p className="text-xs truncate text-gray-500">在线</p>
-          </div>
-        </div>
-      </motion.div>
-    </aside>
+        </motion.div>
+      </motion.aside>
+    </>
   );
 };

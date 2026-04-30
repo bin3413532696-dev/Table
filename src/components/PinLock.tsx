@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, AlertCircle } from 'lucide-react';
+import { verifyPin } from '../db';
 
 interface PinLockProps {
   onSuccess: () => void;
@@ -22,12 +23,18 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
     }
   }, [attempts]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (disabled) return;
 
-    const savedPin = localStorage.getItem('security_pin');
-    if (pin === savedPin) {
+    const hashedPin = localStorage.getItem('security_pin_hashed');
+    if (!hashedPin) {
+      onSuccess();
+      return;
+    }
+
+    const isValid = await verifyPin(pin, hashedPin);
+    if (isValid) {
       onSuccess();
     } else {
       setError(true);
@@ -48,11 +55,11 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-bg-secondary">
+    <div className="min-h-screen flex items-center justify-center bg-bg-secondary p-4">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-md p-8"
+        className="w-full max-w-md p-4 md:p-8"
       >
         <div className="bg-bg-card rounded-2xl p-8 shadow-xl border border-border-primary">
           <div className="text-center mb-8">
@@ -130,7 +137,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
 
           <button
             onClick={() => {
-              localStorage.removeItem('security_pin');
+              localStorage.removeItem('security_pin_hashed');
               onSuccess();
             }}
             className="w-full mt-6 text-center text-sm text-text-muted hover:text-text-secondary transition-colors"

@@ -2,11 +2,11 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, CheckSquare, FileText, Wallet,
-  TrendingUp, TrendingDown, ArrowRight, Clock,
+  LayoutDashboard, CheckSquare, Wallet,
+  TrendingUp, TrendingDown, ArrowRight,
   Calendar, AlertCircle, Zap
 } from 'lucide-react';
-import { financeDB, taskDB, noteDB, Note, Task, createUseDB } from '../../db';
+import { financeDB, taskDB, Task, createUseDB } from '../../db';
 import Loading from '../../components/Loading';
 import { Button, EmptyState } from '../../components/ui';
 
@@ -29,18 +29,16 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   const { data, loading } = useDB(async () => {
-    const [taskStats, notes, financeStats, tasks] = await Promise.all([
+    const [taskStats, financeStats, tasks] = await Promise.all([
       taskDB.getStats(),
-      noteDB.getAll(),
       financeDB.getStats(),
       taskDB.getAll()
     ]);
-    return { taskStats, notes, financeStats, tasks };
-  }, ['tasks', 'notes', 'finance']);
+    return { taskStats, financeStats, tasks };
+  }, ['tasks', 'finance']);
 
-  const { taskStats, notes, financeStats, tasks } = data ?? { taskStats: { total: 0, completed: 0, pending: 0 }, notes: [], financeStats: { income: 0, expense: 0, profit: 0 }, tasks: [] };
+  const { taskStats, financeStats, tasks } = data ?? { taskStats: { total: 0, completed: 0, pending: 0 }, financeStats: { income: 0, expense: 0, profit: 0 }, tasks: [] };
 
-  const recentNotes = notes.slice(0, 3);
   const pendingTasks = tasks.filter((t: Task) => !t.completed).slice(0, 3);
 
   const quickActions = [
@@ -53,16 +51,6 @@ export default function Dashboard() {
       borderColor: 'border-primary-200 dark:border-primary-800',
       textColor: 'text-primary dark:text-primary-400',
       path: '/tasks'
-    },
-    {
-      icon: FileText,
-      label: '笔记',
-      count: notes.length,
-      color: 'bg-gray-600 dark:bg-gray-400',
-      bgColor: 'bg-bg-secondary',
-      borderColor: 'border-border-primary',
-      textColor: 'text-text-secondary',
-      path: '/notes'
     },
     {
       icon: Wallet,
@@ -93,19 +81,19 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto min-h-screen bg-bg-secondary">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-screen bg-bg-secondary">
       <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="mb-8"
+          className="mb-6 md:mb-8"
         >
           <div className="flex items-center gap-3 mb-2">
             <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
               <LayoutDashboard className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-text-primary">个人工作台</h1>
+              <h1 className="text-xl md:text-2xl font-bold text-text-primary">个人工作台</h1>
               <p className="text-sm text-text-muted">
                 {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
               </p>
@@ -117,7 +105,7 @@ export default function Dashboard() {
         variants={containerVariants}
         initial="hidden"
         animate="visible"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5 mb-6 md:mb-8"
       >
         {quickActions.map((action) => (
           <motion.div
@@ -140,12 +128,12 @@ export default function Dashboard() {
         ))}
       </motion.div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
-          className="lg:col-span-2 rounded-2xl p-6 shadow-sm border bg-bg-card border-border-primary"
+          className="rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm border bg-bg-card border-border-primary"
         >
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
@@ -196,96 +184,45 @@ export default function Dashboard() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="rounded-2xl p-6 shadow-sm border bg-bg-card border-border-primary"
+          transition={{ delay: 0.5 }}
+          className="rounded-xl md:rounded-2xl p-4 md:p-6 text-text-primary shadow-sm border bg-bg-card"
         >
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-violet-100 dark:bg-violet-900/30">
-                <Zap className="w-4 h-4 text-violet-600 dark:text-violet-300" />
-              </div>
-              <h2 className="text-lg font-bold text-text-primary">最近笔记</h2>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold mb-1">费用概览</h3>
+              <p className="text-sm text-text-muted">本月收支情况</p>
             </div>
-            <button
-              onClick={() => navigate('/notes')}
-              className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium flex items-center gap-1 group"
-            >
-              查看全部
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </button>
-          </div>
-
-          {recentNotes.length > 0 ? (
-            <div className="space-y-3">
-              {recentNotes.map((note, index) => (
-                <motion.div
-                  key={note.id}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.5 + index * 0.1 }}
-                  onClick={() => navigate('/notes')}
-                  className="p-4 rounded-xl transition-colors duration-150 cursor-pointer border border-border-primary hover:bg-bg-tertiary hover:shadow-sm"
-                >
-                  <h3 className="font-medium mb-1 truncate text-text-primary">{note.title}</h3>
-                  <p className="text-sm line-clamp-2 text-text-muted">{note.content || '无内容'}</p>
-                  <div className="flex items-center gap-1 text-xs mt-2 text-text-muted">
-                    <Clock className="w-3 h-3" />
-                    {new Date(note.updatedAt).toLocaleDateString()}
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              icon={FileText}
-              title="暂无笔记"
-              action={{ label: '新建笔记', onClick: () => navigate('/notes') }}
-            />
-          )}
-        </motion.div>
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
-        className="mt-8 rounded-2xl p-6 text-text-primary shadow-sm border bg-bg-card"
-      >
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-bold mb-1">费用概览</h3>
-            <p className="text-sm text-text-muted">本月收支情况</p>
-          </div>
-          <Button variant="primary" onClick={() => navigate('/finance')}>
+            <Button variant="primary" onClick={() => navigate('/finance')}>
               查看详情
             </Button>
-        </div>
-        <div className="grid grid-cols-3 gap-4 mt-6">
-          <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
-            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-300 mb-1">
-              <TrendingUp className="w-4 h-4" />
-              <span className="text-sm">收入</span>
-            </div>
-            <p className="text-xl font-bold">¥{financeStats.income.toLocaleString()}</p>
           </div>
-          <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
-            <div className="flex items-center gap-2 text-rose-600 dark:text-rose-300 mb-1">
-              <TrendingDown className="w-4 h-4" />
-              <span className="text-sm">支出</span>
+          <div className="grid grid-cols-3 gap-4 mt-6">
+            <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-300 mb-1">
+                <TrendingUp className="w-4 h-4" />
+                <span className="text-sm">收入</span>
+              </div>
+              <p className="text-xl font-bold">¥{financeStats.income.toLocaleString()}</p>
             </div>
-            <p className="text-xl font-bold">¥{financeStats.expense.toLocaleString()}</p>
-          </div>
-          <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
-            <div className="flex items-center gap-2 text-text-muted mb-1">
-              <Wallet className="w-4 h-4" />
-              <span className="text-sm">净收益</span>
+            <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-300 mb-1">
+                <TrendingDown className="w-4 h-4" />
+                <span className="text-sm">支出</span>
+              </div>
+              <p className="text-xl font-bold">¥{financeStats.expense.toLocaleString()}</p>
             </div>
-            <p className={`text-xl font-bold ${financeStats.profit >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300'}`}>
-              ¥{financeStats.profit.toLocaleString()}
-            </p>
+            <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
+              <div className="flex items-center gap-2 text-text-muted mb-1">
+                <Wallet className="w-4 h-4" />
+                <span className="text-sm">净收益</span>
+              </div>
+              <p className={`text-xl font-bold ${financeStats.profit >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300'}`}>
+                ¥{financeStats.profit.toLocaleString()}
+              </p>
+            </div>
           </div>
-        </div>
-      </motion.div>
+        </motion.div>
+      </div>
     </div>
   );
 }

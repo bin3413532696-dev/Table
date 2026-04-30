@@ -288,15 +288,15 @@ export default function Finance() {
   );
 
   return (
-    <div className="p-8 max-w-7xl mx-auto min-h-screen bg-bg-secondary">
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-        <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-screen bg-bg-secondary">
+      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 md:mb-8">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-lg flex items-center justify-center">
               <Wallet className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-text-primary">费用统计</h1>
+              <h1 className="text-xl md:text-2xl font-bold text-text-primary">费用统计</h1>
               <p className="text-sm text-text-muted">大模型API投入与收入统计</p>
             </div>
           </div>
@@ -307,7 +307,7 @@ export default function Finance() {
         </div>
       </motion.div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5 mb-6 md:mb-8">
         {[
           { label: '总收入', value: stats.income, icon: TrendingUp, color: 'emerald', prefix: '¥' },
           { label: '总支出', value: stats.expense, icon: TrendingDown, color: 'rose', prefix: '¥' },
@@ -335,13 +335,13 @@ export default function Finance() {
       </motion.div>
 
       {records.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-8">
-          <div className="rounded-xl shadow-sm border p-5 bg-bg-card border-border-primary">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5 mb-6 md:mb-8">
+          <div className="rounded-xl shadow-sm border p-4 md:p-5 bg-bg-card border-border-primary">
             <div className="flex items-center gap-2 mb-4">
               <BarChart3 className="w-5 h-5 text-text-secondary" />
               <h2 className="text-base font-semibold text-text-primary">月度收支趋势</h2>
             </div>
-            <div className="h-56">
+            <div className="h-48 md:h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={monthlyTrend}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-primary)" />
@@ -354,12 +354,12 @@ export default function Finance() {
               </ResponsiveContainer>
             </div>
           </div>
-          <div className="rounded-xl shadow-sm border p-5 bg-bg-card border-border-primary">
+          <div className="rounded-xl shadow-sm border p-4 md:p-5 bg-bg-card border-border-primary">
             <div className="flex items-center gap-2 mb-4">
               <PieChart className="w-5 h-5 text-text-secondary" />
               <h2 className="text-base font-semibold text-text-primary">模型费用占比</h2>
             </div>
-            <div className="h-56">
+            <div className="h-48 md:h-56">
               {modelPieData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <RechartsPie>
@@ -378,7 +378,7 @@ export default function Finance() {
         </motion.div>
       )}
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-5">
         <div className="lg:col-span-2 rounded-xl shadow-sm border bg-bg-card border-border-primary">
           <div className="p-5 border-b border-border-primary">
             <div className="flex items-center justify-between mb-4">
