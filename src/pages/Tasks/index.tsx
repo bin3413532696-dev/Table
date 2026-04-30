@@ -5,26 +5,19 @@ import { taskDB, Task, createUseDB } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
 import { Button, EmptyState } from '../../components/ui';
+import { TaskItem, PriorityButtonGroup } from './components';
 
 type FilterType = 'all' | 'pending' | 'completed';
 type SortType = 'created' | 'priority' | 'dueDate' | 'title';
-type PriorityType = 'low' | 'medium' | 'high';
+export type PriorityType = 'low' | 'medium' | 'high';
 
 const MAX_TITLE_LENGTH = 100;
 const useDB = createUseDB(React);
-
-// 优先级配置
-const PRIORITY_CONFIG: Record<PriorityType, { label: string; color: string; bgColor: string; icon: React.ElementType }> = {
-  high: { label: '高', color: 'text-error', bgColor: 'bg-error', icon: AlertTriangle },
-  medium: { label: '中', color: 'text-warning', bgColor: 'bg-warning', icon: AlertCircle },
-  low: { label: '低', color: 'text-success', bgColor: 'bg-success', icon: CheckCircle },
-};
 
 const Tasks: React.FC = () => {
   const { data: tasksData, loading } = useDB(() => taskDB.getAll(), ['tasks']);
   const tasks = tasksData ?? [];
 
-  // 状态
   const [newTask, setNewTask] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<PriorityType>('medium');
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
@@ -42,14 +35,12 @@ const Tasks: React.FC = () => {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // 统计
   const stats = useMemo(() => ({
     total: tasks.length,
     completed: tasks.filter(t => t.completed).length,
     pending: tasks.filter(t => !t.completed).length,
   }), [tasks]);
 
-  // 筛选和排序
   const filteredTasks = useMemo(() => {
     let result = tasks;
     if (searchQuery.trim()) {
@@ -81,7 +72,6 @@ const Tasks: React.FC = () => {
     }
   }, [filteredTasks, sortType]);
 
-  // 操作
   const addTask = useCallback(async () => {
     const trimmedTitle = newTask.trim().slice(0, MAX_TITLE_LENGTH);
     if (!trimmedTitle) return;
@@ -160,162 +150,10 @@ const Tasks: React.FC = () => {
     }
   }, [selectedIds.size, sortedTasks]);
 
-  // 辅助函数
-  const isOverdue = (dueDate?: string, completed?: boolean) => {
-    if (!dueDate || completed) return false;
-    const now = new Date();
-    const due = new Date(dueDate);
-    return due < new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  };
-
-  const getOverdueDays = (dueDate?: string) => {
-    if (!dueDate) return 0;
-    const now = new Date();
-    const due = new Date(dueDate);
-    return Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
-  };
-
   const isAllSelected = selectedIds.size === sortedTasks.length && sortedTasks.length > 0;
 
   if (loading) return <Loading />;
 
-  // 优先级按钮组件
-  const PriorityButton: React.FC<{ priority: PriorityType; selected: boolean; onClick: () => void; size?: 'sm' | 'md' }> = ({ priority, selected, onClick, size = 'md' }) => {
-    const config = PRIORITY_CONFIG[priority];
-    const sizeClass = size === 'sm' ? 'px-2 py-1 text-xs' : 'px-3 py-2 text-sm';
-    return (
-      <button
-        onClick={onClick}
-        className={`${sizeClass} rounded font-medium transition-all duration-150 flex items-center gap-1 ${
-          selected
-            ? `${config.bgColor} text-white shadow-sm`
-            : 'bg-bg-secondary text-text-secondary hover:bg-bg-tertiary border border-border-primary'
-        }`}
-      >
-        <config.icon size={size === 'sm' ? 12 : 14} />
-        {config.label}
-      </button>
-    );
-  };
-
-  // 任务项组件
-  const TaskItem: React.FC<{ task: Task; index?: number }> = ({ task, index }) => {
-    const config = PRIORITY_CONFIG[task.priority];
-    const overdue = isOverdue(task.dueDate, task.completed);
-
-    return (
-      <motion.div
-        layout
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -10 }}
-        transition={index !== undefined ? { delay: index * 0.02 } : undefined}
-        className={`group relative flex items-center gap-4 p-4 rounded-lg border transition-all duration-150 ${
-          task.completed
-            ? 'bg-bg-secondary/50 border-border-primary'
-            : 'bg-bg-card border-border-primary hover:border-primary/30 hover:shadow-card'
-        }`}
-      >
-        {/* 左侧指示条 */}
-        <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l ${overdue ? 'bg-error' : config.bgColor}`} />
-
-        {/* 批量选择复选框 */}
-        {showBatchActions && (
-          <input
-            type="checkbox"
-            checked={selectedIds.has(task.id)}
-            onChange={() => toggleSelect(task.id)}
-            className="w-4 h-4 rounded border-border-primary accent-primary"
-          />
-        )}
-
-        {/* 完成状态按钮 */}
-        <button
-          onClick={() => toggleTask(task.id)}
-          className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
-            task.completed
-              ? 'bg-success text-white'
-              : 'border-2 border-border-secondary hover:border-primary'
-          }`}
-        >
-          {task.completed && <CheckCircle size={14} />}
-        </button>
-
-        {/* 内容区域 */}
-        <div className="flex-1 min-w-0">
-          {editingId === task.id ? (
-            <div className="space-y-3">
-              <input
-                type="text"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value.slice(0, MAX_TITLE_LENGTH))}
-                onKeyDown={(e) => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditingId(null); }}
-                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-primary"
-                autoFocus
-              />
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  {(['low', 'medium', 'high'] as const).map(p => (
-                    <PriorityButton key={p} priority={p} selected={editPriority === p} onClick={() => setEditPriority(p)} size="sm" />
-                  ))}
-                </div>
-                <input
-                  type="date"
-                  value={editDueDate}
-                  onChange={(e) => setEditDueDate(e.target.value)}
-                  className="px-2 py-1 border rounded text-sm bg-bg-card border-border-primary text-text-secondary"
-                />
-                <Button variant="primary" size="sm" onClick={saveEdit}>保存</Button>
-                <Button variant="ghost" size="sm" onClick={() => setEditingId(null)}>取消</Button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <p className={`font-medium ${task.completed ? 'text-text-muted line-through' : 'text-text-primary'}`}>
-                {task.title}
-              </p>
-              <div className="flex items-center gap-2 mt-1.5">
-                <span className="flex items-center gap-1 text-xs text-text-muted">
-                  <Calendar size={12} />
-                  {new Date(task.createdAt).toLocaleDateString()}
-                </span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${config.bgColor}/10 ${config.color} border border-current/20`}>
-                  {config.label}
-                </span>
-                {task.dueDate && (
-                  <span className={`flex items-center gap-1 text-xs ${overdue ? 'text-error font-medium' : 'text-text-muted'}`}>
-                    <Clock size={12} />
-                    {new Date(task.dueDate).toLocaleDateString()}
-                    {overdue && <span className="text-error">(逾期{getOverdueDays(task.dueDate)}天)</span>}
-                  </span>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* 操作按钮 */}
-        {editingId !== task.id && (
-          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={() => startEdit(task)}
-              className="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-colors"
-            >
-              <Edit2 size={16} />
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(task.id)}
-              className="p-2 rounded-lg text-text-muted hover:text-error hover:bg-error/10 transition-colors"
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
-        )}
-      </motion.div>
-    );
-  };
-
-  // 筛选按钮配置
   const filterButtons: { key: FilterType; label: string; icon: React.ElementType }[] = [
     { key: 'all', label: '全部', icon: ListTodo },
     { key: 'pending', label: '待办', icon: AlertCircle },
@@ -335,9 +173,30 @@ const Tasks: React.FC = () => {
     return stats.completed;
   };
 
+  const renderTaskItem = (task: Task, index?: number) => (
+    <TaskItem
+      task={task}
+      editingId={editingId}
+      editTitle={editTitle}
+      editPriority={editPriority}
+      editDueDate={editDueDate}
+      selectedIds={selectedIds}
+      showBatchActions={showBatchActions}
+      onToggle={toggleTask}
+      onDelete={(id) => setShowDeleteConfirm(id)}
+      onStartEdit={startEdit}
+      onSaveEdit={saveEdit}
+      onCancelEdit={() => setEditingId(null)}
+      onTitleChange={setEditTitle}
+      onPriorityChange={setEditPriority}
+      onDueDateChange={setEditDueDate}
+      onToggleSelect={toggleSelect}
+      index={index}
+    />
+  );
+
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
-      {/* 页面标题 */}
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 md:mb-8">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
@@ -348,7 +207,6 @@ const Tasks: React.FC = () => {
         <p className="text-sm text-text-muted ml-13">高效管理你的日常任务</p>
       </motion.div>
 
-      {/* 统计卡片 */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-3 gap-3 md:gap-4 mb-6">
         <div className="rounded-lg p-4 bg-bg-card border border-border-primary">
           <div className="flex items-center gap-2 mb-2">
@@ -373,7 +231,6 @@ const Tasks: React.FC = () => {
         </div>
       </motion.div>
 
-      {/* 添加任务表单 */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg shadow-card border p-4 md:p-5 mb-6 bg-bg-card border-border-primary">
         <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
           <input
@@ -384,11 +241,7 @@ const Tasks: React.FC = () => {
             placeholder="输入任务内容..."
             className="flex-1 px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-bg-secondary border-border-primary text-text-primary placeholder-text-muted"
           />
-          <div className="flex gap-1 justify-center">
-            {(['low', 'medium', 'high'] as const).map(p => (
-              <PriorityButton key={p} priority={p} selected={newTaskPriority === p} onClick={() => setNewTaskPriority(p)} />
-            ))}
-          </div>
+          <PriorityButtonGroup selected={newTaskPriority} onChange={setNewTaskPriority} />
           <input
             type="date"
             value={newTaskDueDate}
@@ -402,10 +255,8 @@ const Tasks: React.FC = () => {
         )}
       </motion.div>
 
-      {/* 工具栏 */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
-          {/* 批量操作模式 */}
           {selectedIds.size > 0 ? (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30">
               <span className="text-sm text-primary font-medium">已选 {selectedIds.size} 项</span>
@@ -416,7 +267,6 @@ const Tasks: React.FC = () => {
             </div>
           ) : (
             <>
-              {/* 搜索框 */}
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
                 <input
@@ -436,7 +286,6 @@ const Tasks: React.FC = () => {
                   </button>
                 )}
               </div>
-              {/* 批量模式切换 */}
               {sortedTasks.length > 0 && (
                 <Button
                   variant={showBatchActions ? 'primary' : 'ghost'}
@@ -451,9 +300,7 @@ const Tasks: React.FC = () => {
           )}
         </div>
 
-        {/* 排序和筛选 */}
         <div className="flex items-center gap-2">
-          {/* 排序 */}
           <div className="relative">
             <button
               onClick={() => setShowSortMenu(!showSortMenu)}
@@ -488,7 +335,6 @@ const Tasks: React.FC = () => {
             </AnimatePresence>
           </div>
 
-          {/* 筛选按钮 */}
           {filterButtons.map(btn => (
             <button
               key={btn.key}
@@ -509,7 +355,6 @@ const Tasks: React.FC = () => {
         </div>
       </div>
 
-      {/* 任务列表 */}
       <div className="space-y-2">
         {sortedTasks.length === 0 ? (
           tasks.length === 0 ? (
@@ -522,7 +367,7 @@ const Tasks: React.FC = () => {
             />
           )
         ) : sortedTasks.length > 20 ? (
-          <VirtualList<Task> items={sortedTasks} itemHeight={72} containerHeight={480} renderItem={(task) => <TaskItem task={task} />} />
+          <VirtualList<Task> items={sortedTasks} itemHeight={72} containerHeight={480} renderItem={renderTaskItem} />
         ) : (
           <>
             {showBatchActions && (
@@ -537,13 +382,12 @@ const Tasks: React.FC = () => {
               </div>
             )}
             <AnimatePresence mode="popLayout">
-              {sortedTasks.map((task, index) => <TaskItem key={task.id} task={task} index={index} />)}
+              {sortedTasks.map((task, index) => renderTaskItem(task, index))}
             </AnimatePresence>
           </>
         )}
       </div>
 
-      {/* 删除确认弹窗 */}
       <AnimatePresence>
         {showDeleteConfirm && (
           <motion.div

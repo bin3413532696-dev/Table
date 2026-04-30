@@ -96,7 +96,8 @@ function loadFromStorage<T>(key: string): T[] {
   try {
     const data = localStorage.getItem(key);
     return data ? JSON.parse(data) : [];
-  } catch {
+  } catch (error) {
+    console.warn('[DB] Failed to load from localStorage, returning empty array:', error);
     return [];
   }
 }
@@ -491,7 +492,8 @@ export const dataManager = {
       }
 
       return true;
-    } catch {
+    } catch (error) {
+      console.error('[DB] Import failed:', error);
       return false;
     }
   },

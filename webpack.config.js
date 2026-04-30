@@ -11,70 +11,17 @@ function sanitizeFileName(name) {
 
 function writeSyncData(data) {
   // 确保目录存在
-  const dirs = ['notes', 'tasks', 'finance', 'folders'].map(d => path.join(DATA_DIR, d));
+  const dirs = ['tasks', 'finance'].map(d => path.join(DATA_DIR, d));
   dirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
-  // 1. 笔记 → .md 文件（按文件夹分组）
-  if (Array.isArray(data.notes)) {
-    // 清空 notes 目录下所有内容
-    const notesDir = path.join(DATA_DIR, 'notes');
-    if (fs.existsSync(notesDir)) {
-      fs.readdirSync(notesDir).forEach(entry => {
-        const entryPath = path.join(notesDir, entry);
-        if (fs.statSync(entryPath).isDirectory()) {
-          fs.rmSync(entryPath, { recursive: true, force: true });
-        } else {
-          fs.unlinkSync(entryPath);
-        }
-      });
-    }
-
-    // 建立文件夹映射
-    const folderMap = {};
-    if (Array.isArray(data.folders)) {
-      data.folders.forEach(f => { folderMap[f.id] = f.name; });
-    }
-
-    data.notes.forEach(note => {
-      let noteDir = notesDir;
-      if (note.folderId && folderMap[note.folderId]) {
-        const folderName = sanitizeFileName(folderMap[note.folderId]);
-        noteDir = path.join(notesDir, folderName);
-        if (!fs.existsSync(noteDir)) fs.mkdirSync(noteDir, { recursive: true });
-      }
-
-      const tags = note.tags?.length
-        ? `tags: [${note.tags.map(t => `"${t}"`).join(', ')}]`
-        : 'tags: []';
-
-      const frontMatter = `---
-title: "${note.title || '未命名'}"
-created: ${note.createdAt || ''}
-updated: ${note.updatedAt || ''}
-${tags}
----
-
-`;
-
-      const content = frontMatter + (note.content || '');
-      const fileName = sanitizeFileName(note.title || '未命名') + '.md';
-      fs.writeFileSync(path.join(noteDir, fileName), content, 'utf-8');
-    });
-  }
-
-  // 2. 任务 → JSON
+  // 1. 任务 → JSON
   if (Array.isArray(data.tasks)) {
     fs.writeFileSync(path.join(DATA_DIR, 'tasks', 'tasks.json'), JSON.stringify(data.tasks, null, 2), 'utf-8');
   }
 
-  // 3. 财务 → JSON
+  // 2. 财务 → JSON
   if (Array.isArray(data.finance)) {
     fs.writeFileSync(path.join(DATA_DIR, 'finance', 'finance.json'), JSON.stringify(data.finance, null, 2), 'utf-8');
-  }
-
-  // 4. 文件夹 → JSON
-  if (Array.isArray(data.folders)) {
-    fs.writeFileSync(path.join(DATA_DIR, 'folders', 'folders.json'), JSON.stringify(data.folders, null, 2), 'utf-8');
   }
 }
 

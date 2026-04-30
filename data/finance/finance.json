@@ -1,6 +1,24 @@
 [
   {
     "type": "income",
+    "amount": 156,
+    "description": "hif",
+    "category": "API调用收入",
+    "date": "2026-04-30",
+    "model": "",
+    "id": "moloiukj-2kejue7-01d"
+  },
+  {
+    "type": "expense",
+    "amount": 12,
+    "description": "sgtyu",
+    "category": "API调用费用",
+    "date": "2026-04-30",
+    "model": "GPT-3.5",
+    "id": "moloibm4-9lx2m45-0a3"
+  },
+  {
+    "type": "income",
     "amount": 100,
     "description": "kit",
     "category": "服务收入",

@@ -22,8 +22,8 @@ export const Sidebar: React.FC = () => {
       try {
         const parsed = JSON.parse(savedProfile);
         setProfile({ name: parsed.name || '个人用户', bio: parsed.bio || '' });
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn('[Sidebar] Failed to parse user profile:', e);
       }
     }
   }, []);

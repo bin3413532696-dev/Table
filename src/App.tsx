@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { PinLock } from './components/PinLock';
 import ErrorBoundary from './components/ErrorBoundary';
-import Dashboard from './pages/Dashboard';
-import Tasks from './pages/Tasks';
-import Tools from './pages/Tools';
-import Finance from './pages/Finance';
-import Settings from './pages/Settings';
+import Loading from './components/Loading';
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Tasks = lazy(() => import('./pages/Tasks'));
+const Tools = lazy(() => import('./pages/Tools'));
+const Finance = lazy(() => import('./pages/Finance'));
+const Settings = lazy(() => import('./pages/Settings'));
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -40,16 +42,18 @@ function App() {
   return (
     <ErrorBoundary>
       <HashRouter>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="tasks" element={<Tasks />} />
-            <Route path="tools" element={<Tools />} />
-            <Route path="finance" element={<Finance />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-        </Routes>
+        <Suspense fallback={<Loading />}>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Navigate to="/dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="tasks" element={<Tasks />} />
+              <Route path="tools" element={<Tools />} />
+              <Route path="finance" element={<Finance />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
+          </Routes>
+        </Suspense>
       </HashRouter>
     </ErrorBoundary>
   );
