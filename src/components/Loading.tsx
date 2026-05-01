@@ -23,7 +23,7 @@ export default function Loading({ text = '加载中...', size = 'md' }: LoadingP
     <div className="flex flex-col items-center justify-center min-h-[200px]">
       <motion.div
         className={`${sizeClasses[size]} border-4 border-border-primary rounded-full`}
-        style={{ borderTopColor: '#165DFF' }}
+        style={{ borderTopColor: 'var(--color-primary)' }}
         animate={{ rotate: 360 }}
         transition={{
           duration: 1,

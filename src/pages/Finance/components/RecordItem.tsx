@@ -37,13 +37,13 @@ export const RecordItem: React.FC<RecordItemProps> = ({
             type="checkbox"
             checked={selectedIds.has(record.id)}
             onChange={() => onToggleSelect(record.id)}
-            className="w-4 h-4 rounded border-border-primary accent-blue-500"
+            className="w-4 h-4 rounded border-border-primary accent-primary"
           />
         )}
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
           record.type === 'income'
-            ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
-            : 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400'
+            ? 'bg-success-light text-success dark:bg-success dark:text-success'
+            : 'bg-error-light text-error dark:bg-error dark:text-error'
         }`}>
           {record.type === 'income' ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
         </div>
@@ -59,8 +59,8 @@ export const RecordItem: React.FC<RecordItemProps> = ({
       <div className="flex items-center gap-4">
         <span className={`text-lg font-semibold ${
           record.type === 'income'
-            ? 'text-emerald-600 dark:text-emerald-400'
-            : 'text-rose-600 dark:text-rose-400'
+            ? 'text-success'
+            : 'text-error'
         }`}>
           {record.type === 'income' ? '+' : '-'}¥{record.amount.toLocaleString()}
         </span>
@@ -73,7 +73,7 @@ export const RecordItem: React.FC<RecordItemProps> = ({
           </button>
           <button
             onClick={() => onDelete(record.id)}
-            className="p-2 rounded-lg transition-colors text-text-muted hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+            className="p-2 rounded-lg transition-colors text-text-muted hover:text-error hover:bg-error-light dark:hover:bg-error/20"
           >
             <Trash2 size={16} />
           </button>

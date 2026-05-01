@@ -14,9 +14,9 @@ interface StatsCardsProps {
 
 export const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
   const items = [
-    { label: '总收入', value: stats.income, icon: TrendingUp, color: 'emerald', prefix: '¥' },
-    { label: '总支出', value: stats.expense, icon: TrendingDown, color: 'rose', prefix: '¥' },
-    { label: '净收益', value: stats.profit, icon: DollarSign, color: stats.profit >= 0 ? 'emerald' : 'rose', prefix: stats.profit >= 0 ? '+¥' : '¥' },
+    { label: '总收入', value: stats.income, icon: TrendingUp, color: 'success', prefix: '¥' },
+    { label: '总支出', value: stats.expense, icon: TrendingDown, color: 'error', prefix: '¥' },
+    { label: '净收益', value: stats.profit, icon: DollarSign, color: stats.profit >= 0 ? 'success' : 'error', prefix: stats.profit >= 0 ? '+¥' : '¥' },
   ];
 
   return (
@@ -38,15 +38,15 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-medium text-text-secondary">{item.label}</span>
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-              item.color === 'emerald' ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-rose-100 dark:bg-rose-900/30'
+              item.color === 'success' ? 'bg-success-light dark:bg-success/20' : 'bg-error-light dark:bg-error/20'
             }`}>
               <item.icon className={`w-4 h-4 ${
-                item.color === 'emerald' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+                item.color === 'success' ? 'text-success' : 'text-error'
               }`} />
             </div>
           </div>
           <p className={`text-2xl font-bold ${
-            item.color === 'emerald' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
+            item.color === 'success' ? 'text-success' : 'text-error'
           }`}>
             {item.prefix}{Math.abs(item.value).toLocaleString()}
           </p>

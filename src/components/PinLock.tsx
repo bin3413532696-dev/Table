@@ -63,8 +63,8 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
       >
         <div className="bg-bg-card rounded-2xl p-8 shadow-xl border border-border-primary">
           <div className="text-center mb-8">
-            <div className="w-16 h-16 mx-auto mb-4 bg-blue-500/20 rounded-full flex items-center justify-center">
-              <Lock className="w-8 h-8 text-blue-500 dark:text-blue-400" />
+            <div className="w-16 h-16 mx-auto mb-4 bg-primary/20 rounded-full flex items-center justify-center">
+              <Lock className="w-8 h-8 text-primary" />
             </div>
             <h1 className="text-2xl font-bold text-text-primary mb-2">验证 PIN 码</h1>
             <p className="text-text-muted">请输入您的访问密码</p>
@@ -76,7 +76,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="flex items-center gap-2 mb-6 p-3 bg-rose-50 dark:bg-rose-900/30 rounded-lg text-rose-600 dark:text-rose-300"
+                className="flex items-center gap-2 mb-6 p-3 bg-error-light dark:bg-error/20 rounded-lg text-error"
               >
                 <AlertCircle className="w-4 h-4" />
                 <span className="text-sm">
@@ -93,7 +93,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
                   key={i}
                   className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center transition-all ${
                     pin[i]
-                      ? 'bg-blue-500 border-blue-400'
+                      ? 'bg-primary border-primary'
                       : 'border-border-primary bg-bg-secondary'
                   }`}
                 >

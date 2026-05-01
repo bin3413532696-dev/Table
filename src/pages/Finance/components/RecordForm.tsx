@@ -58,8 +58,8 @@ export const RecordForm: React.FC<RecordFormProps> = ({
               onClick={() => onDataChange({ ...formData, type: 'expense' })}
               className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
                 formData.type === 'expense'
-                  ? 'bg-rose-500 text-white'
-                  : 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'
+                  ? 'bg-error text-white'
+                  : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'
               }`}
             >
               支出
@@ -69,8 +69,8 @@ export const RecordForm: React.FC<RecordFormProps> = ({
               onClick={() => onDataChange({ ...formData, type: 'income' })}
               className={`flex-1 py-2 rounded-lg font-medium transition-colors ${
                 formData.type === 'income'
-                  ? 'bg-emerald-500 text-white'
-                  : 'bg-bg-tertiary text-text-secondary hover:bg-gray-200 dark:hover:bg-gray-700'
+                  ? 'bg-success text-white'
+                  : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'
               }`}
             >
               收入
@@ -92,14 +92,14 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                   onDataChange({ ...formData, amount: isNaN(value) ? 0 : Math.max(0, value) });
                   if (formErrors.amount) onDataChange({ ...formData, amount: isNaN(value) ? 0 : Math.max(0, value) });
                 }}
-                className={`w-full pl-8 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card text-text-primary ${
-                  formErrors.amount ? 'border-rose-500' : 'border-border-primary'
+                className={`w-full pl-8 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card text-text-primary ${
+                  formErrors.amount ? 'border-error' : 'border-border-primary'
                 }`}
                 placeholder="0.00"
                 required
               />
             </div>
-            {formErrors.amount && <p className="text-rose-500 text-xs mt-1">{formErrors.amount}</p>}
+            {formErrors.amount && <p className="text-error text-xs mt-1">{formErrors.amount}</p>}
           </div>
 
           <div>
@@ -110,13 +110,13 @@ export const RecordForm: React.FC<RecordFormProps> = ({
               type="text"
               value={formData.description || ''}
               onChange={e => onDataChange({ ...formData, description: e.target.value.slice(0, 100) })}
-              className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card text-text-primary ${
-                formErrors.description ? 'border-rose-500' : 'border-border-primary'
+              className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card text-text-primary ${
+                formErrors.description ? 'border-error' : 'border-border-primary'
               }`}
               placeholder="输入描述..."
               required
             />
-            {formErrors.description && <p className="text-rose-500 text-xs mt-1">{formErrors.description}</p>}
+            {formErrors.description && <p className="text-error text-xs mt-1">{formErrors.description}</p>}
           </div>
 
           <div>
@@ -124,7 +124,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
             <select
               value={formData.category || ''}
               onChange={e => onDataChange({ ...formData, category: e.target.value })}
-              className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
+              className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-primary"
             >
               <option value="">选择分类</option>
               {(categories[formData.type || 'expense'] || []).map(cat => (
@@ -139,7 +139,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
               <select
                 value={formData.model || ''}
                 onChange={e => onDataChange({ ...formData, model: e.target.value })}
-                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
+                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-primary"
               >
                 <option value="">选择模型</option>
                 {models.map(model => (
@@ -157,7 +157,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                 type="date"
                 value={formData.date || ''}
                 onChange={e => onDataChange({ ...formData, date: e.target.value })}
-                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
+                className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-primary"
                 required
               />
             </div>
@@ -173,7 +173,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
             </button>
             <button
               type="submit"
-              className="flex-1 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-primary-600 transition-colors"
             >
               {editingId ? '保存' : '添加'}
             </button>

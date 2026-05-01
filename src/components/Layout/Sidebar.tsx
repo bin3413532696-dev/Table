@@ -66,19 +66,19 @@ export const Sidebar: React.FC = () => {
       <motion.aside
         animate={{ width: collapsed ? 0 : 256, x: collapsed ? -256 : 0 }}
         transition={{ duration: 0.2 }}
-        className="h-screen flex flex-col fixed left-0 top-0 z-50 bg-[#18181B] overflow-hidden"
+        className="h-screen flex flex-col fixed left-0 top-0 z-50 bg-[--sidebar-bg] overflow-hidden"
         style={{ minWidth: collapsed ? 0 : 256 }}
       >
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
-          className="p-6 border-b border-[#3F3F46]/50"
+          className="p-6 border-b border-[--sidebar-border]"
         >
-          <h1 className="text-xl font-bold flex items-center gap-3 text-white">
+          <h1 className="text-xl font-bold flex items-center gap-3 text-[--sidebar-text-active]">
             <motion.div
               whileHover={{ scale: 1.05, rotate: 5 }}
-              className="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center"
+              className="w-10 h-10 bg-neutral-700 rounded-lg flex items-center justify-center"
             >
               <span className="text-white font-bold text-lg">W</span>
             </motion.div>
@@ -104,19 +104,19 @@ export const Sidebar: React.FC = () => {
                   {isActive && (
                     <motion.div
                       layoutId="activeTab"
-                      className="absolute inset-0 bg-gray-700 rounded-lg"
+                      className="absolute inset-0 bg-neutral-700 rounded-lg"
                       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                     />
                   )}
-                  <span className={`relative z-10 transition-colors duration-200 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'}`}>
+                  <span className={`relative z-10 transition-colors duration-200 ${isActive ? 'text-white' : ''}`} style={!isActive ? { color: 'var(--sidebar-text)' } : undefined}>
                     <item.icon size={20} />
                   </span>
-                  <span className={`relative z-10 font-medium transition-colors duration-200 ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'}`}>
+                  <span className={`relative z-10 font-medium transition-colors duration-200 ${isActive ? 'text-white' : ''}`} style={!isActive ? { color: 'var(--sidebar-text)' } : undefined}>
                     {item.label}
                   </span>
                   {!isActive && (
                     <motion.div
-                      className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-colors duration-200 bg-[#3F3F46]/50"
+                      className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-colors duration-200 bg-[--sidebar-border]"
                       transition={{ duration: 0.2 }}
                     />
                   )}
@@ -130,15 +130,15 @@ export const Sidebar: React.FC = () => {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.5 }}
-          className="p-4 border-t border-[#3F3F46]/50"
+          className="p-4 border-t border-[--sidebar-border]"
         >
-          <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-[#3F3F46]/30">
-            <div className="w-9 h-9 bg-gray-600 rounded-full flex items-center justify-center">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-neutral-800/50">
+            <div className="w-9 h-9 bg-neutral-600 rounded-full flex items-center justify-center">
               <span className="text-sm font-medium text-white">{profile.name.charAt(0)}</span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate text-white">{profile.name}</p>
-              <p className="text-xs truncate text-gray-500">{profile.bio || '在线'}</p>
+              <p className="text-xs truncate" style={{ color: 'var(--sidebar-text)' }}>{profile.bio || '在线'}</p>
             </div>
           </div>
         </motion.div>

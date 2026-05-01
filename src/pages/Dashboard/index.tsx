@@ -185,7 +185,7 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
-          className="rounded-xl md:rounded-2xl p-4 md:p-6 text-text-primary shadow-sm border bg-bg-card"
+          className="rounded-xl md:rounded-2xl p-4 md:p-6 text-text-primary shadow-sm border border-border-primary bg-bg-card dark:bg-neutral-900"
         >
           <div className="flex items-center justify-between">
             <div>
