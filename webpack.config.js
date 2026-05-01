@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const webpack = require('webpack');
 
 // ── 同步 data 目录的写入逻辑 ──
 const DATA_DIR = path.join(__dirname, 'data');
@@ -64,7 +65,18 @@ module.exports = (env, argv) => {
       ]
     },
     resolve: {
-      extensions: ['.ts', '.tsx', '.js', '.jsx']
+      extensions: ['.ts', '.tsx', '.js', '.jsx'],
+      alias: {
+        '@huggingface/transformers': path.resolve(__dirname, 'node_modules/@huggingface/transformers/dist/transformers.web.js'),
+        'sharp$': false,
+        'onnxruntime-node$': false,
+        'onnxruntime-web$': false,
+      },
+      fallback: {
+        fs: false,
+        path: false,
+        url: false,
+      }
     },
     devServer: {
       port: 3266,
@@ -94,7 +106,7 @@ module.exports = (env, argv) => {
         return middlewares;
       }
     },
-    plugins: [
+plugins: [
       new HtmlWebpackPlugin({
         template: './index.html',
         inject: 'body'

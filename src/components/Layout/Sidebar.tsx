@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X } from 'lucide-react';
+import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X, BookOpen } from 'lucide-react';
 
 const menuItems = [
   { path: '/dashboard', icon: Home, label: '首页' },
   { path: '/tasks', icon: CheckSquare, label: '任务' },
   { path: '/finance', icon: Wallet, label: '费用统计' },
+  { path: '/knowledge', icon: BookOpen, label: '知识库' },
   { path: '/tools', icon: Calendar, label: '工具' },
   { path: '/settings', icon: Settings, label: '设置' },
 ];
