@@ -171,7 +171,43 @@ export const noteOperations = {
   },
 
   async update(id: string, updates: Partial<KnowledgeNote>): Promise<void> {
+    const oldNote = await knowledgeDb.notes.get(id);
+    if (!oldNote) return;
+
     await knowledgeDb.notes.update(id, { ...updates, updatedAt: Date.now() });
+
+    // 同步 backlinks：当 links 变化时，需要更新被链接笔记的 backlinks
+    if (updates.links !== undefined && updates.links !== oldNote.links) {
+      const oldLinkIds = new Set(oldNote.links);
+      const newLinkIds = new Set(updates.links);
+
+      // 1. 从之前链接但现在不再链接的笔记的 backlinks 中移除
+      for (const removedLinkId of oldLinkIds) {
+        if (!newLinkIds.has(removedLinkId)) {
+          const targetNote = await knowledgeDb.notes.get(removedLinkId);
+          if (targetNote && targetNote.backlinks.includes(id)) {
+            await knowledgeDb.notes.update(removedLinkId, {
+              backlinks: targetNote.backlinks.filter(b => b !== id),
+              updatedAt: Date.now(),
+            });
+          }
+        }
+      }
+
+      // 2. 向新链接的笔记的 backlinks 中添加
+      for (const addedLinkId of newLinkIds) {
+        if (!oldLinkIds.has(addedLinkId)) {
+          const targetNote = await knowledgeDb.notes.get(addedLinkId);
+          if (targetNote && !targetNote.backlinks.includes(id)) {
+            await knowledgeDb.notes.update(addedLinkId, {
+              backlinks: [...targetNote.backlinks, id],
+              updatedAt: Date.now(),
+            });
+          }
+        }
+      }
+    }
+
     notifyKnowledgeChange();
     scheduleKnowledgeSync();
   },
@@ -225,6 +261,9 @@ export const noteOperations = {
    * 更新笔记内容并自动提取/更新 links
    */
   async updateContent(id: string, content: string, title?: string): Promise<void> {
+    const oldNote = await knowledgeDb.notes.get(id);
+    if (!oldNote) return;
+
     const allNotes = await knowledgeDb.notes.toArray();
     const newLinks = extractWikiLinks(content, allNotes);
 
@@ -236,6 +275,39 @@ export const noteOperations = {
     if (title) {
       updates.title = title;
     }
+
+    // 同步 backlinks：当 links 变化时，需要更新被链接笔记的 backlinks
+    if (newLinks !== oldNote.links) {
+      const oldLinkIds = new Set(oldNote.links);
+      const newLinkIds = new Set(newLinks);
+
+      // 1. 从之前链接但现在不再链接的笔记的 backlinks 中移除
+      for (const removedLinkId of oldLinkIds) {
+        if (!newLinkIds.has(removedLinkId)) {
+          const targetNote = await knowledgeDb.notes.get(removedLinkId);
+          if (targetNote && targetNote.backlinks.includes(id)) {
+            await knowledgeDb.notes.update(removedLinkId, {
+              backlinks: targetNote.backlinks.filter(b => b !== id),
+              updatedAt: Date.now(),
+            });
+          }
+        }
+      }
+
+      // 2. 向新链接的笔记的 backlinks 中添加
+      for (const addedLinkId of newLinkIds) {
+        if (!oldLinkIds.has(addedLinkId)) {
+          const targetNote = await knowledgeDb.notes.get(addedLinkId);
+          if (targetNote && !targetNote.backlinks.includes(id)) {
+            await knowledgeDb.notes.update(addedLinkId, {
+              backlinks: [...targetNote.backlinks, id],
+              updatedAt: Date.now(),
+            });
+          }
+        }
+      }
+    }
+
     await knowledgeDb.notes.update(id, updates);
     notifyKnowledgeChange();
     scheduleKnowledgeSync();

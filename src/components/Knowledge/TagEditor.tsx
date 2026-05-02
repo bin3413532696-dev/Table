@@ -45,7 +45,7 @@ export default function TagEditor({ tags, onChange, suggestedTags = [] }: TagEdi
   }, [input, availableSuggestions.length]);
 
   return (
-    <div className="tag-editor">
+    <div className="tag-editor relative">
       <div className="flex items-center gap-1 mb-1">
         <Tag className="w-3 h-3 text-text-muted" />
         <span className="text-xs text-text-muted">标签</span>
@@ -80,7 +80,7 @@ export default function TagEditor({ tags, onChange, suggestedTags = [] }: TagEdi
 
       {/* 建议标签下拉 */}
       {showSuggestions && availableSuggestions.length > 0 && (
-        <div className="absolute z-10 mt-1 p-1 border border-border-primary rounded-lg bg-bg-card shadow-lg">
+        <div className="absolute z-10 mt-1 w-full p-1 border border-border-primary rounded-lg bg-bg-card shadow-lg">
           {availableSuggestions.slice(0, 5).map((suggestion) => (
             <button
               key={suggestion}

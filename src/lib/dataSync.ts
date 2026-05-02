@@ -1,125 +1,28 @@
 /**
  * 数据同步服务
  * 负责浏览器存储与服务器文件之间的双向同步
+ *
+ * 注意：此文件作为 sync/ 模块的兼容层
+ * 核心同步逻辑已迁移到 src/sync/SyncEngine.ts
  */
 
-import { financeDB, taskDB } from '../db';
-import { knowledgeDb, noteOperations, subscribeKnowledge, KnowledgeNote } from '../db/knowledge';
-import { subscribe } from '../db';
+import { syncEngine, SyncStatus, SyncResult, LoadResult } from '../sync';
+import { financeStore, taskStore, noteStore } from '../store/impl';
+import { subscribeDataChange } from '../core/events';
+import { KnowledgeNote } from '../core/types';
 
-type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
-type DataType = 'finance' | 'tasks' | 'notes' | 'all';
+// ==================== 类型导出 ====================
 
-interface SyncResult {
-  success: boolean;
-  error?: string;
-  timestamp?: number;
-}
-
-interface LoadResult {
-  success: boolean;
-  data?: {
-    finance: any[];
-    tasks: any[];
-    notes: KnowledgeNote[];
-    folders: any[];
-    config: Record<string, any>;
-  };
-  error?: string;
-}
+export type { SyncStatus, SyncResult, LoadResult };
 
 // ==================== 同步状态 ====================
 
-let syncStatus: SyncStatus = 'idle';
-let lastSyncTime: number | null = null;
-let lastError: string | null = null;
-
-const listeners = new Set<() => void>();
-
-function notifyListeners() {
-  listeners.forEach(listener => listener());
-}
-
 export function getSyncStatus() {
-  return { status: syncStatus, lastSyncTime, lastError };
+  return syncEngine.getStatus();
 }
 
 export function subscribeSyncStatus(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-// ==================== 推送数据到服务器 ====================
-
-async function syncToServer(type: DataType = 'all'): Promise<SyncResult> {
-  if (syncStatus === 'syncing') {
-    return { success: false, error: 'Sync already in progress' };
-  }
-
-  syncStatus = 'syncing';
-  notifyListeners();
-
-  try {
-    const payload: Record<string, any> = {};
-
-    if (type === 'all' || type === 'finance') {
-      payload.finance = await financeDB.getAll();
-    }
-    if (type === 'all' || type === 'tasks') {
-      payload.tasks = await taskDB.getAll();
-    }
-    if (type === 'all' || type === 'notes') {
-      payload.notes = await knowledgeDb.notes.toArray();
-    }
-
-    const response = await fetch('/api/sync-data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
-    }
-
-    const result = await response.json();
-    syncStatus = 'success';
-    lastSyncTime = result.timestamp || Date.now();
-    lastError = null;
-
-    return { success: true, timestamp: lastSyncTime };
-  } catch (error) {
-    syncStatus = 'error';
-    lastError = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: lastError };
-  } finally {
-    notifyListeners();
-  }
-}
-
-// ==================== 从服务器拉取数据 ====================
-
-async function loadFromServer(): Promise<LoadResult> {
-  try {
-    const response = await fetch('/api/load-data');
-
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
-    }
-
-    const result = await response.json();
-
-    if (!result.success) {
-      throw new Error(result.error || 'Load failed');
-    }
-
-    return { success: true, data: result.data };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
+  return syncEngine.subscribe(listener);
 }
 
 // ==================== 初始化加载 ====================
@@ -127,7 +30,7 @@ async function loadFromServer(): Promise<LoadResult> {
 export async function initializeData(): Promise<boolean> {
   console.log('[Sync] Initializing data from server...');
 
-  const result = await loadFromServer();
+  const result = await syncEngine.loadFromServer();
 
   if (!result.success || !result.data) {
     console.warn('[Sync] Failed to load from server:', result.error);
@@ -141,38 +44,25 @@ export async function initializeData(): Promise<boolean> {
 
   // 财务数据
   if (Array.isArray(finance) && finance.length > 0) {
-    const localFinance = await financeDB.getAll();
+    const localFinance = await financeStore.getAll();
     if (localFinance.length === 0 || finance.length > localFinance.length) {
-      // 清空并重新导入
-      for (const record of finance) {
-        try {
-          await financeDB.add(record);
-        } catch {
-          // 忽略重复
-        }
-      }
+      financeStore.replaceAll(finance as any);
     }
   }
 
   // 任务数据
   if (Array.isArray(tasks) && tasks.length > 0) {
-    const localTasks = await taskDB.getAll();
+    const localTasks = await taskStore.getAll();
     if (localTasks.length === 0 || tasks.length > localTasks.length) {
-      for (const task of tasks) {
-        try {
-          await taskDB.add(task);
-        } catch {
-          // 忽略重复
-        }
-      }
+      taskStore.replaceAll(tasks as any);
     }
   }
 
   // 笔记数据
   if (Array.isArray(notes) && notes.length > 0) {
-    const localNotes = await knowledgeDb.notes.toArray();
+    const localNotes = await noteStore.getAll();
     if (localNotes.length === 0 || notes.length > localNotes.length) {
-      await noteOperations.importNotes(notes);
+      await noteStore.importNotes(notes as any);
     }
   }
 
@@ -182,27 +72,20 @@ export async function initializeData(): Promise<boolean> {
 
 // ==================== 自动同步 ====================
 
-let syncTimer: ReturnType<typeof setTimeout> | null = null;
-const SYNC_DELAY = 2000;
-
-function scheduleSync(type: DataType = 'all') {
-  if (syncTimer) clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => {
-    syncTimer = null;
-    syncToServer(type);
-  }, SYNC_DELAY);
-}
-
-// 监听本地数据变化，自动同步
 export function startAutoSync() {
-  // 监听财务和任务变化
-  subscribe((collection) => {
-    scheduleSync(collection === 'finance' ? 'finance' : 'tasks');
+  // 监听财务变化
+  subscribeDataChange('finance', () => {
+    syncEngine.schedule('finance');
+  });
+
+  // 监听任务变化
+  subscribeDataChange('tasks', () => {
+    syncEngine.schedule('tasks');
   });
 
   // 监听笔记变化
-  subscribeKnowledge(() => {
-    scheduleSync('notes');
+  subscribeDataChange('notes', () => {
+    syncEngine.schedule('notes');
   });
 
   console.log('[Sync] Auto sync started');
@@ -258,7 +141,7 @@ export function startRealtimeSync() {
 
 async function handleServerChange(message: { type: string; file: string; timestamp: number }) {
   // 从服务器重新加载数据
-  const result = await loadFromServer();
+  const result = await syncEngine.loadFromServer();
 
   if (!result.success || !result.data) {
     console.warn('[Sync] Failed to reload data after server change');
@@ -268,26 +151,65 @@ async function handleServerChange(message: { type: string; file: string; timesta
   const { finance, tasks, notes } = result.data;
 
   // 更新本地数据（触发 UI 更新）
-  // 这里通过更新 IndexedDB/localStorage 来触发订阅回调
 
   // 比较并更新笔记
   if (Array.isArray(notes)) {
-    const localNotes = await knowledgeDb.notes.toArray();
+    const localNotes = await noteStore.getAll();
     const localMap = new Map(localNotes.map(n => [n.id, n]));
     const serverMap = new Map(notes.map(n => [n.id, n]));
 
     // 找出需要更新的笔记
     for (const [id, serverNote] of serverMap) {
       const localNote = localMap.get(id);
-      if (!localNote || localNote.updatedAt < serverNote.updatedAt) {
-        await knowledgeDb.notes.put(serverNote);
+      if (!localNote || localNote.updatedAt < (serverNote as any).updatedAt) {
+        await noteStore.update(id, serverNote as any);
       }
     }
 
     // 找出需要删除的笔记
     for (const [id] of localMap) {
       if (!serverMap.has(id)) {
-        await knowledgeDb.notes.delete(id);
+        await noteStore.delete(id);
+      }
+    }
+  }
+
+  // 更新财务数据
+  if (Array.isArray(finance)) {
+    const localFinance = await financeStore.getAll();
+    const localMap = new Map(localFinance.map(r => [r.id, r]));
+    const serverMap = new Map(finance.map(r => [r.id, r]));
+
+    for (const [id, serverRecord] of serverMap) {
+      const localRecord = localMap.get(id);
+      if (!localRecord || localRecord.updatedAt < serverRecord.updatedAt) {
+        await financeStore.update(id, serverRecord);
+      }
+    }
+
+    for (const [id] of localMap) {
+      if (!serverMap.has(id)) {
+        await financeStore.delete(id);
+      }
+    }
+  }
+
+  // 更新任务数据
+  if (Array.isArray(tasks)) {
+    const localTasks = await taskStore.getAll();
+    const localMap = new Map(localTasks.map(t => [t.id, t]));
+    const serverMap = new Map(tasks.map(t => [t.id, t]));
+
+    for (const [id, serverTask] of serverMap) {
+      const localTask = localMap.get(id);
+      if (!localTask || localTask.updatedAt < serverTask.updatedAt) {
+        await taskStore.update(id, serverTask);
+      }
+    }
+
+    for (const [id] of localMap) {
+      if (!serverMap.has(id)) {
+        await taskStore.delete(id);
       }
     }
   }
@@ -307,21 +229,21 @@ export function stopRealtimeSync() {
 // ==================== 手动同步 ====================
 
 export async function syncAll(): Promise<SyncResult> {
-  return syncToServer('all');
+  return syncEngine.syncNow('all');
 }
 
 export async function syncFinance(): Promise<SyncResult> {
-  return syncToServer('finance');
+  return syncEngine.syncNow('finance');
 }
 
 export async function syncTasks(): Promise<SyncResult> {
-  return syncToServer('tasks');
+  return syncEngine.syncNow('tasks');
 }
 
 export async function syncNotes(): Promise<SyncResult> {
-  return syncToServer('notes');
+  return syncEngine.syncNow('notes');
 }
 
 export async function loadAllFromServer(): Promise<LoadResult> {
-  return loadFromServer();
+  return syncEngine.loadFromServer();
 }

@@ -1,4 +1,4 @@
-import { Tool, ToolResult, JSONSchema } from '../types';
+import type { Tool, ToolResult, JSONSchema } from '../types';
 import { financeDB, taskDB, type FinanceRecord, type Task } from '../../db';
 import { noteOperations } from '../../db/knowledge';
 import { searchVectors, getIndexedCount } from '../../lib/vectorStore';
@@ -439,4 +439,4 @@ export const toolRegistry: Map<string, Tool> = new Map([
   [crossModuleAnalysisTool.name, crossModuleAnalysisTool],
 ]);
 
-export { Tool, ToolResult };
+export type { Tool, ToolResult };

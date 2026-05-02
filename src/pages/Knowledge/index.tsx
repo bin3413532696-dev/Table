@@ -174,8 +174,10 @@ export default function Knowledge() {
     // 使用新的 updateContent 方法，自动更新 links
     await noteOperations.updateContent(selectedNote.id, editContent, title !== selectedNote.title ? title : undefined);
 
-    // 更新标签
-    if (editTags !== selectedNote.tags) {
+    // 更新标签（正确比较数组内容）
+    const tagsChanged = editTags.length !== selectedNote.tags.length || 
+                       editTags.some((tag, index) => tag !== selectedNote.tags[index]);
+    if (tagsChanged) {
       await noteOperations.update(selectedNote.id, { tags: editTags });
     }
 

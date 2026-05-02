@@ -1,0 +1,74 @@
+{"ts":"2026-05-02T06:36:00.616Z","cmd":"goto","args":"http://localhost:3266","origin":"http://localhost:3266/","durationMs":742,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:36:14.674Z","cmd":"snapshot","args":"-i","origin":"http://localhost:3266/","durationMs":55,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:36:30.304Z","cmd":"text","args":"","origin":"http://localhost:3266/","durationMs":5,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:36:30.700Z","cmd":"console","args":"","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:36:43.433Z","cmd":"html","args":"","origin":"http://localhost:3266/","durationMs":4,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:37:04.807Z","cmd":"network","args":"","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:37:05.215Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:37:21.232Z","cmd":"wait","args":"--networkidle","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:37:32.834Z","cmd":"snapshot","args":"-i","origin":"http://localhost:3266/","durationMs":8,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:37:33.249Z","cmd":"console","args":"","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:37:44.606Z","cmd":"js","args":"document.getElementById('root').innerHTML","origin":"http://localhost:3266/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:38:20.549Z","cmd":"js","args":"document.getElementById('root').children.length","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:38:20.920Z","cmd":"js","args":"window.React ? 'React loaded' : 'React not found'","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:38:57.695Z","cmd":"js","args":"typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:38:58.072Z","cmd":"js","args":"document.querySelectorAll('script').length","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:39:10.371Z","cmd":"js","args":"try { require('./bundle.js'); 'bundle executed'; } catch(e) { 'error: ' + e.message; }","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:39:24.628Z","cmd":"js","args":"document.body.innerHTML","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:39:43.450Z","cmd":"js","args":"\nconst script = document.querySelector('script[src=\"bundle.js\"]'); \nscript ? 'script found, defer=' + script.defer + ', src=' + script.src : 'script not found';\n","origin":"http://localhost:3266/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:39:53.505Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":82,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:40:09.357Z","cmd":"wait","args":"--load","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:40:19.213Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:40:19.608Z","cmd":"snapshot","args":"-i","origin":"http://localhost:3266/","durationMs":20,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:41:08.675Z","cmd":"js","args":"\n// 检查是否有全局错误\nwindow.onerror ? 'onerror handler exists' : 'no onerror handler';\n","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:41:09.055Z","cmd":"js","args":"\n// 手动检查 bundle 是否已执行\ndocument.querySelector('script[src*=\"bundle.js\"]') ? 'bundle script tag exists' : 'no bundle script';\n","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:41:20.740Z","cmd":"js","args":"\n// 检查 bundle.js 是否已加载执行\nconst scripts = Array.from(document.querySelectorAll('script'));\nscripts.map(s => ({ src: s.src, loaded: s.complete, defer: s.defer }));\n","origin":"http://localhost:3266/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:42:04.093Z","cmd":"js","args":"\n// 检查 ReactDOM 是否存在\ntypeof ReactDOM !== 'undefined' ? 'ReactDOM exists' : 'ReactDOM not found';\n","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:42:04.491Z","cmd":"js","args":"\n// 检查是否有任何全局变量\nObject.keys(window).filter(k => k.includes('React') || k.includes('react')).join(', ') || 'no React globals';\n","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:42:19.496Z","cmd":"js","args":"\n// 检查是否有模块加载错误\nwindow.webpackJsonp ? 'webpackJsonp exists' : 'webpackJsonp not found';\n","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:47:55.135Z","cmd":"js","args":"\n// 检查 bundle 是否执行了\nwindow.__webpack_require__ ? 'webpack runtime loaded' : 'webpack runtime not loaded';\n","origin":"http://localhost:3266/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:48:13.196Z","cmd":"js","args":"\n// 创建一个标记来检测 bundle 是否执行\nwindow.__bundle_executed__ = window.__bundle_executed__ || false;\nwindow.__bundle_executed__;\n","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:49:28.287Z","cmd":"js","args":"\n// 手动创建并执行脚本\nconst script = document.createElement('script');\nscript.src = 'http://localhost:3266/bundle.js';\ndocument.body.appendChild(script);\n'script appended';\n","origin":"http://localhost:3266/","durationMs":8,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:49:58.768Z","cmd":"wait","args":"--networkidle","origin":"http://localhost:3266/","durationMs":15007,"status":"error","hasCookies":false,"mode":"launched","error":"page.waitForLoadState: Timeout 15000ms exceeded."}
+{"ts":"2026-05-02T06:50:22.014Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:50:55.750Z","cmd":"snapshot","args":"-i","origin":"http://localhost:3266/","durationMs":16,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:51:09.251Z","cmd":"js","args":"document.getElementById('root').innerHTML","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:52:01.597Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":79,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:52:22.414Z","cmd":"console","args":"","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:52:36.684Z","cmd":"snapshot","args":"-i","origin":"http://localhost:3266/","durationMs":24,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:53:00.463Z","cmd":"js","args":"\n// 检查 root 元素的子元素\nconst root = document.getElementById('root');\nroot ? 'root exists, children: ' + root.children.length : 'root not found';\n","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:53:28.228Z","cmd":"js","args":"\n// 检查是否有任何 JavaScript 错误被捕获\nif (window.onerror) {\n  'onerror exists';\n} else {\n  // 设置错误监听\n  window.onerror = function(msg, url, line, col, error) {\n    console.error('GLOBAL ERROR:', msg, url, line,…","origin":"http://localhost:3266/","durationMs":1,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:53:51.493Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":494,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:54:13.664Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:55:51.042Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":474,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:56:09.454Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:57:08.568Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:58:21.890Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:58:52.175Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":824,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T06:59:46.298Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:00:37.214Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":104,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:01:00.449Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:02:09.714Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":66,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:02:56.943Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:05:04.863Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":56,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:08:37.505Z","cmd":"goto","args":"http://localhost:3266","origin":"http://localhost:3266/","durationMs":490,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:09:31.680Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:10:20.798Z","cmd":"js","args":"location.reload(true)","origin":"http://localhost:3266/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:10:40.935Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:11:10.008Z","cmd":"goto","args":"http://localhost:3266","origin":"http://localhost:3266/","durationMs":60,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:11:38.937Z","cmd":"console","args":"--clear","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:12:37.459Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:12:56.983Z","cmd":"snapshot","args":"-i","origin":"http://localhost:3266/","durationMs":34,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:13:26.108Z","cmd":"js","args":"document.getElementById('root').innerHTML","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:13:40.433Z","cmd":"network","args":"","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:14:03.253Z","cmd":"html","args":"","origin":"http://localhost:3266/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:14:23.438Z","cmd":"js","args":"\n// 检查 React 是否已渲染\nconst root = document.getElementById('root');\n'root children: ' + root.children.length + ', innerHTML length: ' + root.innerHTML.length;\n","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:14:41.520Z","cmd":"console","args":"","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:14:58.807Z","cmd":"js","args":"\n// 手动检查 bundle.js 是否加载\nconst scripts = Array.from(document.querySelectorAll('script'));\nscripts.map(s => ({ src: s.src, loaded: s.complete, readyState: s.readyState }));\n","origin":"http://localhost:3266/","durationMs":3,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:17:47.074Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":711,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:18:20.954Z","cmd":"console","args":"--errors","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:18:53.705Z","cmd":"snapshot","args":"-i","origin":"http://localhost:3266/","durationMs":23,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:19:18.750Z","cmd":"js","args":"\nconst root = document.getElementById('root');\n'root children: ' + root.children.length;\n","origin":"http://localhost:3266/","durationMs":2,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:19:40.566Z","cmd":"network","args":"--clear","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:20:00.584Z","cmd":"reload","args":"","origin":"http://localhost:3266/","durationMs":104,"status":"ok","hasCookies":false,"mode":"launched"}
+{"ts":"2026-05-02T07:20:25.117Z","cmd":"network","args":"","origin":"http://localhost:3266/","durationMs":0,"status":"ok","hasCookies":false,"mode":"launched"}

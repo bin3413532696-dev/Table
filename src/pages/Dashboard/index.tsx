@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CheckSquare, Wallet,
   TrendingUp, TrendingDown, ArrowRight,
-  Calendar, AlertCircle, Zap
+  Calendar, AlertCircle, Clock, Target
 } from 'lucide-react';
 import { financeDB, taskDB, Task, createUseDB } from '../../db';
 import Loading from '../../components/Loading';
@@ -14,13 +14,13 @@ const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.1 }
+    transition: { staggerChildren: 0.08 }
   }
 };
 
 const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0 }
+  hidden: { opacity: 0, y: 16 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
 };
 
 const useDB = createUseDB(React);
@@ -39,42 +39,35 @@ export default function Dashboard() {
 
   const { taskStats, financeStats, tasks } = data ?? { taskStats: { total: 0, completed: 0, pending: 0 }, financeStats: { income: 0, expense: 0, profit: 0 }, tasks: [] };
 
-  const pendingTasks = tasks.filter((t: Task) => !t.completed).slice(0, 3);
+  const pendingTasks = tasks.filter((t: Task) => !t.completed).slice(0, 5);
 
-  const quickActions = [
+  // 统计卡片数据
+  const statsCards = [
     {
       icon: CheckSquare,
       label: '待办任务',
-      count: taskStats.pending,
-      bgColor: 'bg-bg-card',
-      borderColor: 'border-border-primary hover:border-primary/30 dark:border-border-secondary dark:hover:border-primary/50',
-      iconBgColor: 'bg-primary',
-      textColor: 'text-text-primary',
-      countColor: 'text-primary dark:text-primary-400',
+      value: taskStats.pending,
+      unit: '项',
+      color: 'primary',
+      trend: taskStats.total > 0 ? `${Math.round(taskStats.completed / taskStats.total * 100)}% 完成` : '暂无任务',
       path: '/tasks'
     },
     {
       icon: Wallet,
       label: '净收益',
-      count: `¥${financeStats.profit.toLocaleString()}`,
-      bgColor: 'bg-bg-card',
-      borderColor: financeStats.profit >= 0
-        ? 'border-border-primary hover:border-success/30 dark:border-border-secondary dark:hover:border-success/50'
-        : 'border-border-primary hover:border-error/30 dark:border-border-secondary dark:hover:border-error/50',
-      iconBgColor: financeStats.profit >= 0 ? 'bg-success' : 'bg-error',
-      textColor: 'text-text-primary',
-      countColor: financeStats.profit >= 0 ? 'text-success dark:text-success-400' : 'text-error dark:text-error-400',
+      value: financeStats.profit,
+      unit: '元',
+      color: financeStats.profit >= 0 ? 'success' : 'error',
+      trend: financeStats.income > 0 ? `收入 ¥${financeStats.income.toLocaleString()}` : '暂无收入',
       path: '/finance'
     },
     {
       icon: Calendar,
       label: '今日',
-      count: new Date().toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }),
-      bgColor: 'bg-bg-card',
-      borderColor: 'border-border-primary hover:border-info/30 dark:border-border-secondary dark:hover:border-info/50',
-      iconBgColor: 'bg-info',
-      textColor: 'text-text-primary',
-      countColor: 'text-info dark:text-info-400',
+      value: new Date().getDate(),
+      unit: new Date().toLocaleDateString('zh-CN', { month: 'long' }),
+      color: 'info',
+      trend: new Date().toLocaleDateString('zh-CN', { weekday: 'long' }),
       path: '/tasks'
     },
   ];
@@ -85,93 +78,128 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-screen bg-bg-secondary">
+      {/* 页面头部 */}
       <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="mb-6 md:mb-8"
-        >
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-              <LayoutDashboard className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl md:text-2xl font-bold text-text-primary">个人工作台</h1>
-              <p className="text-sm text-text-muted">
-                {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-              </p>
-            </div>
-          </div>
-        </motion.div>
+        initial={{ opacity: 0, y: -16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="page-header"
+      >
+        <div className="page-header-icon">
+          <LayoutDashboard className="w-5 h-5 text-white" />
+        </div>
+        <div>
+          <h1 className="page-header-title">个人工作台</h1>
+          <p className="page-header-subtitle">
+            {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+          </p>
+        </div>
+      </motion.div>
 
+      {/* 统计卡片区 */}
       <motion.div
         variants={containerVariants}
         initial="hidden"
         animate="visible"
         className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5 mb-6 md:mb-8"
       >
-        {quickActions.map((action) => (
-          <motion.div
-            key={action.label}
-            variants={itemVariants}
-            whileHover={{ y: -2, transition: { duration: 0.2 } }}
-            onClick={() => navigate(action.path)}
-            className={`${action.bgColor} rounded-xl p-5 cursor-pointer group border ${action.borderColor} hover:shadow-md dark:hover:shadow-card-dark transition-all duration-200`}
-          >
-            <div className={`w-12 h-12 ${action.iconBgColor} rounded-lg flex items-center justify-center mb-4`}>
-              <action.icon className="w-6 h-6 text-white" />
-            </div>
-            <p className={`text-sm font-medium mb-1 ${action.textColor}`}>{action.label}</p>
-            <p className={`text-2xl font-bold ${action.countColor}`}>{action.count}</p>
-            <div className="flex items-center gap-1 mt-3 text-xs text-text-secondary group-hover:text-text-primary transition-colors">
-              <span>查看详情</span>
-              <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
-            </div>
-          </motion.div>
-        ))}
+        {statsCards.map((card) => {
+          const colorMap: Record<string, { bg: string; iconBg: string; text: string }> = {
+            primary: { bg: 'bg-primary/10 dark:bg-primary/20', iconBg: 'bg-primary', text: 'text-primary dark:text-primary-400' },
+            success: { bg: 'bg-success/10 dark:bg-success/20', iconBg: 'bg-success', text: 'text-success dark:text-success-400' },
+            error: { bg: 'bg-error/10 dark:bg-error/20', iconBg: 'bg-error', text: 'text-error dark:text-error-400' },
+            info: { bg: 'bg-info/10 dark:bg-info/20', iconBg: 'bg-info', text: 'text-info dark:text-info-400' },
+          };
+          const colors = colorMap[card.color];
+
+          return (
+            <motion.div
+              key={card.label}
+              variants={itemVariants}
+              whileHover={{ y: -2 }}
+              onClick={() => navigate(card.path)}
+              className="card cursor-pointer group"
+            >
+              <div className="flex items-start justify-between mb-4">
+                <div className={`w-11 h-11 rounded-xl ${colors.bg} flex items-center justify-center`}>
+                  <card.icon className={`w-5 h-5 ${colors.text}`} />
+                </div>
+                <ArrowRight className="w-4 h-4 text-text-muted group-hover:text-text-secondary group-hover:translate-x-0.5 transition-all" />
+              </div>
+              <p className="text-sm text-text-secondary mb-1">{card.label}</p>
+              <div className="flex items-baseline gap-1">
+                <span className={`text-3xl font-bold ${colors.text}`}>
+                  {typeof card.value === 'number' && card.label !== '今日' ? card.value.toLocaleString() : card.value}
+                </span>
+                <span className="text-sm text-text-muted">{card.unit}</span>
+              </div>
+              <p className="text-xs text-text-muted mt-2">{card.trend}</p>
+            </motion.div>
+          );
+        })}
       </motion.div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-8">
+      {/* 主内容区 */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
+        {/* 待办任务 - 占 3 列 */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm border bg-bg-card border-border-primary"
+          transition={{ delay: 0.2 }}
+          className="lg:col-span-3 card"
         >
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-primary/10 dark:bg-primary/20">
-                <AlertCircle className="w-4 h-4 text-primary dark:text-primary-400" />
+              <div className="w-8 h-8 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center">
+                <Target className="w-4 h-4 text-primary dark:text-primary-400" />
               </div>
-              <h2 className="text-lg font-bold text-text-primary">待办任务</h2>
+              <h2 className="text-base font-semibold text-text-primary">待办任务</h2>
+              {taskStats.pending > 0 && (
+                <span className="badge badge-primary">{taskStats.pending}</span>
+              )}
             </div>
             <button
               onClick={() => navigate('/tasks')}
-              className="text-sm text-primary hover:text-primary-600 font-medium flex items-center gap-1 group"
+              className="btn btn-ghost btn-sm"
             >
               查看全部
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
           {pendingTasks.length > 0 ? (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {pendingTasks.map((task, index) => (
                 <motion.div
                   key={task.id}
-                  initial={{ opacity: 0, x: -20 }}
+                  initial={{ opacity: 0, x: -12 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.4 + index * 0.1 }}
+                  transition={{ delay: 0.3 + index * 0.05 }}
                   onClick={() => navigate('/tasks')}
-                  className="flex items-center justify-between p-4 rounded-xl transition-colors duration-150 cursor-pointer border border-border-primary hover:bg-bg-tertiary hover:shadow-sm"
+                  className="flex items-center justify-between p-3 rounded-lg border border-border-primary hover:bg-bg-tertiary hover:border-border-secondary cursor-pointer transition-all duration-150"
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="w-2 h-2 bg-primary rounded-full"></div>
-                    <span className="font-medium text-text-primary">{task.title}</span>
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ${
+                      task.priority === 'high' ? 'bg-error' :
+                      task.priority === 'medium' ? 'bg-warning' : 'bg-success'
+                    }`} />
+                    <span className="text-sm text-text-primary truncate max-w-[200px] md:max-w-[300px]">{task.title}</span>
                   </div>
-                  <span className="text-xs text-text-muted">
-                    {new Date(task.createdAt).toLocaleDateString()}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    {task.dueDate && (
+                      <span className="text-xs text-text-muted flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {new Date(task.dueDate).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+                      </span>
+                    )}
+                    <span className={`text-xs px-2 py-0.5 rounded ${
+                      task.priority === 'high' ? 'bg-error/10 text-error' :
+                      task.priority === 'medium' ? 'bg-warning/10 text-warning' :
+                      'bg-success/10 text-success'
+                    }`}>
+                      {task.priority === 'high' ? '高' : task.priority === 'medium' ? '中' : '低'}
+                    </span>
+                  </div>
                 </motion.div>
               ))}
             </div>
@@ -179,56 +207,68 @@ export default function Dashboard() {
             <EmptyState
               icon={CheckSquare}
               title="暂无待办任务"
+              description="所有任务都已完成"
               action={{ label: '添加任务', onClick: () => navigate('/tasks') }}
             />
           )}
         </motion.div>
 
+        {/* 费用概览 - 占 2 列 */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="rounded-xl md:rounded-2xl p-4 md:p-6 text-text-primary shadow-sm border border-border-primary bg-bg-card"
+          transition={{ delay: 0.3 }}
+          className="lg:col-span-2 card"
         >
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-bold mb-1">费用概览</h3>
-              <p className="text-sm text-text-muted">本月收支情况</p>
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-success/10 dark:bg-success/20 flex items-center justify-center">
+                <Wallet className="w-4 h-4 text-success dark:text-success-400" />
+              </div>
+              <h2 className="text-base font-semibold text-text-primary">费用概览</h2>
             </div>
-            <Button variant="primary" onClick={() => navigate('/finance')}>
-              查看详情
+            <Button variant="ghost" size="sm" onClick={() => navigate('/finance')}>
+              详情
+              <ArrowRight className="w-3.5 h-3.5" />
             </Button>
           </div>
-          <div className="grid grid-cols-3 gap-4 mt-6">
-            {/* 收入模块 */}
-            <div className="bg-status-income-bg dark:bg-success/10 rounded-xl p-4 border border-status-income-border dark:border-success/30">
-              <div className="flex items-center gap-2 text-success dark:text-success-400 mb-1">
-                <TrendingUp className="w-4 h-4" />
-                <span className="text-sm font-medium">收入</span>
+
+          <div className="space-y-3">
+            {/* 收入 */}
+            <div className="flex items-center justify-between p-3 rounded-lg bg-success/5 dark:bg-success/10 border border-success/20">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-success dark:text-success-400" />
+                <span className="text-sm text-text-secondary">收入</span>
               </div>
-              <p className="text-xl font-bold text-success dark:text-success-400">¥{financeStats.income.toLocaleString()}</p>
+              <span className="text-lg font-semibold text-success dark:text-success-400">
+                ¥{financeStats.income.toLocaleString()}
+              </span>
             </div>
-            {/* 支出模块 */}
-            <div className="bg-status-expense-bg dark:bg-error/10 rounded-xl p-4 border border-status-expense-border dark:border-error/30">
-              <div className="flex items-center gap-2 text-error dark:text-error-400 mb-1">
-                <TrendingDown className="w-4 h-4" />
-                <span className="text-sm font-medium">支出</span>
+
+            {/* 支出 */}
+            <div className="flex items-center justify-between p-3 rounded-lg bg-error/5 dark:bg-error/10 border border-error/20">
+              <div className="flex items-center gap-2">
+                <TrendingDown className="w-4 h-4 text-error dark:text-error-400" />
+                <span className="text-sm text-text-secondary">支出</span>
               </div>
-              <p className="text-xl font-bold text-error dark:text-error-400">¥{financeStats.expense.toLocaleString()}</p>
+              <span className="text-lg font-semibold text-error dark:text-error-400">
+                ¥{financeStats.expense.toLocaleString()}
+              </span>
             </div>
-            {/* 净收益模块 */}
-            <div className={`rounded-xl p-4 border ${
+
+            {/* 净收益 */}
+            <div className={`flex items-center justify-between p-3 rounded-lg border ${
               financeStats.profit >= 0
-                ? 'bg-status-income-bg dark:bg-success/10 border-status-income-border dark:border-success/30'
-                : 'bg-status-expense-bg dark:bg-error/10 border-status-expense-border dark:border-error/30'
+                ? 'bg-success/5 dark:bg-success/10 border-success/20'
+                : 'bg-error/5 dark:bg-error/10 border-error/20'
             }`}>
-              <div className="flex items-center gap-2 text-text-secondary dark:text-text-muted mb-1">
-                <Wallet className="w-4 h-4" />
-                <span className="text-sm font-medium">净收益</span>
+              <div className="flex items-center gap-2">
+                <Wallet className={`w-4 h-4 ${financeStats.profit >= 0 ? 'text-success dark:text-success-400' : 'text-error dark:text-error-400'}`} />
+                <span className="text-sm text-text-secondary">净收益</span>
               </div>
-              <p className={`text-xl font-bold ${financeStats.profit >= 0 ? 'text-success dark:text-success-400' : 'text-error dark:text-error-400'}`}>
+              <span className={`text-xl font-bold ${financeStats.profit >= 0 ? 'text-success dark:text-success-400' : 'text-error dark:text-error-400'}`}>
                 ¥{financeStats.profit.toLocaleString()}
-              </p>
+              </span>
             </div>
           </div>
         </motion.div>

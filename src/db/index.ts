@@ -1,14 +1,45 @@
-let idCounter = 0;
+/**
+ * 数据库兼容层
+ * 保持向后兼容，内部使用新 Store 实现
+ *
+ * @deprecated 请使用 src/store 中的新 API
+ * - import { financeStore, taskStore } from '@/store'
+ * - import { useFinance, useTasks } from '@/store'
+ */
 
-function generateId(): string {
-  const timestamp = Date.now().toString(36);
-  const random = Math.random().toString(36).substring(2, 9);
-  idCounter = (idCounter + 1) % 1000;
-  const counter = idCounter.toString(36).padStart(3, '0');
-  return `${timestamp}-${random}-${counter}`;
+import { financeStore, taskStore } from '../store/impl';
+import { subscribeDataChange, eventEmitter } from '../core/events';
+import { FinanceRecord, Task } from '../core/types';
+
+// ============================================================================
+// 类型导出（保持兼容）
+// ============================================================================
+
+export type { FinanceRecord, Task };
+
+// ============================================================================
+// 工具函数（保持兼容）
+// ============================================================================
+
+/**
+ * @deprecated 使用 core/validation 中的 isValidId
+ */
+function isValidId(id: string): boolean {
+  return typeof id === 'string' && id.length >= 10 && /^[a-z0-9-]+$/i.test(id);
 }
 
-async function hashPin(pin: string): Promise<string> {
+/**
+ * @deprecated 使用 core/validation 中的 isValidISODate
+ */
+function isValidDate(dateStr: string): boolean {
+  const date = new Date(dateStr);
+  return date instanceof Date && !isNaN(date.getTime());
+}
+
+/**
+ * 哈希 PIN
+ */
+export async function hashPin(pin: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(pin);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -16,142 +47,40 @@ async function hashPin(pin: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * 验证 PIN
+ */
 export async function verifyPin(pin: string, hashedPin: string): Promise<boolean> {
   const hashedInput = await hashPin(pin);
   return hashedInput === hashedPin;
 }
 
-function isValidId(id: string): boolean {
-  return typeof id === 'string' && id.length >= 10 && /^[a-z0-9-]+$/i.test(id);
-}
-
-function isValidDate(dateStr: string): boolean {
-  const date = new Date(dateStr);
-  return date instanceof Date && !isNaN(date.getTime());
-}
-
-const MAX_AMOUNT = 999999999.99;
-const MAX_STRING_LENGTH = 500;
-
-function isValidFinanceRecord(record: unknown): record is FinanceRecord {
-  if (typeof record !== 'object' || record === null) return false;
-  const r = record as FinanceRecord;
-  return (
-    isValidId(r.id) &&
-    (r.type === 'income' || r.type === 'expense') &&
-    typeof r.amount === 'number' && r.amount >= 0 && r.amount <= MAX_AMOUNT &&
-    typeof r.description === 'string' && r.description.length <= MAX_STRING_LENGTH &&
-    typeof r.category === 'string' && r.category.length <= MAX_STRING_LENGTH &&
-    isValidDate(r.date) &&
-    (r.model === undefined || typeof r.model === 'string')
-  );
-}
-
-function isValidTask(record: unknown): record is Task {
-  if (typeof record !== 'object' || record === null) return false;
-  const r = record as Task;
-  return (
-    isValidId(r.id) &&
-    typeof r.title === 'string' && r.title.length <= MAX_STRING_LENGTH &&
-    typeof r.completed === 'boolean' &&
-    isValidDate(r.createdAt) &&
-    (r.priority === 'low' || r.priority === 'medium' || r.priority === 'high') &&
-    (r.dueDate === undefined || isValidDate(r.dueDate))
-  );
-}
-
-interface FinanceRecord {
-  id: string;
-  type: 'income' | 'expense';
-  amount: number;
-  description: string;
-  category: string;
-  date: string;
-  model?: string;
-}
-
-interface Task {
-  id: string;
-  title: string;
-  completed: boolean;
-  createdAt: string;
-  priority: 'low' | 'medium' | 'high';
-  dueDate?: string;
-}
-
-const STORAGE_KEYS = {
-  finance: 'finance_records',
-  tasks: 'tasks_records'
-};
+// ============================================================================
+// 订阅系统（保持兼容）
+// ============================================================================
 
 type CollectionType = 'finance' | 'tasks';
 type Listener = (collection: CollectionType) => void;
 
-const listeners = new Set<Listener>();
-
-function notifyChange(collection: CollectionType) {
-  listeners.forEach(listener => listener(collection));
-}
-
+/**
+ * @deprecated 使用 core/events 中的 subscribeDataChange
+ */
 export function subscribe(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  const unsubFinance = subscribeDataChange('finance', () => listener('finance'));
+  const unsubTasks = subscribeDataChange('tasks', () => listener('tasks'));
+
+  return () => {
+    unsubFinance();
+    unsubTasks();
+  };
 }
 
-function loadFromStorage<T>(key: string): T[] {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
-  } catch (error) {
-    console.warn('[DB] Failed to load from localStorage, returning empty array:', error);
-    return [];
-  }
-}
+// ============================================================================
+// 存储状态（保持兼容）
+// ============================================================================
 
 let storageError: Error | null = null;
 let storageQuotaExceeded: boolean = false;
-
-function saveToStorage<T>(key: string, records: T[]) {
-  try {
-    const serialized = JSON.stringify(records);
-
-    // Check if we're approaching localStorage limits (typically 5-10MB)
-    const totalSize = new Blob([serialized]).size;
-    if (totalSize > 4 * 1024 * 1024) { // 4MB warning threshold
-      console.warn('[DB] Storage size approaching limit:', (totalSize / 1024 / 1024).toFixed(2) + 'MB');
-    }
-
-    localStorage.setItem(key, serialized);
-    storageError = null;
-    storageQuotaExceeded = false;
-  } catch (error) {
-    storageError = error instanceof Error ? error : new Error('Storage error');
-    storageQuotaExceeded = error instanceof DOMException && error.name === 'QuotaExceededError';
-
-    if (storageQuotaExceeded) {
-      console.error('[DB] Storage quota exceeded! Consider clearing old data.');
-      // Dispatch custom event for UI to handle
-      window.dispatchEvent(new CustomEvent('storageQuotaExceeded', {
-        detail: { key, size: records.length }
-      }));
-    } else {
-      console.error('[DB] Failed to save to localStorage:', storageError);
-    }
-    return;
-  }
-
-  scheduleSync();
-
-  const collectionMap: Record<string, CollectionType> = {
-    [STORAGE_KEYS.finance]: 'finance',
-    [STORAGE_KEYS.tasks]: 'tasks'
-  };
-
-  const collection = collectionMap[key];
-  if (collection) {
-    notifyChange(collection);
-  }
-}
 
 export function getStorageError(): Error | null {
   return storageError;
@@ -163,8 +92,8 @@ export function isStorageQuotaExceeded(): boolean {
 
 export function getStorageUsage(): { used: number; available: boolean } {
   try {
-    const financeData = localStorage.getItem(STORAGE_KEYS.finance) || '';
-    const tasksData = localStorage.getItem(STORAGE_KEYS.tasks) || '';
+    const financeData = localStorage.getItem('finance_records') || '';
+    const tasksData = localStorage.getItem('tasks_records') || '';
     const used = new Blob([financeData + tasksData]).size;
     return { used, available: true };
   } catch {
@@ -172,342 +101,101 @@ export function getStorageUsage(): { used: number; available: boolean } {
   }
 }
 
-let syncTimer: ReturnType<typeof setTimeout> | null = null;
+// ============================================================================
+// 同步状态（保持兼容）
+// ============================================================================
+
 let syncStatus: 'idle' | 'syncing' | 'success' | 'error' = 'idle';
 let lastSyncError: Error | null = null;
 let syncRetryCount = 0;
 let lastSuccessfulSync: string | null = null;
-const MAX_RETRY_COUNT = 3;
-const SYNC_DELAY = 1500;
 
-interface SyncResult {
-  success: boolean;
-  timestamp?: string;
-  error?: string;
-}
-
-async function performSync(): Promise<SyncResult> {
-  if (syncStatus === 'syncing') {
-    return { success: false, error: 'Sync already in progress' };
-  }
-
-  try {
-    syncStatus = 'syncing';
-    syncRetryCount = 0;
-
-    const response = await fetch('/api/sync-data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tasks: taskStore.getAll(),
-        finance: financeStore.getAll()
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Sync failed with status ${response.status}`);
-    }
-
-    syncStatus = 'success';
-    lastSyncError = null;
-    lastSuccessfulSync = new Date().toISOString();
-
-    // Persist sync status
-    try {
-      localStorage.setItem('last_sync_status', JSON.stringify({
-        status: syncStatus,
-        timestamp: lastSuccessfulSync
-      }));
-    } catch {
-      // Ignore persistence errors for sync status
-    }
-
-    return { success: true, timestamp: lastSuccessfulSync };
-  } catch (error) {
-    const err = error instanceof Error ? error : new Error('Unknown sync error');
-    lastSyncError = err;
-    syncStatus = 'error';
-
-    if (syncRetryCount < MAX_RETRY_COUNT) {
-      syncRetryCount++;
-      const delay = Math.pow(2, syncRetryCount) * 1000;
-      setTimeout(performSync, delay);
-    }
-
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn('[DB Sync] Failed to sync data to disk:', err.message);
-    }
-
-    return { success: false, timestamp: new Date().toISOString(), error: err.message };
-  }
-}
-
-function scheduleSync() {
-  if (syncTimer) clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => {
-    syncTimer = null;
-    if (typeof fetch !== 'undefined') {
-      performSync();
-    }
-  }, SYNC_DELAY);
-}
-
-// Restore sync status on load
-try {
-  const savedSyncStatus = localStorage.getItem('last_sync_status');
-  if (savedSyncStatus) {
-    const parsed = JSON.parse(savedSyncStatus);
-    lastSuccessfulSync = parsed.timestamp;
-    syncStatus = parsed.status === 'success' ? 'success' : 'idle';
-  }
-} catch {
-  // Ignore errors
-}
-
-class Store<T extends { id: string }> {
-  private records: T[];
-  private storageKey: string;
-  private collectionType: CollectionType;
-  private validator: (record: unknown) => record is T;
-  private delayedSave: boolean = false;
-
-  constructor(storageKey: string, collectionType: CollectionType, validator: (record: unknown) => record is T) {
-    this.storageKey = storageKey;
-    this.collectionType = collectionType;
-    this.validator = validator;
-    this.records = loadFromStorage<T>(storageKey);
-  }
-
-  getAll(): T[] {
-    return [...this.records];
-  }
-
-  getById(id: string): T | undefined {
-    return this.records.find(r => r.id === id);
-  }
-
-  add(record: Omit<T, 'id'>): T {
-    const newRecord = { ...record, id: generateId() } as T;
-    this.records = [newRecord, ...this.records];
-    if (!this.delayedSave) {
-      this.save();
-    }
-    return newRecord;
-  }
-
-  update(id: string, updates: Partial<T>): void {
-    this.records = this.records.map(r => r.id === id ? { ...r, ...updates } : r);
-    if (!this.delayedSave) {
-      this.save();
-    }
-  }
-
-  delete(id: string): void {
-    this.records = this.records.filter(r => r.id !== id);
-    if (!this.delayedSave) {
-      this.save();
-    }
-  }
-
-  filter(predicate: (record: T) => boolean): T[] {
-    return this.records.filter(predicate);
-  }
-
-  map<U>(fn: (record: T) => U): U[] {
-    return this.records.map(fn);
-  }
-
-  reduce<U>(fn: (acc: U, record: T) => U, initial: U): U {
-    return this.records.reduce(fn, initial);
-  }
-
-  get length(): number {
-    return this.records.length;
-  }
-
-  save(): void {
-    saveToStorage(this.storageKey, this.records);
-  }
-
-  replaceAll(records: T[]): void {
-    this.records = records;
-    if (!this.delayedSave) {
-      this.save();
-    }
-  }
-
-  setDelayedSave(delayed: boolean): void {
-    this.delayedSave = delayed;
-  }
-
-  cloneRecords(): T[] {
-    return JSON.parse(JSON.stringify(this.records));
-  }
-
-  restoreRecords(records: T[]): void {
-    this.records = records;
-  }
-
-  getRecords(): T[] {
-    return this.records;
-  }
-}
-
-interface TransactionOperation {
-  store: Store<any>;
-  before: any[];
-}
-
-class Transaction {
-  private operations: TransactionOperation[] = [];
-  private active: boolean = false;
-
-  begin(): void {
-    if (this.active) {
-      throw new Error('Transaction already active');
-    }
-    this.active = true;
-    this.operations = [];
-  }
-
-  registerStore(store: Store<any>): void {
-    if (!this.active) {
-      throw new Error('No active transaction');
-    }
-    this.operations.push({
-      store,
-      before: store.cloneRecords()
-    });
-    store.setDelayedSave(true);
-  }
-
-  commit(): void {
-    if (!this.active) {
-      throw new Error('No active transaction');
-    }
-    try {
-      for (const op of this.operations) {
-        op.store.save();
-      }
-      this.active = false;
-    } finally {
-      for (const op of this.operations) {
-        op.store.setDelayedSave(false);
-      }
-    }
-  }
-
-  rollback(): void {
-    if (!this.active) {
-      throw new Error('No active transaction');
-    }
-    try {
-      for (const op of this.operations) {
-        op.store.restoreRecords(op.before);
-      }
-    } finally {
-      for (const op of this.operations) {
-        op.store.setDelayedSave(false);
-      }
-      this.active = false;
-    }
-  }
-
-  get isActive(): boolean {
-    return this.active;
-  }
-}
-
-const transaction = new Transaction();
-
-const financeStore = new Store<FinanceRecord>(STORAGE_KEYS.finance, 'finance', isValidFinanceRecord);
-const taskStore = new Store<Task>(STORAGE_KEYS.tasks, 'tasks', isValidTask);
-
-export async function runInTransaction<T>(fn: () => T | Promise<T>): Promise<T> {
-  transaction.begin();
-  try {
-    transaction.registerStore(taskStore);
-    transaction.registerStore(financeStore);
-
-    const result = await fn();
-    transaction.commit();
-    return result;
-  } catch (error) {
-    transaction.rollback();
-    throw error;
-  }
-}
-
-export const initDB = async () => {
-  return true;
-};
+// ============================================================================
+// 财务数据库 API（保持兼容）
+// ============================================================================
 
 export const financeDB = {
   async getAll(): Promise<FinanceRecord[]> {
-    return financeStore.getAll().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const records = await financeStore.getAll();
+    return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   },
 
+  /**
+   * @deprecated 使用 financeStore.create()
+   */
   async add(record: Omit<FinanceRecord, 'id'>): Promise<FinanceRecord> {
-    return financeStore.add(record);
+    const result = await financeStore.create(record);
+    if (!result.success || !result.data) {
+      throw new Error('Failed to create finance record');
+    }
+    return result.data;
   },
 
   async update(id: string, updates: Partial<FinanceRecord>): Promise<void> {
-    financeStore.update(id, updates);
+    await financeStore.update(id, updates);
   },
 
   async delete(id: string): Promise<void> {
-    financeStore.delete(id);
+    await financeStore.delete(id);
   },
 
   async getStats() {
-    const income = financeStore.filter(r => r.type === 'income').reduce((sum, r) => sum + r.amount, 0);
-    const expense = financeStore.filter(r => r.type === 'expense').reduce((sum, r) => sum + r.amount, 0);
-    return { income, expense, profit: income - expense };
+    return financeStore.getStats();
   },
 
   async getModelStats(): Promise<Record<string, { expense: number; income: number }>> {
-    const stats: Record<string, { expense: number; income: number }> = {};
-    financeStore.map(r => {
-      const model = r.model || '其他';
-      if (!stats[model]) stats[model] = { expense: 0, income: 0 };
-      if (r.type === 'expense') stats[model].expense += r.amount;
-      else stats[model].income += r.amount;
-    });
-    return stats;
+    return financeStore.getModelStats();
   }
 };
+
+// ============================================================================
+// 任务数据库 API（保持兼容）
+// ============================================================================
 
 export const taskDB = {
   async getAll(): Promise<Task[]> {
-    return taskStore.getAll().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const records = await taskStore.getAll();
+    return records.sort((a, b) => b.createdAt - a.createdAt);
   },
 
+  /**
+   * @deprecated 使用 taskStore.create()
+   */
   async add(record: Omit<Task, 'id'>): Promise<Task> {
-    return taskStore.add({ ...record, dueDate: record.dueDate || undefined });
+    const result = await taskStore.create({
+      ...record,
+      dueDate: record.dueDate ? new Date(record.dueDate).getTime() : undefined
+    });
+    if (!result.success || !result.data) {
+      throw new Error('Failed to create task');
+    }
+    return result.data;
   },
 
   async update(id: string, updates: Partial<Task>): Promise<void> {
-    taskStore.update(id, updates);
+    const updateData: Partial<Task> = { ...updates };
+    if (updates.dueDate && typeof updates.dueDate === 'string') {
+      updateData.dueDate = new Date(updates.dueDate).getTime();
+    }
+    await taskStore.update(id, updateData);
   },
 
   async delete(id: string): Promise<void> {
-    taskStore.delete(id);
+    await taskStore.delete(id);
   },
 
   async toggle(id: string): Promise<void> {
-    const task = taskStore.getById(id);
-    if (task) {
-      taskStore.update(id, { completed: !task.completed });
-    }
+    await taskStore.toggle(id);
   },
 
   async getStats() {
-    const total = taskStore.length;
-    const completed = taskStore.filter(r => r.completed).length;
-    const pending = total - completed;
-    return { total, completed, pending };
+    return taskStore.getStats();
   }
 };
+
+// ============================================================================
+// 数据管理器（保持兼容）
+// ============================================================================
 
 export const dataManager = {
   exportAll(): string {
@@ -529,24 +217,29 @@ export const dataManager = {
   importAll(jsonString: string): boolean {
     try {
       const data = JSON.parse(jsonString);
-      const validators = {
-        finance: isValidFinanceRecord,
-        tasks: isValidTask
-      };
-      const stores = {
-        finance: financeStore,
-        tasks: taskStore
-      };
 
-      for (const key of ['finance', 'tasks'] as const) {
-        if (key in data) {
-          if (!Array.isArray(data[key])) return false;
-          const validRecords = data[key].filter(validators[key]);
-          if (validRecords.length !== data[key].length) return false;
-          stores[key].replaceAll(validRecords);
-        }
+      // 导入财务数据
+      if (Array.isArray(data.finance)) {
+        const validRecords = data.finance.filter((r): r is FinanceRecord => {
+          return isValidId(r.id) &&
+                 (r.type === 'income' || r.type === 'expense') &&
+                 typeof r.amount === 'number';
+        });
+        // 使用新 Store 的批量导入
+        financeStore.replaceAll(validRecords);
       }
 
+      // 导入任务数据
+      if (Array.isArray(data.tasks)) {
+        const validRecords = data.tasks.filter((r): r is Task => {
+          return isValidId(r.id) &&
+                 typeof r.title === 'string' &&
+                 typeof r.completed === 'boolean';
+        });
+        taskStore.replaceAll(validRecords);
+      }
+
+      // 导入用户设置
       if (data.userSettings) {
         if (data.userSettings.profile) {
           localStorage.setItem('user_profile', data.userSettings.profile);
@@ -580,8 +273,8 @@ export const dataManager = {
 
   getStats() {
     return {
-      finance: financeStore.length,
-      tasks: taskStore.length,
+      finance: financeStore.getAll().length,
+      tasks: taskStore.getAll().length,
       totalSize: JSON.stringify({
         finance: financeStore.getAll(),
         tasks: taskStore.getAll()
@@ -604,16 +297,32 @@ export const dataManager = {
   },
 
   async triggerSync(): Promise<{ success: boolean; error?: string }> {
-    if (typeof fetch === 'undefined') {
-      return { success: false, error: 'Fetch not available' };
+    const { syncEngine } = await import('../sync');
+    try {
+      await syncEngine.syncNow('finance');
+      await syncEngine.syncNow('tasks');
+      syncStatus = 'success';
+      lastSuccessfulSync = new Date().toISOString();
+      return { success: true };
+    } catch (error) {
+      syncStatus = 'error';
+      lastSyncError = error instanceof Error ? error : new Error('Unknown error');
+      return { success: false, error: lastSyncError.message };
     }
-    const result = await performSync();
-    return { success: result.success, error: result.error };
   }
 };
 
-export type { FinanceRecord, Task };
-export { hashPin };
+// ============================================================================
+// 初始化（保持兼容）
+// ============================================================================
+
+export const initDB = async () => {
+  return true;
+};
+
+// ============================================================================
+// React Hook（保持兼容）
+// ============================================================================
 
 export function createUseDB(React: typeof import('react')) {
   return function useDB<T>(

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, Circle, Plus, Trash2, Calendar, Clock, ListTodo, CheckCheck, AlertCircle, Search, SortAsc, AlertTriangle, CheckSquare, X, Flag, Edit2 } from 'lucide-react';
+import { CheckCircle, Circle, Plus, Trash2, Calendar, Clock, ListTodo, CheckCheck, AlertCircle, Search, SortAsc, AlertTriangle, CheckSquare, X, Flag, Edit2, Target, TrendingUp } from 'lucide-react';
 import { taskDB, Task, createUseDB } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
@@ -205,48 +205,60 @@ const Tasks: React.FC = () => {
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 md:mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center">
-            <ListTodo className="w-5 h-5 text-white" />
-          </div>
-          <h1 className="text-xl md:text-2xl font-bold text-text-primary">任务管理</h1>
+      {/* 页面头部 */}
+      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="page-header">
+        <div className="page-header-icon">
+          <ListTodo className="w-5 h-5 text-white" />
         </div>
-        <p className="text-sm text-text-muted ml-12">高效管理你的日常任务</p>
-      </motion.div>
-
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-        <div className="rounded-lg p-4 bg-bg-card border border-border-primary">
-          <div className="flex items-center gap-2 mb-2">
-            <Flag className="w-4 h-4 text-text-muted" />
-            <span className="text-sm text-text-secondary">总任务</span>
-          </div>
-          <p className="text-2xl font-bold text-text-primary">{stats.total}</p>
-        </div>
-        <div className="rounded-lg p-4 bg-bg-card border border-border-primary">
-          <div className="flex items-center gap-2 mb-2">
-            <CheckCheck className="w-4 h-4 text-success" />
-            <span className="text-sm text-text-secondary">已完成</span>
-          </div>
-          <p className="text-2xl font-bold text-success">{stats.completed}</p>
-        </div>
-        <div className="rounded-lg p-4 bg-bg-card border border-border-primary">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertCircle className="w-4 h-4 text-warning" />
-            <span className="text-sm text-text-secondary">待办</span>
-          </div>
-          <p className="text-2xl font-bold text-warning">{stats.pending}</p>
-        </div>
-        <div className="rounded-lg p-4 bg-bg-card border border-border-primary">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="w-4 h-4 text-error" />
-            <span className="text-sm text-text-secondary">逾期</span>
-          </div>
-          <p className="text-2xl font-bold text-error">{stats.overdue}</p>
+        <div>
+          <h1 className="page-header-title">任务管理</h1>
+          <p className="page-header-subtitle">高效管理你的日常任务</p>
         </div>
       </motion.div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg shadow-card border p-4 md:p-5 mb-6 bg-bg-card border-border-primary">
+      {/* 统计卡片 */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
+        <div className="stat-card group hover:border-primary/30 cursor-pointer transition-all" onClick={() => setFilter('all')}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="stat-card-icon bg-primary/10 dark:bg-primary/20">
+              <Flag className="w-4 h-4 text-primary dark:text-primary-400" />
+            </div>
+            <TrendingUp className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
+          <p className="stat-card-value text-text-primary">{stats.total}</p>
+          <p className="stat-card-label">总任务</p>
+        </div>
+        <div className="stat-card group hover:border-success/30 cursor-pointer transition-all" onClick={() => setFilter('completed')}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="stat-card-icon bg-success/10 dark:bg-success/20">
+              <CheckCheck className="w-4 h-4 text-success dark:text-success-400" />
+            </div>
+          </div>
+          <p className="stat-card-value text-success dark:text-success-400">{stats.completed}</p>
+          <p className="stat-card-label">已完成</p>
+        </div>
+        <div className="stat-card group hover:border-warning/30 cursor-pointer transition-all" onClick={() => setFilter('pending')}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="stat-card-icon bg-warning/10 dark:bg-warning/20">
+              <AlertCircle className="w-4 h-4 text-warning dark:text-warning-400" />
+            </div>
+          </div>
+          <p className="stat-card-value text-warning dark:text-warning-400">{stats.pending}</p>
+          <p className="stat-card-label">待办</p>
+        </div>
+        <div className="stat-card group hover:border-error/30 cursor-pointer transition-all">
+          <div className="flex items-center justify-between mb-2">
+            <div className="stat-card-icon bg-error/10 dark:bg-error/20">
+              <AlertTriangle className="w-4 h-4 text-error dark:text-error-400" />
+            </div>
+          </div>
+          <p className="stat-card-value text-error dark:text-error-400">{stats.overdue}</p>
+          <p className="stat-card-label">逾期</p>
+        </div>
+      </motion.div>
+
+      {/* 添加任务区 */}
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="card mb-6">
         <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
           <input
             type="text"
@@ -259,38 +271,39 @@ const Tasks: React.FC = () => {
               }
             }}
             placeholder="输入任务内容，按 Enter 添加..."
-            className="flex-1 px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-bg-secondary border-border-primary text-text-primary placeholder-text-muted"
+            className="input flex-1"
           />
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <PriorityButtonGroup selected={newTaskPriority} onChange={setNewTaskPriority} />
             <input
               type="date"
               value={newTaskDueDate}
               min={new Date().toISOString().split('T')[0]}
               onChange={(e) => setNewTaskDueDate(e.target.value)}
-              className="px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-secondary"
+              className="input w-auto px-3 py-2 text-sm"
               title="截止日期"
             />
-            <Button variant="primary" onClick={addTask} icon={<Plus size={18} />}>添加</Button>
+            <Button variant="primary" onClick={addTask} icon={<Plus size={16} />}>添加</Button>
           </div>
         </div>
         {newTask.length > 0 && (
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-xs text-text-muted">{stats.pending} 个待办任务</span>
-            <span className="text-xs text-text-muted">{newTask.length}/{MAX_TITLE_LENGTH}</span>
+          <div className="flex items-center justify-between mt-2 text-xs text-text-muted">
+            <span>{stats.pending} 个待办任务</span>
+            <span>{newTask.length}/{MAX_TITLE_LENGTH}</span>
           </div>
         )}
       </motion.div>
 
+      {/* 筛选和排序 */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {selectedIds.size > 0 ? (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30">
               <span className="text-sm text-primary font-medium">已选 {selectedIds.size} 项</span>
               <Button variant="success" size="sm" onClick={() => handleBatchToggle(true)} icon={<CheckCircle size={14} />}>完成</Button>
-              <Button variant="ghost" size="sm" onClick={() => handleBatchToggle(false)} icon={<Circle size={14} />}>取消完成</Button>
+              <Button variant="ghost" size="sm" onClick={() => handleBatchToggle(false)} icon={<Circle size={14} />}>取消</Button>
               <Button variant="danger" size="sm" onClick={() => setShowDeleteConfirm('batch')} icon={<Trash2 size={14} />}>删除</Button>
-              <button onClick={() => setSelectedIds(new Set())} className="text-sm text-text-muted hover:text-text-secondary">取消</button>
+              <button onClick={() => setSelectedIds(new Set())} className="text-sm text-text-muted hover:text-text-secondary ml-1">取消</button>
             </div>
           ) : (
             <>
@@ -302,58 +315,32 @@ const Tasks: React.FC = () => {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="搜索任务..."
-                  className="pl-9 pr-8 py-2 w-52 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-primary placeholder-text-muted"
+                  className="input pl-9 pr-8 w-48 md:w-56"
                 />
                 {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-secondary"
-                  >
+                  <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-secondary">
                     <X size={14} />
                   </button>
                 )}
               </div>
               {sortedTasks.length > 0 && (
-                <Button
-                  variant={showBatchActions ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setShowBatchActions(!showBatchActions)}
-                  icon={<CheckSquare size={14} />}
-                >
-                  批量
-                </Button>
+                <Button variant={showBatchActions ? 'primary' : 'ghost'} size="sm" onClick={() => setShowBatchActions(!showBatchActions)} icon={<CheckSquare size={14} />}>批量</Button>
               )}
             </>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
-            <button
-              onClick={() => setShowSortMenu(!showSortMenu)}
-              className="px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700"
-            >
+            <button onClick={() => setShowSortMenu(!showSortMenu)} className="btn btn-secondary btn-sm">
               <SortAsc size={14} />
               排序
             </button>
             <AnimatePresence>
               {showSortMenu && (
-                <motion.div
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  className="absolute right-0 top-full mt-1 bg-bg-card border border-border-primary rounded-lg shadow-lg py-1 z-10 min-w-[120px]"
-                >
+                <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute right-0 top-full mt-1 bg-bg-card border border-border-primary rounded-lg shadow-lg py-1 z-10 min-w-[120px]">
                   {sortOptions.map(opt => (
-                    <button
-                      key={opt.key}
-                      onClick={() => { setSortType(opt.key); setShowSortMenu(false); }}
-                      className={`w-full px-3 py-2 text-sm text-left transition-colors ${
-                        sortType === opt.key
-                          ? 'text-primary bg-primary/10'
-                          : 'text-text-secondary hover:bg-bg-tertiary'
-                      }`}
-                    >
+                    <button key={opt.key} onClick={() => { setSortType(opt.key); setShowSortMenu(false); }} className={`w-full px-3 py-2 text-sm text-left transition-colors ${sortType === opt.key ? 'text-primary bg-primary/10' : 'text-text-secondary hover:bg-bg-tertiary'}`}>
                       {opt.label}
                     </button>
                   ))}
@@ -363,46 +350,28 @@ const Tasks: React.FC = () => {
           </div>
 
           {filterButtons.map(btn => (
-            <button
-              key={btn.key}
-              onClick={() => setFilter(btn.key)}
-              className={`flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                filter === btn.key
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'bg-bg-card text-text-secondary border border-border-primary hover:bg-bg-secondary'
-              }`}
-            >
+            <button key={btn.key} onClick={() => setFilter(btn.key)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${filter === btn.key ? 'bg-primary text-white shadow-sm' : 'btn btn-secondary'}`}>
               <btn.icon size={14} />
               {btn.label}
-              <span className={`text-xs ml-0.5 ${filter === btn.key ? 'text-white/70' : 'text-text-muted'}`}>
-                {getFilterCount(btn.key)}
-              </span>
+              <span className={`text-xs ${filter === btn.key ? 'text-white/70' : 'text-text-muted'}`}>{getFilterCount(btn.key)}</span>
             </button>
           ))}
         </div>
       </div>
 
+      {/* 任务列表 */}
       <div className="space-y-2">
         {sortedTasks.length === 0 ? (
           tasks.length === 0 ? (
             <EmptyState icon={ListTodo} title="还没有任务" description="在上方输入框添加第一个任务" />
           ) : (
-            <EmptyState
-              icon={filter === 'completed' ? CheckCheck : AlertCircle}
-              title={filter === 'completed' ? '还没有已完成的任务' : searchQuery ? '未找到匹配的任务' : '没有待办任务'}
-              description={filter === 'completed' ? '完成任务后会显示在这里' : searchQuery ? '尝试其他关键词' : '所有任务都已完成'}
-            />
+            <EmptyState icon={filter === 'completed' ? CheckCheck : AlertCircle} title={filter === 'completed' ? '还没有已完成的任务' : searchQuery ? '未找到匹配的任务' : '没有待办任务'} description={filter === 'completed' ? '完成任务后会显示在这里' : searchQuery ? '尝试其他关键词' : '所有任务都已完成'} />
           )
         ) : sortedTasks.length > 20 ? (
           <>
             {showBatchActions && (
               <div className="p-3 flex items-center gap-3 bg-bg-secondary rounded-lg border border-border-primary mb-2">
-                <input
-                  type="checkbox"
-                  checked={isAllSelected}
-                  onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-border-primary accent-primary"
-                />
+                <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-primary" />
                 <span className="text-sm text-text-muted">全选 ({sortedTasks.length} 条任务)</span>
               </div>
             )}
@@ -412,47 +381,27 @@ const Tasks: React.FC = () => {
           <>
             {showBatchActions && (
               <div className="p-3 flex items-center gap-3 bg-bg-secondary rounded-lg border border-border-primary">
-                <input
-                  type="checkbox"
-                  checked={isAllSelected}
-                  onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-border-primary accent-primary"
-                />
+                <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-primary" />
                 <span className="text-sm text-text-muted">全选</span>
               </div>
             )}
-            <AnimatePresence mode="popLayout">
-              {sortedTasks.map((task, index) => renderTaskItem(task, index))}
-            </AnimatePresence>
+            <AnimatePresence mode="popLayout">{sortedTasks.map((task, index) => renderTaskItem(task, index))}</AnimatePresence>
           </>
         )}
       </div>
 
+      {/* 删除确认弹窗 */}
       <AnimatePresence>
         {showDeleteConfirm && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-lg p-6 w-full max-w-sm bg-bg-card shadow-lg border border-border-primary"
-            >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="card w-full max-w-sm">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
                   <AlertTriangle className="w-5 h-5 text-error" />
                 </div>
                 <h3 className="text-lg font-semibold text-text-primary">确认删除</h3>
               </div>
-              <p className="text-text-secondary mb-5 text-sm">
-                {showDeleteConfirm === 'batch'
-                  ? `确定要删除选中的 ${selectedIds.size} 个任务吗？此操作无法撤销。`
-                  : '确定要删除这个任务吗？此操作无法撤销。'}
-              </p>
+              <p className="text-text-secondary mb-5 text-sm">{showDeleteConfirm === 'batch' ? `确定要删除选中的 ${selectedIds.size} 个任务吗？此操作无法撤销。` : '确定要删除这个任务吗？此操作无法撤销。'}</p>
               <div className="flex gap-3">
                 <Button variant="ghost" onClick={() => setShowDeleteConfirm(null)} className="flex-1">取消</Button>
                 <Button variant="danger" onClick={showDeleteConfirm === 'batch' ? handleBatchDelete : () => deleteTask(showDeleteConfirm)} className="flex-1">删除</Button>
