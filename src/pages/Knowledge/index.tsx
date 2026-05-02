@@ -350,12 +350,12 @@ export default function Knowledge() {
         </motion.div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6" style={{ height: 'calc(100vh - 220px)' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 md:gap-6" style={{ height: 'calc(100vh - 220px)' }}>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="rounded-xl shadow-sm border bg-bg-card border-border-primary overflow-hidden"
+          className="lg:col-span-1 rounded-xl shadow-sm border bg-bg-card border-border-primary overflow-hidden"
         >
           <NoteList notes={notes} onSelect={handleSelectNote} onCreate={handleCreateNote} onDelete={handleDeleteNote} />
         </motion.div>
@@ -364,7 +364,7 @@ export default function Knowledge() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="lg:col-span-2 rounded-xl shadow-sm border bg-bg-card border-border-primary overflow-hidden flex flex-col"
+          className="lg:col-span-3 rounded-xl shadow-sm border bg-bg-card border-border-primary overflow-hidden flex flex-col"
         >
           {selectedNote ? (
             <>

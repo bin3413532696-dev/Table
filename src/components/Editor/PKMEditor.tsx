@@ -10,6 +10,7 @@ import { TaskItem } from '@tiptap/extension-task-item';
 import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table';
 import { WikiLink } from './extensions/WikiLink';
 import { WikiLinkSuggestionExtension } from './extensions/WikiLinkSuggestion';
+import { SlashCommandExtension } from './extensions/SlashCommandExtension';
 
 export interface Note {
   id: string;
@@ -43,7 +44,7 @@ const PKMEditor: React.FC<PKMEditorProps> = ({ content, onChange, notes, onWikiL
         },
       }),
       Placeholder.configure({
-        placeholder: '开始输入... 支持 Markdown 格式，输入 [[ 创建双向链接',
+        placeholder: '开始输入... 支持 Markdown，输入 [[ 创建双向链接，输入 / 插入块',
       }),
       TaskList,
       TaskItem.configure({
@@ -57,6 +58,7 @@ const PKMEditor: React.FC<PKMEditorProps> = ({ content, onChange, notes, onWikiL
       TableHeader,
       WikiLink.configure({ notes }),
       WikiLinkSuggestionExtension.configure({ notes }),
+      SlashCommandExtension,
     ],
     content,
     contentType: 'markdown',
@@ -109,6 +111,7 @@ const PKMEditor: React.FC<PKMEditorProps> = ({ content, onChange, notes, onWikiL
           TableHeader,
           WikiLink.configure({ notes }),
           WikiLinkSuggestionExtension.configure({ notes }),
+          SlashCommandExtension,
         ],
       });
     }
