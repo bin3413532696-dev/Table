@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X, BookOpen } from 'lucide-react';
+import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X } from 'lucide-react';
 
 const menuItems = [
   { path: '/dashboard', icon: Home, label: '首页' },
   { path: '/tasks', icon: CheckSquare, label: '任务' },
   { path: '/finance', icon: Wallet, label: '费用统计' },
-  { path: '/knowledge', icon: BookOpen, label: '知识库' },
   { path: '/tools', icon: Calendar, label: '工具' },
   { path: '/settings', icon: Settings, label: '设置' },
 ];
@@ -76,14 +75,14 @@ export const Sidebar: React.FC = () => {
           transition={{ duration: 0.4 }}
           className="p-6 border-b border-sidebar-border"
         >
-          <h1 className="text-xl font-bold flex items-center gap-3 text-[--sidebar-text-active]">
+          <h1 className="text-xl font-bold flex items-center gap-3 text-[#17181b] dark:text-white">
             <motion.div
               whileHover={{ scale: 1.05, rotate: 5 }}
               className="w-10 h-10 bg-primary rounded-lg flex items-center justify-center"
             >
               <span className="text-white font-bold text-lg">W</span>
             </motion.div>
-            <span className="tracking-tight">工作站</span>
+            <span className="tracking-tight text-[#171717] dark:text-white">工作站</span>
           </h1>
         </motion.div>
 

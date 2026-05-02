@@ -4,10 +4,10 @@
  */
 
 // Store 实现
-export { financeStore, taskStore, noteStore } from './impl';
+export { financeStore, taskStore } from './impl';
 
 // Context 和 Hooks
-export { StoreProvider, useStore, useFinance, useTasks, useNotes } from './context';
+export { StoreProvider, useStore, useFinance, useTasks } from './context';
 
 // 基类和类型
 export { BaseStore, generateId } from './base/Store';

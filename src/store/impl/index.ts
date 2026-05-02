@@ -4,4 +4,3 @@
 
 export { financeStore } from './FinanceStore';
 export { taskStore } from './TaskStore';
-export { noteStore } from './NoteStore';

@@ -7,9 +7,8 @@
  */
 
 import { syncEngine, SyncStatus, SyncResult, LoadResult } from '../sync';
-import { financeStore, taskStore, noteStore } from '../store/impl';
+import { financeStore, taskStore } from '../store/impl';
 import { subscribeDataChange } from '../core/events';
-import { KnowledgeNote } from '../core/types';
 
 // ==================== 类型导出 ====================
 
@@ -37,7 +36,7 @@ export async function initializeData(): Promise<boolean> {
     return false;
   }
 
-  const { finance, tasks, notes } = result.data;
+  const { finance, tasks } = result.data;
 
   // 合并数据到本地存储
   // 策略：服务器数据优先，但保留本地更新的数据
@@ -58,14 +57,6 @@ export async function initializeData(): Promise<boolean> {
     }
   }
 
-  // 笔记数据
-  if (Array.isArray(notes) && notes.length > 0) {
-    const localNotes = await noteStore.getAll();
-    if (localNotes.length === 0 || notes.length > localNotes.length) {
-      await noteStore.importNotes(notes as any);
-    }
-  }
-
   console.log('[Sync] Data initialized successfully');
   return true;
 }
@@ -81,11 +72,6 @@ export function startAutoSync() {
   // 监听任务变化
   subscribeDataChange('tasks', () => {
     syncEngine.schedule('tasks');
-  });
-
-  // 监听笔记变化
-  subscribeDataChange('notes', () => {
-    syncEngine.schedule('notes');
   });
 
   console.log('[Sync] Auto sync started');
@@ -148,31 +134,9 @@ async function handleServerChange(message: { type: string; file: string; timesta
     return;
   }
 
-  const { finance, tasks, notes } = result.data;
+  const { finance, tasks } = result.data;
 
   // 更新本地数据（触发 UI 更新）
-
-  // 比较并更新笔记
-  if (Array.isArray(notes)) {
-    const localNotes = await noteStore.getAll();
-    const localMap = new Map(localNotes.map(n => [n.id, n]));
-    const serverMap = new Map(notes.map(n => [n.id, n]));
-
-    // 找出需要更新的笔记
-    for (const [id, serverNote] of serverMap) {
-      const localNote = localMap.get(id);
-      if (!localNote || localNote.updatedAt < (serverNote as any).updatedAt) {
-        await noteStore.update(id, serverNote as any);
-      }
-    }
-
-    // 找出需要删除的笔记
-    for (const [id] of localMap) {
-      if (!serverMap.has(id)) {
-        await noteStore.delete(id);
-      }
-    }
-  }
 
   // 更新财务数据
   if (Array.isArray(finance)) {
@@ -238,10 +202,6 @@ export async function syncFinance(): Promise<SyncResult> {
 
 export async function syncTasks(): Promise<SyncResult> {
   return syncEngine.syncNow('tasks');
-}
-
-export async function syncNotes(): Promise<SyncResult> {
-  return syncEngine.syncNow('notes');
 }
 
 export async function loadAllFromServer(): Promise<LoadResult> {

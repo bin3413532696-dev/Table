@@ -4,9 +4,9 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
-import { EntityId, CrudResult, FinanceRecord, Task, KnowledgeNote, CreateFinanceDTO, UpdateFinanceDTO, CreateTaskDTO, UpdateTaskDTO, CreateNoteDTO, UpdateNoteDTO } from '../../core/types';
+import { EntityId, CrudResult, FinanceRecord, Task, CreateFinanceDTO, UpdateFinanceDTO, CreateTaskDTO, UpdateTaskDTO } from '../../core/types';
 import { eventEmitter, EventTopics, subscribeDataChange } from '../../core/events';
-import { financeStore, taskStore, noteStore } from '../impl';
+import { financeStore, taskStore } from '../impl';
 
 /**
  * Store Context 值类型
@@ -15,7 +15,6 @@ interface StoreContextValue {
   // 数据
   finance: FinanceRecord[];
   tasks: Task[];
-  notes: KnowledgeNote[];
 
   // 加载状态
   loading: boolean;
@@ -39,15 +38,6 @@ interface StoreContextValue {
     getById: (id: EntityId) => Promise<Task | undefined>;
     getStats: () => Promise<{ total: number; completed: number; pending: number }>;
   };
-
-  // 笔记操作
-  noteActions: {
-    create: (dto: CreateNoteDTO) => Promise<CrudResult<KnowledgeNote>>;
-    update: (id: EntityId, dto: UpdateNoteDTO) => Promise<CrudResult<KnowledgeNote>>;
-    delete: (id: EntityId) => Promise<CrudResult<void>>;
-    getById: (id: EntityId) => Promise<KnowledgeNote | undefined>;
-    getStats: () => Promise<{ total: number; tagged: number; linked: number }>;
-  };
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -58,7 +48,6 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [finance, setFinance] = useState<FinanceRecord[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [notes, setNotes] = useState<KnowledgeNote[]>([]);
   const [loading, setLoading] = useState(true);
 
   // 初始化加载数据
@@ -66,14 +55,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [financeData, tasksData, notesData] = await Promise.all([
+        const [financeData, tasksData] = await Promise.all([
           financeStore.getAll(),
           taskStore.getAll(),
-          noteStore.getAll(),
         ]);
         setFinance(financeData);
         setTasks(tasksData);
-        setNotes(notesData);
       } catch (error) {
         console.error('[Store] Failed to load initial data:', error);
       } finally {
@@ -94,14 +81,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setTasks(await taskStore.getAll());
     });
 
-    const unsubNotes = subscribeDataChange('notes', async () => {
-      setNotes(await noteStore.getAll());
-    });
-
     return () => {
       unsubFinance();
       unsubTasks();
-      unsubNotes();
     };
   }, []);
 
@@ -167,42 +149,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     getStats: () => taskStore.getStats(),
   }), []);
 
-  // 笔记操作
-  const noteActions = useMemo(() => ({
-    create: async (dto: CreateNoteDTO) => {
-      const result = await noteStore.create(dto);
-      if (result.success) {
-        setNotes(await noteStore.getAll());
-      }
-      return result;
-    },
-    update: async (id: EntityId, dto: UpdateNoteDTO) => {
-      const result = await noteStore.update(id, dto);
-      if (result.success) {
-        setNotes(await noteStore.getAll());
-      }
-      return result;
-    },
-    delete: async (id: EntityId) => {
-      const result = await noteStore.delete(id);
-      if (result.success) {
-        setNotes(await noteStore.getAll());
-      }
-      return result;
-    },
-    getById: (id: EntityId) => noteStore.getById(id),
-    getStats: () => noteStore.getStats(),
-  }), []);
-
   const value = useMemo(() => ({
     finance,
     tasks,
-    notes,
     loading,
     financeActions,
     taskActions,
-    noteActions,
-  }), [finance, tasks, notes, loading, financeActions, taskActions, noteActions]);
+  }), [finance, tasks, loading, financeActions, taskActions]);
 
   return (
     <StoreContext.Provider value={value}>
@@ -236,12 +189,4 @@ export function useFinance() {
 export function useTasks() {
   const { tasks, loading, taskActions } = useStore();
   return { data: tasks, loading, ...taskActions };
-}
-
-/**
- * 使用笔记数据和操作
- */
-export function useNotes() {
-  const { notes, loading, noteActions } = useStore();
-  return { data: notes, loading, ...noteActions };
 }

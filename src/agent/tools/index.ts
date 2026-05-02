@@ -1,6 +1,5 @@
 import type { Tool, ToolResult, JSONSchema } from '../types';
 import { financeDB, taskDB, type FinanceRecord, type Task } from '../../db';
-import { noteOperations } from '../../db/knowledge';
 import { searchVectors, getIndexedCount } from '../../lib/vectorStore';
 import { isLoaded as isEmbeddingLoaded } from '../../lib/embeddings';
 
@@ -254,89 +253,23 @@ const deleteTaskTool: Tool = {
   },
 };
 
-// ==================== 知识库工具 ====================
-
-const searchKnowledgeTool: Tool = {
-  name: 'search_knowledge',
-  description: '使用语义搜索查询知识库笔记',
-  parameters: {
-    type: 'object',
-    required: ['query'],
-    properties: {
-      query: { type: 'string', description: '搜索关键词或语义描述' },
-      topK: { type: 'number', description: '返回结果数量', default: 5 },
-    },
-  },
-  requiresConfirmation: false,
-  category: 'query',
-  execute: async (params) => {
-    const query = params.query as string;
-    const topK = (params.topK as number) || 5;
-
-    // 检查嵌入模型是否加载
-    if (!isEmbeddingLoaded()) {
-      // 回退到关键词搜索
-      const notes = await noteOperations.getAll();
-      const keywordResults = notes.filter(n =>
-        n.title.includes(query) || n.content.includes(query)
-      ).slice(0, topK);
-      return { success: true, data: keywordResults, note: '语义搜索未就绪，使用关键词搜索' };
-    }
-
-    const results = await searchVectors(query, topK);
-    return { success: true, data: results };
-  },
-};
-
-const getKnowledgeIndexStatusTool: Tool = {
-  name: 'get_knowledge_index_status',
-  description: '获取知识库向量索引状态',
-  parameters: { type: 'object', properties: {} },
-  requiresConfirmation: false,
-  category: 'query',
-  execute: async () => {
-    const count = await getIndexedCount();
-    return { success: true, data: { indexedCount: count, embeddingLoaded: isEmbeddingLoaded() } };
-  },
-};
-
-const listNotesTool: Tool = {
-  name: 'list_notes',
-  description: '列出所有笔记',
-  parameters: {
-    type: 'object',
-    properties: {
-      limit: { type: 'number', description: '返回数量限制', default: 20 },
-    },
-  },
-  requiresConfirmation: false,
-  category: 'query',
-  execute: async (params) => {
-    const limit = (params.limit as number) || 20;
-    const notes = await noteOperations.getAll();
-    return { success: true, data: notes.slice(0, limit) };
-  },
-};
-
 // ==================== 跨模块分析工具 ====================
 
 const getOverviewTool: Tool = {
   name: 'get_overview',
-  description: '获取全局概览：财务摘要、任务进度、知识库状态',
+  description: '获取全局概览：财务摘要、任务进度',
   parameters: { type: 'object', properties: {} },
   requiresConfirmation: false,
   category: 'query',
   execute: async () => {
     const financeStats = await financeDB.getStats();
     const taskStats = await taskDB.getStats();
-    const noteCount = await noteOperations.getCount();
 
     return {
       success: true,
       data: {
         finance: financeStats,
         tasks: taskStats,
-        knowledge: { noteCount },
       },
     };
   },
@@ -428,11 +361,6 @@ export const toolRegistry: Map<string, Tool> = new Map([
   [createTaskTool.name, createTaskTool],
   [updateTaskTool.name, updateTaskTool],
   [deleteTaskTool.name, deleteTaskTool],
-
-  // 知识库工具
-  [searchKnowledgeTool.name, searchKnowledgeTool],
-  [getKnowledgeIndexStatusTool.name, getKnowledgeIndexStatusTool],
-  [listNotesTool.name, listNotesTool],
 
   // 分析工具
   [getOverviewTool.name, getOverviewTool],

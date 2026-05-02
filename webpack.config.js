@@ -78,37 +78,7 @@ function writeSyncData(data) {
       'utf-8'
     );
 
-    // 每个笔记写入单独的 markdown 文件
-    data.notes.forEach(note => {
-      const fileName = sanitizeFileName(note.title) + '_' + note.id.slice(0, 8) + '.md';
-      const filePath = path.join(DATA_DIR, 'notes', fileName);
-
-      // YAML frontmatter
-      const frontmatter = [
-        '---',
-        `id: ${note.id}`,
-        `title: "${note.title.replace(/"/g, '\\"')}"`,
-        `tags: [${note.tags.map(t => `"${t}"`).join(', ')}]`,
-        `links: [${note.links.map(l => `"${l}"`).join(', ')}]`,
-        `backlinks: [${note.backlinks.map(b => `"${b}"`).join(', ')}]`,
-        `createdAt: ${note.createdAt}`,
-        `updatedAt: ${note.updatedAt}`,
-        '---',
-        '',
-      ].join('\n');
-
-      fs.writeFileSync(filePath, frontmatter + note.content, 'utf-8');
-    });
-
-    // 清理已删除的笔记文件
-    const existingFiles = fs.readdirSync(path.join(DATA_DIR, 'notes')).filter(f => f.endsWith('.md'));
-    const expectedFiles = data.notes.map(note => sanitizeFileName(note.title) + '_' + note.id.slice(0, 8) + '.md');
-    existingFiles.forEach(file => {
-      if (!expectedFiles.includes(file) && file !== '.gitkeep') {
-        fs.unlinkSync(path.join(DATA_DIR, 'notes', file));
-      }
-    });
-  }
+    }
 
   // 4. 文件夹结构
   if (Array.isArray(data.folders)) {
@@ -128,7 +98,6 @@ function readSyncData() {
   const result = {
     tasks: [],
     finance: [],
-    notes: [],
     folders: [],
     config: {},
   };
@@ -151,26 +120,6 @@ function readSyncData() {
     }
   } catch (e) {
     console.warn('[Data] Failed to read finance:', e.message);
-  }
-
-  // 读取笔记（从 Markdown 文件）
-  try {
-    const notesDir = path.join(DATA_DIR, 'notes');
-    const noteFiles = fs.readdirSync(notesDir).filter(f => f.endsWith('.md'));
-
-    noteFiles.forEach(file => {
-      try {
-        const content = fs.readFileSync(path.join(notesDir, file), 'utf-8');
-        const note = parseNoteMarkdown(content);
-        if (note) {
-          result.notes.push(note);
-        }
-      } catch (e) {
-        console.warn('[Data] Failed to parse note:', file, e.message);
-      }
-    });
-  } catch (e) {
-    console.warn('[Data] Failed to read notes:', e.message);
   }
 
   // 读取文件夹
@@ -196,58 +145,7 @@ function readSyncData() {
   return result;
 }
 
-// 解析 Markdown 笔记文件
-function parseNoteMarkdown(content) {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!frontmatterMatch) {
-    return null;
-  }
 
-  const [, frontmatterText, noteContent] = frontmatterMatch;
-  const note = {
-    id: '',
-    title: '',
-    content: noteContent,
-    tags: [],
-    links: [],
-    backlinks: [],
-    createdAt: 0,
-    updatedAt: 0,
-  };
-
-  // 解析 YAML frontmatter
-  const lines = frontmatterText.split('\n');
-  lines.forEach(line => {
-    const [key, ...valueParts] = line.split(':');
-    const value = valueParts.join(':').trim();
-
-    switch (key.trim()) {
-      case 'id':
-        note.id = value;
-        break;
-      case 'title':
-        note.title = value.replace(/^"|"$/g, '');
-        break;
-      case 'tags':
-        note.tags = parseArrayValue(value);
-        break;
-      case 'links':
-        note.links = parseArrayValue(value);
-        break;
-      case 'backlinks':
-        note.backlinks = parseArrayValue(value);
-        break;
-      case 'createdAt':
-        note.createdAt = parseInt(value, 10) || 0;
-        break;
-      case 'updatedAt':
-        note.updatedAt = parseInt(value, 10) || 0;
-        break;
-    }
-  });
-
-  return note.id ? note : null;
-}
 
 // 解析数组值 [\"a\", \"b\"]
 function parseArrayValue(value) {
@@ -388,70 +286,7 @@ module.exports = (env, argv) => {
           }
         });
 
-        // API: 加载单个笔记
-        app.get('/api/notes/:id', (req, res, next) => {
-          try {
-            const notesDir = path.join(DATA_DIR, 'notes');
-            const files = fs.readdirSync(notesDir).filter(f => f.includes(req.params.id.slice(0, 8)));
-
-            if (files.length === 0) {
-              return res.status(404).json({ success: false, error: 'Note not found' });
-            }
-
-            const content = fs.readFileSync(path.join(notesDir, files[0]), 'utf-8');
-            const note = parseNoteMarkdown(content);
-            res.json({ success: true, note });
-          } catch (err) {
-            res.status(500).json({ success: false, error: err.message });
-          }
-        });
-
-        // API: 保存单个笔记
-        app.post('/api/notes/:id', (req, res) => {
-          let body = '';
-          req.on('data', chunk => { body += chunk; });
-          req.on('end', () => {
-            try {
-              const note = JSON.parse(body);
-              const fileName = sanitizeFileName(note.title) + '_' + note.id.slice(0, 8) + '.md';
-              const filePath = path.join(DATA_DIR, 'notes', fileName);
-
-              const frontmatter = [
-                '---',
-                `id: ${note.id}`,
-                `title: "${note.title.replace(/"/g, '\\"')}"`,
-                `tags: [${note.tags.map(t => `"${t}"`).join(', ')}]`,
-                `links: [${note.links.map(l => `"${l}"`).join(', ')}]`,
-                `backlinks: [${note.backlinks.map(b => `"${b}"`).join(', ')}]`,
-                `createdAt: ${note.createdAt}`,
-                `updatedAt: ${note.updatedAt}`,
-                '---',
-                '',
-              ].join('\n');
-
-              fs.writeFileSync(filePath, frontmatter + note.content, 'utf-8');
-              res.json({ success: true });
-            } catch (err) {
-              res.status(500).json({ success: false, error: err.message });
-            }
-          });
-        });
-
-        // API: 删除笔记
-        app.delete('/api/notes/:id', (req, res) => {
-          try {
-            const notesDir = path.join(DATA_DIR, 'notes');
-            const files = fs.readdirSync(notesDir).filter(f => f.includes(req.params.id.slice(0, 8)));
-
-            files.forEach(file => {
-              fs.unlinkSync(path.join(notesDir, file));
-            });
-
-            res.json({ success: true });
-          } catch (err) {
-            res.status(500).json({ success: false, error: err.message });
-          }
-        });
+        
 
         // 启动文件监听
         try {

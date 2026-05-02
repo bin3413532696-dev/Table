@@ -1,19 +1,16 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useMemo } from 'react';
 import { financeDB, taskDB, subscribe, type FinanceRecord, type Task } from '../db';
-import { knowledgeDb, subscribeKnowledge, type KnowledgeNote } from '../db/knowledge';
 
 export interface AppState {
   finance: FinanceRecord[];
   tasks: Task[];
-  notes: KnowledgeNote[];
   loading: boolean;
 }
 
 type Action =
-  | { type: 'LOAD_DATA'; payload: { finance: FinanceRecord[]; tasks: Task[]; notes: KnowledgeNote[] } }
+  | { type: 'LOAD_DATA'; payload: { finance: FinanceRecord[]; tasks: Task[] } }
   | { type: 'UPDATE_FINANCE'; payload: FinanceRecord[] }
   | { type: 'UPDATE_TASKS'; payload: Task[] }
-  | { type: 'UPDATE_NOTES'; payload: KnowledgeNote[] }
   | { type: 'SET_LOADING'; payload: boolean };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -24,8 +21,6 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, finance: action.payload };
     case 'UPDATE_TASKS':
       return { ...state, tasks: action.payload };
-    case 'UPDATE_NOTES':
-      return { ...state, notes: action.payload };
     case 'SET_LOADING':
       return { ...state, loading: action.payload };
     default:
@@ -36,7 +31,6 @@ function reducer(state: AppState, action: Action): AppState {
 const initialState: AppState = {
   finance: [],
   tasks: [],
-  notes: [],
   loading: true,
 };
 
@@ -61,12 +55,6 @@ interface StoreContextType {
     toggle: (id: string) => Promise<void>;
     getStats: () => Promise<{ total: number; completed: number; pending: number }>;
   };
-
-  noteActions: {
-    getAll: () => Promise<KnowledgeNote[]>;
-    getCount: () => Promise<number>;
-    getStats: () => Promise<{ total: number; tagged: number; linked: number }>;
-  };
 }
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -76,14 +64,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const loadData = useCallback(async () => {
     dispatch({ type: 'SET_LOADING', payload: true });
-    const [finance, tasks, notes] = await Promise.all([
+    const [finance, tasks] = await Promise.all([
       financeDB.getAll(),
       taskDB.getAll(),
-      knowledgeDb.notes.toArray(),
     ]);
     dispatch({
       type: 'LOAD_DATA',
-      payload: { finance, tasks, notes },
+      payload: { finance, tasks },
     });
   }, []);
 
@@ -101,16 +88,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           dispatch({ type: 'UPDATE_TASKS', payload: await taskDB.getAll() });
           break;
       }
-    });
-
-    return unsubscribe;
-  }, []);
-
-  // 知识库数据订阅
-  useEffect(() => {
-    const unsubscribe = subscribeKnowledge(async () => {
-      const notes = await knowledgeDb.notes.toArray();
-      dispatch({ type: 'UPDATE_NOTES', payload: notes });
     });
 
     return unsubscribe;
@@ -165,30 +142,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     getStats: async () => taskDB.getStats(),
   }), []);
 
-  const noteActions = useMemo(() => ({
-    getAll: async () => {
-      const data = await knowledgeDb.notes.toArray();
-      dispatch({ type: 'UPDATE_NOTES', payload: data });
-      return data;
-    },
-    getCount: async () => knowledgeDb.notes.count(),
-    getStats: async () => {
-      const notes = await knowledgeDb.notes.toArray();
-      return {
-        total: notes.length,
-        tagged: notes.filter(n => n.tags.length > 0).length,
-        linked: notes.filter(n => n.links.length > 0).length,
-      };
-    },
-  }), []);
-
   const value = useMemo(() => ({
     state,
     loadData,
     financeActions,
     taskActions,
-    noteActions,
-  }), [state, loadData, financeActions, taskActions, noteActions]);
+  }), [state, loadData, financeActions, taskActions]);
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
@@ -209,9 +168,4 @@ export function useFinance() {
 export function useTasks() {
   const { state, taskActions } = useStore();
   return { data: state.tasks, ...taskActions };
-}
-
-export function useNotes() {
-  const { state, noteActions } = useStore();
-  return { data: state.notes, ...noteActions };
 }

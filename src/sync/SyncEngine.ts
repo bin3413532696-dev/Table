@@ -116,7 +116,7 @@ class SyncEngineClass {
   private async performSync(types: SyncDataType[]): Promise<SyncResult> {
     try {
       // 动态导入 Store 实现以避免循环依赖
-      const { financeStore, taskStore, noteStore } = await import('../store/impl');
+      const { financeStore, taskStore } = await import('../store/impl');
 
       const payload: Record<string, unknown> = {};
 
@@ -126,9 +126,6 @@ class SyncEngineClass {
         }
         if (type === 'all' || type === 'tasks') {
           payload.tasks = await taskStore.getAll();
-        }
-        if (type === 'all' || type === 'notes') {
-          payload.notes = await noteStore.getAll();
         }
       }
 
@@ -213,11 +210,4 @@ export function syncFinance(): void {
  */
 export function syncTasks(): void {
   syncEngine.schedule('tasks');
-}
-
-/**
- * 便捷函数：同步笔记数据
- */
-export function syncNotes(): void {
-  syncEngine.schedule('notes');
 }

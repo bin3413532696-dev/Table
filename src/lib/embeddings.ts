@@ -30,38 +30,27 @@ export async function initEmbedder(onProgress?: ProgressCallback): Promise<void>
 
   initPromise = (async () => {
     try {
-      // 尝试 WebGPU，失败则回退到 WASM
-      let device: 'webgpu' | 'wasm' = 'wasm';
-
-      try {
-        // 检测 WebGPU 支持
-        if ('gpu' in navigator) {
-          const adapter = await (navigator as any).gpu.requestAdapter();
-          if (adapter) {
-            device = 'webgpu';
-          }
-        }
-      } catch {
-        console.log('[Embedder] WebGPU not available, falling back to WASM');
-      }
+      console.log('[Embedder] Creating pipeline...');
 
       extractor = await pipeline(
         'feature-extraction',
         'Xenova/all-MiniLM-L6-v2',
         {
-          device,
-          dtype: device === 'webgpu' ? 'q8' : 'q8',
+          device: 'wasm',
           progress_callback: (progress: any) => {
-            if (progress.status === 'progress') {
-              const percent = Math.round(progress.progress * 100);
+            console.log('[Embedder] Progress:', progress);
+            if (progress.status === 'progress' && progress.progress) {
+              const percent = Math.round(progress.progress);
               progressCallback?.({ loaded: false, loading: true, progress: percent });
             }
           },
         }
       );
+
+      console.log('[Embedder] Pipeline ready');
       progressCallback?.({ loaded: true, loading: false, progress: 100 });
     } catch (error) {
-      console.error('[Embedder] Failed to initialize:', error);
+      console.error('[Embedder] Init failed:', error);
       progressCallback?.({ loaded: false, loading: false, progress: null });
       throw error;
     }
@@ -71,30 +60,19 @@ export async function initEmbedder(onProgress?: ProgressCallback): Promise<void>
 }
 
 export async function embedText(text: string): Promise<Float32Array> {
-  if (!extractor) {
-    await initEmbedder();
-  }
-
-  const output = await extractor(text, {
-    pooling: 'mean',
-    normalize: true,
-  });
-
+  if (!extractor) await initEmbedder();
+  const output = await extractor(text, { pooling: 'mean', normalize: true });
   return output.data;
 }
 
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
+  let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
+    dot += a[i] * b[i];
     normA += a[i] * a[i];
     normB += b[i] * b[i];
   }
-
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
 export function isLoaded(): boolean {

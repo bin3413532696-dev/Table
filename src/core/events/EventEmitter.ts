@@ -89,7 +89,6 @@ export const eventEmitter = new EventEmitterClass();
 
 /**
  * 订阅数据变更事件
- * 统一接口，替代原有的 subscribe / subscribeKnowledge
  */
 export function subscribeDataChange(
   type: DataType,
@@ -143,9 +142,4 @@ export function subscribe(listener: LegacyListener): () => void {
   };
 }
 
-// 兼容 db/knowledge.ts 的 subscribeKnowledge
-export type KnowledgeListener = () => void;
 
-export function subscribeKnowledge(listener: KnowledgeListener): () => void {
-  return eventEmitter.subscribe(EventTopics.NOTES_CHANGED, listener);
-}

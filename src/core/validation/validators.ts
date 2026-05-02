@@ -174,35 +174,4 @@ export function isValidCreateTaskDTO(dto: unknown): dto is import('../types').Cr
   );
 }
 
-/**
- * 知识笔记验证
- */
-export function isValidNote(note: unknown): note is import('../types').KnowledgeNote {
-  if (typeof note !== 'object' || note === null) return false;
-  const n = note as Record<string, unknown>;
 
-  return (
-    isValidId(n.id) &&
-    isNonEmptyString(n.title) &&
-    isValidString(n.content, VALIDATION_CONSTANTS.MAX_CONTENT_LENGTH) &&
-    isStringArray(n.tags) &&
-    isStringArray(n.links) &&
-    isStringArray(n.backlinks) &&
-    isValidTimestamp(n.createdAt) &&
-    isValidTimestamp(n.updatedAt)
-  );
-}
-
-/**
- * 创建笔记 DTO 验证
- */
-export function isValidCreateNoteDTO(dto: unknown): dto is import('../types').CreateNoteDTO {
-  if (typeof dto !== 'object' || dto === null) return false;
-  const d = dto as Record<string, unknown>;
-
-  return (
-    isNonEmptyString(d.title) &&
-    isValidString(d.content, VALIDATION_CONSTANTS.MAX_CONTENT_LENGTH) &&
-    (d.tags === undefined || isStringArray(d.tags))
-  );
-}

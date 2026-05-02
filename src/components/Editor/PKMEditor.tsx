@@ -129,7 +129,7 @@ const PKMEditor: React.FC<PKMEditorProps> = ({ content, onChange, notes, onWikiL
   }
 
   return (
-    <div className="pkm-editor h-full" onClick={handleClick}>
+    <div className="pkm-editor h-full [&_.ProseMirror]:!outline-none" onClick={handleClick}>
       <EditorContent editor={editor} className="h-full" />
     </div>
   );
