@@ -10,6 +10,8 @@ const PRIORITY_CONFIG: Record<PriorityType, { label: string; color: string; bgCo
   low: { label: '低', color: 'text-success', bgColor: 'bg-success' },
 };
 
+const MAX_TITLE_DISPLAY = 60;
+
 interface TaskItemProps {
   task: Task;
   editingId: string | null;
@@ -29,6 +31,25 @@ interface TaskItemProps {
   onToggleSelect: (id: string) => void;
   index?: number;
 }
+
+const formatDisplayDate = (dateStr: string): string => {
+  const date = new Date(dateStr);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const dateOnly = dateStr.split('T')[0];
+  const todayOnly = today.toISOString().split('T')[0];
+  const yesterdayOnly = yesterday.toISOString().split('T')[0];
+  const tomorrowOnly = tomorrow.toISOString().split('T')[0];
+
+  if (dateOnly === todayOnly) return '今天';
+  if (dateOnly === yesterdayOnly) return '昨天';
+  if (dateOnly === tomorrowOnly) return '明天';
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+};
 
 export const TaskItem: React.FC<TaskItemProps> = ({
   task,
@@ -63,6 +84,9 @@ export const TaskItem: React.FC<TaskItemProps> = ({
     return Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
   };
   const overdue = isOverdue(task.dueDate, task.completed);
+  const truncatedTitle = task.title.length > MAX_TITLE_DISPLAY
+    ? task.title.slice(0, MAX_TITLE_DISPLAY) + '...'
+    : task.title;
 
   return (
     <motion.div
@@ -70,6 +94,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
+      transition={index !== undefined ? { delay: Math.min(index * 0.03, 0.3) } : undefined}
       className={`group relative flex items-center gap-4 p-4 rounded-lg border transition-all duration-150 ${
         task.completed
           ? 'bg-bg-secondary/50 border-border-primary'
@@ -83,7 +108,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
           type="checkbox"
           checked={selectedIds.has(task.id)}
           onChange={() => onToggleSelect(task.id)}
-          className="w-4 h-4 rounded border-border-primary accent-primary"
+          className="w-4 h-4 rounded border-border-primary accent-primary shrink-0"
         />
       )}
 
@@ -94,6 +119,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             ? 'bg-success text-white'
             : 'border-2 border-border-secondary hover:border-primary'
         }`}
+        title={task.completed ? '标记为未完成' : '标记为完成'}
       >
         {task.completed && <CheckCircle size={14} />}
       </button>
@@ -117,27 +143,27 @@ export const TaskItem: React.FC<TaskItemProps> = ({
                 onChange={(e) => onDueDateChange(e.target.value)}
                 className="px-2 py-1 border rounded text-sm bg-bg-card border-border-primary text-text-secondary"
               />
-              <button onClick={onSaveEdit} className="px-3 py-1 bg-primary text-white rounded text-sm">保存</button>
-              <button onClick={onCancelEdit} className="px-3 py-1 bg-bg-secondary text-text-secondary rounded text-sm">取消</button>
+              <button onClick={onSaveEdit} className="px-3 py-1 bg-primary text-white rounded text-sm hover:bg-primary-600 transition-colors">保存</button>
+              <button onClick={onCancelEdit} className="px-3 py-1 bg-bg-secondary text-text-secondary rounded text-sm hover:bg-bg-tertiary transition-colors">取消</button>
             </div>
           </div>
         ) : (
           <>
-            <p className={`font-medium ${task.completed ? 'text-text-muted line-through' : 'text-text-primary'}`}>
-              {task.title}
+            <p className={`font-medium truncate ${task.completed ? 'text-text-muted line-through' : 'text-text-primary'}`} title={task.title}>
+              {truncatedTitle}
             </p>
-            <div className="flex items-center gap-2 mt-1.5">
-              <span className="flex items-center gap-1 text-xs text-text-muted">
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              <span className="flex items-center gap-1 text-xs text-text-muted shrink-0">
                 <Calendar size={12} />
-                {new Date(task.createdAt).toLocaleDateString()}
+                {formatDisplayDate(task.createdAt)}
               </span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${config.bgColor}/10 ${config.color} border border-current/20`}>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${config.bgColor}/10 ${config.color} border border-current/20 shrink-0`}>
                 {config.label}
               </span>
               {task.dueDate && (
-                <span className={`flex items-center gap-1 text-xs ${overdue ? 'text-error font-medium' : 'text-text-muted'}`}>
+                <span className={`flex items-center gap-1 text-xs shrink-0 ${overdue ? 'text-error font-medium' : 'text-text-muted'}`}>
                   <Clock size={12} />
-                  {new Date(task.dueDate).toLocaleDateString()}
+                  {formatDisplayDate(task.dueDate)}
                   {overdue && <span className="text-error">(逾期{getOverdueDays(task.dueDate)}天)</span>}
                 </span>
               )}
@@ -147,16 +173,18 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       </div>
 
       {editingId !== task.id && (
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
           <button
             onClick={() => onStartEdit(task)}
             className="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-colors"
+            title="编辑"
           >
             <Edit2 size={16} />
           </button>
           <button
             onClick={() => onDelete(task.id)}
             className="p-2 rounded-lg text-text-muted hover:text-error hover:bg-error/10 transition-colors"
+            title="删除"
           >
             <Trash2 size={16} />
           </button>

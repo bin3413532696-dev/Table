@@ -1,7 +1,10 @@
+let idCounter = 0;
+
 function generateId(): string {
   const timestamp = Date.now().toString(36);
   const random = Math.random().toString(36).substring(2, 9);
-  const counter = Math.floor(Math.random() * 1000).toString(36).padStart(3, '0');
+  idCounter = (idCounter + 1) % 1000;
+  const counter = idCounter.toString(36).padStart(3, '0');
   return `${timestamp}-${random}-${counter}`;
 }
 
@@ -27,15 +30,18 @@ function isValidDate(dateStr: string): boolean {
   return date instanceof Date && !isNaN(date.getTime());
 }
 
+const MAX_AMOUNT = 999999999.99;
+const MAX_STRING_LENGTH = 500;
+
 function isValidFinanceRecord(record: unknown): record is FinanceRecord {
   if (typeof record !== 'object' || record === null) return false;
   const r = record as FinanceRecord;
   return (
     isValidId(r.id) &&
     (r.type === 'income' || r.type === 'expense') &&
-    typeof r.amount === 'number' && r.amount >= 0 &&
-    typeof r.description === 'string' &&
-    typeof r.category === 'string' &&
+    typeof r.amount === 'number' && r.amount >= 0 && r.amount <= MAX_AMOUNT &&
+    typeof r.description === 'string' && r.description.length <= MAX_STRING_LENGTH &&
+    typeof r.category === 'string' && r.category.length <= MAX_STRING_LENGTH &&
     isValidDate(r.date) &&
     (r.model === undefined || typeof r.model === 'string')
   );
@@ -46,7 +52,7 @@ function isValidTask(record: unknown): record is Task {
   const r = record as Task;
   return (
     isValidId(r.id) &&
-    typeof r.title === 'string' &&
+    typeof r.title === 'string' && r.title.length <= MAX_STRING_LENGTH &&
     typeof r.completed === 'boolean' &&
     isValidDate(r.createdAt) &&
     (r.priority === 'low' || r.priority === 'medium' || r.priority === 'high') &&
@@ -103,14 +109,34 @@ function loadFromStorage<T>(key: string): T[] {
 }
 
 let storageError: Error | null = null;
+let storageQuotaExceeded: boolean = false;
 
 function saveToStorage<T>(key: string, records: T[]) {
   try {
-    localStorage.setItem(key, JSON.stringify(records));
+    const serialized = JSON.stringify(records);
+
+    // Check if we're approaching localStorage limits (typically 5-10MB)
+    const totalSize = new Blob([serialized]).size;
+    if (totalSize > 4 * 1024 * 1024) { // 4MB warning threshold
+      console.warn('[DB] Storage size approaching limit:', (totalSize / 1024 / 1024).toFixed(2) + 'MB');
+    }
+
+    localStorage.setItem(key, serialized);
     storageError = null;
+    storageQuotaExceeded = false;
   } catch (error) {
     storageError = error instanceof Error ? error : new Error('Storage error');
-    console.error('[DB] Failed to save to localStorage:', storageError);
+    storageQuotaExceeded = error instanceof DOMException && error.name === 'QuotaExceededError';
+
+    if (storageQuotaExceeded) {
+      console.error('[DB] Storage quota exceeded! Consider clearing old data.');
+      // Dispatch custom event for UI to handle
+      window.dispatchEvent(new CustomEvent('storageQuotaExceeded', {
+        detail: { key, size: records.length }
+      }));
+    } else {
+      console.error('[DB] Failed to save to localStorage:', storageError);
+    }
     return;
   }
 
@@ -131,11 +157,28 @@ export function getStorageError(): Error | null {
   return storageError;
 }
 
+export function isStorageQuotaExceeded(): boolean {
+  return storageQuotaExceeded;
+}
+
+export function getStorageUsage(): { used: number; available: boolean } {
+  try {
+    const financeData = localStorage.getItem(STORAGE_KEYS.finance) || '';
+    const tasksData = localStorage.getItem(STORAGE_KEYS.tasks) || '';
+    const used = new Blob([financeData + tasksData]).size;
+    return { used, available: true };
+  } catch {
+    return { used: 0, available: false };
+  }
+}
+
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let syncStatus: 'idle' | 'syncing' | 'success' | 'error' = 'idle';
 let lastSyncError: Error | null = null;
 let syncRetryCount = 0;
+let lastSuccessfulSync: string | null = null;
 const MAX_RETRY_COUNT = 3;
+const SYNC_DELAY = 1500;
 
 interface SyncResult {
   success: boolean;
@@ -144,6 +187,10 @@ interface SyncResult {
 }
 
 async function performSync(): Promise<SyncResult> {
+  if (syncStatus === 'syncing') {
+    return { success: false, error: 'Sync already in progress' };
+  }
+
   try {
     syncStatus = 'syncing';
     syncRetryCount = 0;
@@ -163,7 +210,19 @@ async function performSync(): Promise<SyncResult> {
 
     syncStatus = 'success';
     lastSyncError = null;
-    return { success: true, timestamp: new Date().toISOString() };
+    lastSuccessfulSync = new Date().toISOString();
+
+    // Persist sync status
+    try {
+      localStorage.setItem('last_sync_status', JSON.stringify({
+        status: syncStatus,
+        timestamp: lastSuccessfulSync
+      }));
+    } catch {
+      // Ignore persistence errors for sync status
+    }
+
+    return { success: true, timestamp: lastSuccessfulSync };
   } catch (error) {
     const err = error instanceof Error ? error : new Error('Unknown sync error');
     lastSyncError = err;
@@ -190,7 +249,19 @@ function scheduleSync() {
     if (typeof fetch !== 'undefined') {
       performSync();
     }
-  }, 1500);
+  }, SYNC_DELAY);
+}
+
+// Restore sync status on load
+try {
+  const savedSyncStatus = localStorage.getItem('last_sync_status');
+  if (savedSyncStatus) {
+    const parsed = JSON.parse(savedSyncStatus);
+    lastSuccessfulSync = parsed.timestamp;
+    syncStatus = parsed.status === 'success' ? 'success' : 'idle';
+  }
+} catch {
+  // Ignore errors
 }
 
 class Store<T extends { id: string }> {
@@ -522,11 +593,13 @@ export const dataManager = {
     status: 'idle' | 'syncing' | 'success' | 'error';
     lastError: string | null;
     retryCount: number;
+    lastSuccessfulSync: string | null;
   } {
     return {
       status: syncStatus,
       lastError: lastSyncError?.message || null,
-      retryCount: syncRetryCount
+      retryCount: syncRetryCount,
+      lastSuccessfulSync
     };
   },
 

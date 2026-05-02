@@ -30,41 +30,110 @@
   --color-primary-active: #0D3899;
   --color-primary-light: #E8F1FF;
 
-  /* 语义色变量 */
+  /* Info语义色（与Primary一致） */
+  --color-info: #165DFF;
+  --color-info-light: #E8F1FF;
+  --color-info-dark: #092666;
+
+  /* Success语义色 */
   --color-success: #00B42A;
   --color-success-light: #E8FFEA;
+  --color-success-dark: #009922;
+
+  /* Warning语义色 */
   --color-warning: #FF7D00;
   --color-warning-light: #FFF7E8;
+  --color-warning-dark: #CC6400;
+
+  /* Error语义色 */
   --color-error: #F53F3F;
   --color-error-light: #FFECE8;
+  --color-error-dark: #CB272D;
+
+  /* 图表专用色 */
+  --chart-1: #165DFF;
+  --chart-2: #00B42A;
+  --chart-3: #FF7D00;
+  --chart-4: #F53F3F;
+  --chart-5: #757575;
+  --chart-6: #8B5CF6;
+  --chart-7: #06B6D4;
+  --chart-8: #84CC16;
+  --chart-positive: #00B42A;
+  --chart-negative: #F53F3F;
+  --chart-neutral: #757575;
+
+  /* Sidebar 变量（浅色模式） */
+  --sidebar-bg: #FAFAFA;
+  --sidebar-border: #E0E0E0;
+  --sidebar-text: #616161;
+  --sidebar-text-active: #212121;
+  --sidebar-active-bg: #165DFF;
+
+  /* 状态分隔背景色（费用概览内部模块） */
+  --status-income-bg: #E8FFEA;
+  --status-income-border: #B8FFC0;
+  --status-expense-bg: #FFECE8;
+  --status-expense-border: #FFD9D1;
+  --status-neutral-bg: #F5F5F5;
+  --status-neutral-border: #E0E0E0;
 }
 
 .dark {
-  --bg-primary: #141414;
-  --bg-secondary: #1F1F1F;
-  --bg-tertiary: #2A2A2A;
-  --bg-card: #1F1F1F;
+  /* 背景 - 增强层级差异 */
+  --bg-primary: #0A0A0A;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1F1F1F;
+  --bg-card: #1C1C1C;
 
+  /* 文字 - 改善对比度 */
   --text-primary: #FAFAFA;
-  --text-secondary: #BDBDBD;
-  --text-muted: #757575;
+  --text-secondary: #D4D4D4;
+  --text-muted: #A3A3A3;
 
+  /* 边框 */
   --border-primary: #2A2A2A;
   --border-secondary: #424242;
 
   --color-primary-light: #092666;
+  --color-info-light: #092666;
 
-  --color-success: #00B42A;
-  --color-success-light: #092666;
-  --color-warning: #FF7D00;
-  --color-warning-light: #2A1A00;
-  --color-error: #F53F3F;
-  --color-error-light: #2A0A0A;
+  --color-success: #34D399;
+  --color-success-light: #064E3B;
+  --color-success-dark: #34D399;
+  --color-warning: #FBBF24;
+  --color-warning-light: #78350F;
+  --color-warning-dark: #FBBF24;
+  --color-error: #F87171;
+  --color-error-light: #7F1D1D;
+  --color-error-dark: #F87171;
 
+  --chart-1: #478FFF;
+  --chart-2: #34D399;
+  --chart-3: #FBBF24;
+  --chart-4: #F87171;
+  --chart-5: #A1A1AA;
+  --chart-6: #A78BFA;
+  --chart-7: #22D3EE;
+  --chart-8: #A3E635;
+  --chart-positive: #34D399;
+  --chart-negative: #F87171;
+  --chart-neutral: #A1A1AA;
+
+  /* Sidebar 深色模式 */
   --sidebar-bg: #18181B;
   --sidebar-border: #3F3F46;
   --sidebar-text: #A1A1AA;
   --sidebar-text-active: #FFFFFF;
+  --sidebar-active-bg: #165DFF;
+
+  /* 状态分隔背景色（深色适配） */
+  --status-income-bg: #064E3B;
+  --status-income-border: #10B981;
+  --status-expense-bg: #7F1D1D;
+  --status-expense-border: #EF4444;
+  --status-neutral-bg: #262626;
+  --status-neutral-border: #404040;
 }
 
 /* 字体设置 */

@@ -1,14 +1,17 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Calendar } from 'lucide-react';
 import type { FinanceRecord } from '../../../db';
+
+const MAX_AMOUNT = 999999999.99;
+const MAX_DESCRIPTION_LENGTH = 100;
 
 interface RecordFormProps {
   formData: Partial<FinanceRecord>;
   editingId: string | null;
   categories: { income: string[]; expense: string[] };
   models: string[];
-  formErrors: { amount?: string; description?: string };
+  formErrors: { amount?: string; description?: string; category?: string };
   onSubmit: (e: React.FormEvent) => void;
   onClose: () => void;
   onDataChange: (data: Partial<FinanceRecord>) => void;
@@ -26,6 +29,10 @@ export const RecordForm: React.FC<RecordFormProps> = ({
 }) => {
   const formRef = useRef<HTMLFormElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const today = new Date().toISOString().split('T')[0];
+  const descriptionLength = (formData.description || '').length;
 
   useEffect(() => {
     setTimeout(() => firstInputRef.current?.focus(), 50);
@@ -51,7 +58,12 @@ export const RecordForm: React.FC<RecordFormProps> = ({
         <h2 className="text-lg font-semibold mb-5 text-text-primary">
           {editingId ? '编辑记录' : '添加记录'}
         </h2>
-        <form ref={formRef} onSubmit={onSubmit} className="space-y-4">
+        <form ref={formRef} onSubmit={(e) => {
+          if (isSubmitting) return;
+          setIsSubmitting(true);
+          onSubmit(e);
+          setTimeout(() => setIsSubmitting(false), 500);
+        }} className="space-y-4">
           <div className="flex gap-2">
             <button
               type="button"
@@ -85,12 +97,13 @@ export const RecordForm: React.FC<RecordFormProps> = ({
                 ref={firstInputRef}
                 type="number"
                 min="0.01"
+                max={MAX_AMOUNT}
                 step="0.01"
                 value={formData.amount || ''}
                 onChange={e => {
                   const value = parseFloat(e.target.value);
-                  onDataChange({ ...formData, amount: isNaN(value) ? 0 : Math.max(0, value) });
-                  if (formErrors.amount) onDataChange({ ...formData, amount: isNaN(value) ? 0 : Math.max(0, value) });
+                  const clampedValue = isNaN(value) ? 0 : Math.min(Math.max(0, value), MAX_AMOUNT);
+                  onDataChange({ ...formData, amount: clampedValue });
                 }}
                 className={`w-full pl-8 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card text-text-primary ${
                   formErrors.amount ? 'border-error' : 'border-border-primary'
@@ -104,12 +117,12 @@ export const RecordForm: React.FC<RecordFormProps> = ({
 
           <div>
             <label className="block text-sm font-medium mb-1.5 text-text-secondary">
-              描述 <span className="text-text-muted font-normal">(0/100)</span>
+              描述 <span className="text-text-muted font-normal">({descriptionLength}/{MAX_DESCRIPTION_LENGTH})</span>
             </label>
             <input
               type="text"
               value={formData.description || ''}
-              onChange={e => onDataChange({ ...formData, description: e.target.value.slice(0, 100) })}
+              onChange={e => onDataChange({ ...formData, description: e.target.value.slice(0, MAX_DESCRIPTION_LENGTH) })}
               className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card text-text-primary ${
                 formErrors.description ? 'border-error' : 'border-border-primary'
               }`}
@@ -156,6 +169,7 @@ export const RecordForm: React.FC<RecordFormProps> = ({
               <input
                 type="date"
                 value={formData.date || ''}
+                max={today}
                 onChange={e => onDataChange({ ...formData, date: e.target.value })}
                 className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-primary"
                 required
@@ -173,7 +187,8 @@ export const RecordForm: React.FC<RecordFormProps> = ({
             </button>
             <button
               type="submit"
-              className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-primary-600 transition-colors"
+              disabled={isSubmitting}
+              className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {editingId ? '保存' : '添加'}
             </button>

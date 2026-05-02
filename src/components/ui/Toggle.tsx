@@ -43,7 +43,7 @@ const Toggle: React.FC<ToggleProps> = ({
         relative inline-flex items-center rounded-full
         transition-colors duration-200 ease-in-out
         focus:outline-none focus:ring-2 focus:ring-primary/20
-        ${checked ? 'bg-primary' : 'bg-neutral-300 dark:bg-neutral-600'}
+        ${checked ? 'bg-primary' : 'bg-border-secondary dark:bg-border-primary'}
         ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
         ${className}
       `}

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { Markdown } from '@tiptap/markdown';
@@ -9,6 +9,7 @@ import { TaskList } from '@tiptap/extension-task-list';
 import { TaskItem } from '@tiptap/extension-task-item';
 import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table';
 import { WikiLink } from './extensions/WikiLink';
+import { WikiLinkSuggestionExtension } from './extensions/WikiLinkSuggestion';
 
 export interface Note {
   id: string;
@@ -28,11 +29,7 @@ const PKMEditor: React.FC<PKMEditorProps> = ({ content, onChange, notes, onWikiL
       StarterKit.configure({
         heading: { levels: [1, 2, 3, 4, 5, 6] },
       }),
-      Markdown.configure({
-        html: false,
-        transformCopiedText: true,
-        transformPastedText: true,
-      }),
+      Markdown,
       Link.configure({
         openOnClick: false,
         HTMLAttributes: {
@@ -46,7 +43,7 @@ const PKMEditor: React.FC<PKMEditorProps> = ({ content, onChange, notes, onWikiL
         },
       }),
       Placeholder.configure({
-        placeholder: '开始输入... 支持 Markdown 格式',
+        placeholder: '开始输入... 支持 Markdown 格式，输入 [[ 创建双向链接',
       }),
       TaskList,
       TaskItem.configure({
@@ -58,7 +55,8 @@ const PKMEditor: React.FC<PKMEditorProps> = ({ content, onChange, notes, onWikiL
       TableRow,
       TableCell,
       TableHeader,
-      WikiLink,
+      WikiLink.configure({ notes }),
+      WikiLinkSuggestionExtension.configure({ notes }),
     ],
     content,
     contentType: 'markdown',
@@ -67,6 +65,54 @@ const PKMEditor: React.FC<PKMEditorProps> = ({ content, onChange, notes, onWikiL
       onChange(editor.getMarkdown());
     },
   });
+
+  // 当 content 外部变化时同步到编辑器
+  useEffect(() => {
+    if (editor && content !== editor.getMarkdown()) {
+      editor.commands.setContent(content);
+    }
+  }, [editor, content]);
+
+  // 当 notes 变化时更新 suggestion 扩展的选项
+  useEffect(() => {
+    if (editor) {
+      editor.setOptions({
+        extensions: [
+          StarterKit.configure({
+            heading: { levels: [1, 2, 3, 4, 5, 6] },
+          }),
+          Markdown,
+          Link.configure({
+            openOnClick: false,
+            HTMLAttributes: {
+              class: 'text-primary hover:underline',
+            },
+          }),
+          Image.configure({
+            inline: false,
+            HTMLAttributes: {
+              class: 'rounded-lg max-w-full',
+            },
+          }),
+          Placeholder.configure({
+            placeholder: '开始输入... 支持 Markdown 格式，输入 [[ 创建双向链接',
+          }),
+          TaskList,
+          TaskItem.configure({
+            nested: true,
+          }),
+          Table.configure({
+            resizable: true,
+          }),
+          TableRow,
+          TableCell,
+          TableHeader,
+          WikiLink.configure({ notes }),
+          WikiLinkSuggestionExtension.configure({ notes }),
+        ],
+      });
+    }
+  }, [editor, notes]);
 
   const handleClick = useCallback((event: React.MouseEvent) => {
     const target = event.target as HTMLElement;

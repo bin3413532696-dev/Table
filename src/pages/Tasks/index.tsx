@@ -35,11 +35,19 @@ const Tasks: React.FC = () => {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  const stats = useMemo(() => ({
-    total: tasks.length,
-    completed: tasks.filter(t => t.completed).length,
-    pending: tasks.filter(t => !t.completed).length,
-  }), [tasks]);
+  const stats = useMemo(() => {
+    const total = tasks.length;
+    const completed = tasks.filter(t => t.completed).length;
+    const pending = tasks.filter(t => !t.completed).length;
+    const overdue = tasks.filter(t => {
+      if (!t.dueDate || t.completed) return false;
+      const due = new Date(t.dueDate);
+      const today = new Date();
+      return due < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    }).length;
+    const highPriority = tasks.filter(t => t.priority === 'high' && !t.completed).length;
+    return { total, completed, pending, overdue, highPriority };
+  }, [tasks]);
 
   const filteredTasks = useMemo(() => {
     let result = tasks;
@@ -204,10 +212,10 @@ const Tasks: React.FC = () => {
           </div>
           <h1 className="text-xl md:text-2xl font-bold text-text-primary">任务管理</h1>
         </div>
-        <p className="text-sm text-text-muted ml-13">高效管理你的日常任务</p>
+        <p className="text-sm text-text-muted ml-12">高效管理你的日常任务</p>
       </motion.div>
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-3 gap-3 md:gap-4 mb-6">
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
         <div className="rounded-lg p-4 bg-bg-card border border-border-primary">
           <div className="flex items-center gap-2 mb-2">
             <Flag className="w-4 h-4 text-text-muted" />
@@ -229,6 +237,13 @@ const Tasks: React.FC = () => {
           </div>
           <p className="text-2xl font-bold text-warning">{stats.pending}</p>
         </div>
+        <div className="rounded-lg p-4 bg-bg-card border border-border-primary">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="w-4 h-4 text-error" />
+            <span className="text-sm text-text-secondary">逾期</span>
+          </div>
+          <p className="text-2xl font-bold text-error">{stats.overdue}</p>
+        </div>
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-lg shadow-card border p-4 md:p-5 mb-6 bg-bg-card border-border-primary">
@@ -237,21 +252,33 @@ const Tasks: React.FC = () => {
             type="text"
             value={newTask}
             onChange={(e) => setNewTask(e.target.value.slice(0, MAX_TITLE_LENGTH))}
-            onKeyDown={(e) => e.key === 'Enter' && addTask()}
-            placeholder="输入任务内容..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                addTask();
+              }
+            }}
+            placeholder="输入任务内容，按 Enter 添加..."
             className="flex-1 px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all bg-bg-secondary border-border-primary text-text-primary placeholder-text-muted"
           />
-          <PriorityButtonGroup selected={newTaskPriority} onChange={setNewTaskPriority} />
-          <input
-            type="date"
-            value={newTaskDueDate}
-            onChange={(e) => setNewTaskDueDate(e.target.value)}
-            className="px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-secondary"
-          />
-          <Button variant="primary" onClick={addTask} icon={<Plus size={18} />}>添加</Button>
+          <div className="flex items-center gap-2">
+            <PriorityButtonGroup selected={newTaskPriority} onChange={setNewTaskPriority} />
+            <input
+              type="date"
+              value={newTaskDueDate}
+              min={new Date().toISOString().split('T')[0]}
+              onChange={(e) => setNewTaskDueDate(e.target.value)}
+              className="px-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-secondary"
+              title="截止日期"
+            />
+            <Button variant="primary" onClick={addTask} icon={<Plus size={18} />}>添加</Button>
+          </div>
         </div>
         {newTask.length > 0 && (
-          <div className="text-xs text-text-muted text-right mt-2">{newTask.length}/{MAX_TITLE_LENGTH}</div>
+          <div className="flex items-center justify-between mt-2">
+            <span className="text-xs text-text-muted">{stats.pending} 个待办任务</span>
+            <span className="text-xs text-text-muted">{newTask.length}/{MAX_TITLE_LENGTH}</span>
+          </div>
         )}
       </motion.div>
 
@@ -367,7 +394,20 @@ const Tasks: React.FC = () => {
             />
           )
         ) : sortedTasks.length > 20 ? (
-          <VirtualList<Task> items={sortedTasks} itemHeight={72} containerHeight={480} renderItem={renderTaskItem} />
+          <>
+            {showBatchActions && (
+              <div className="p-3 flex items-center gap-3 bg-bg-secondary rounded-lg border border-border-primary mb-2">
+                <input
+                  type="checkbox"
+                  checked={isAllSelected}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 rounded border-border-primary accent-primary"
+                />
+                <span className="text-sm text-text-muted">全选 ({sortedTasks.length} 条任务)</span>
+              </div>
+            )}
+            <VirtualList<Task> items={sortedTasks} itemHeight={72} containerHeight={480} renderItem={renderTaskItem} />
+          </>
         ) : (
           <>
             {showBatchActions && (

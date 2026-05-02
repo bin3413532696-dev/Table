@@ -46,32 +46,35 @@ export default function Dashboard() {
       icon: CheckSquare,
       label: '待办任务',
       count: taskStats.pending,
-      color: 'bg-primary',
-      bgColor: 'bg-primary-50 dark:bg-primary-900/20',
-      borderColor: 'border-primary-200 dark:border-primary-800',
-      textColor: 'text-primary dark:text-primary-400',
+      bgColor: 'bg-bg-card',
+      borderColor: 'border-border-primary hover:border-primary/30 dark:border-border-secondary dark:hover:border-primary/50',
+      iconBgColor: 'bg-primary',
+      textColor: 'text-text-primary',
+      countColor: 'text-primary dark:text-primary-400',
       path: '/tasks'
     },
     {
       icon: Wallet,
       label: '净收益',
       count: `¥${financeStats.profit.toLocaleString()}`,
-      color: financeStats.profit >= 0 ? 'bg-emerald-500' : 'bg-rose-500',
-      bgColor: financeStats.profit >= 0
-        ? 'bg-emerald-50 dark:bg-emerald-900/20'
-        : 'bg-rose-50 dark:bg-rose-900/20',
-      borderColor: financeStats.profit >= 0 ? 'border-emerald-200 dark:border-emerald-800' : 'border-rose-200 dark:border-rose-800',
-      textColor: financeStats.profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400',
+      bgColor: 'bg-bg-card',
+      borderColor: financeStats.profit >= 0
+        ? 'border-border-primary hover:border-success/30 dark:border-border-secondary dark:hover:border-success/50'
+        : 'border-border-primary hover:border-error/30 dark:border-border-secondary dark:hover:border-error/50',
+      iconBgColor: financeStats.profit >= 0 ? 'bg-success' : 'bg-error',
+      textColor: 'text-text-primary',
+      countColor: financeStats.profit >= 0 ? 'text-success dark:text-success-400' : 'text-error dark:text-error-400',
       path: '/finance'
     },
     {
       icon: Calendar,
       label: '今日',
       count: new Date().toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }),
-      color: 'bg-gray-500 dark:bg-gray-500',
-      bgColor: 'bg-bg-secondary',
-      borderColor: 'border-border-primary',
-      textColor: 'text-text-secondary',
+      bgColor: 'bg-bg-card',
+      borderColor: 'border-border-primary hover:border-info/30 dark:border-border-secondary dark:hover:border-info/50',
+      iconBgColor: 'bg-info',
+      textColor: 'text-text-primary',
+      countColor: 'text-info dark:text-info-400',
       path: '/tasks'
     },
   ];
@@ -113,14 +116,14 @@ export default function Dashboard() {
             variants={itemVariants}
             whileHover={{ y: -2, transition: { duration: 0.2 } }}
             onClick={() => navigate(action.path)}
-            className={`${action.bgColor} rounded-xl p-5 cursor-pointer group border ${action.borderColor} hover:shadow-md transition-all duration-200`}
+            className={`${action.bgColor} rounded-xl p-5 cursor-pointer group border ${action.borderColor} hover:shadow-md dark:hover:shadow-card-dark transition-all duration-200`}
           >
-            <div className={`w-12 h-12 ${action.color} rounded-lg flex items-center justify-center mb-4`}>
+            <div className={`w-12 h-12 ${action.iconBgColor} rounded-lg flex items-center justify-center mb-4`}>
               <action.icon className="w-6 h-6 text-white" />
             </div>
             <p className={`text-sm font-medium mb-1 ${action.textColor}`}>{action.label}</p>
-            <p className="text-2xl font-bold text-text-primary">{action.count}</p>
-            <div className="flex items-center gap-1 mt-3 text-xs text-text-muted group-hover:text-text-secondary">
+            <p className={`text-2xl font-bold ${action.countColor}`}>{action.count}</p>
+            <div className="flex items-center gap-1 mt-3 text-xs text-text-secondary group-hover:text-text-primary transition-colors">
               <span>查看详情</span>
               <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
             </div>
@@ -137,8 +140,8 @@ export default function Dashboard() {
         >
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-amber-100 dark:bg-amber-900/30">
-                <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-300" />
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-primary/10 dark:bg-primary/20">
+                <AlertCircle className="w-4 h-4 text-primary dark:text-primary-400" />
               </div>
               <h2 className="text-lg font-bold text-text-primary">待办任务</h2>
             </div>
@@ -185,7 +188,7 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
-          className="rounded-xl md:rounded-2xl p-4 md:p-6 text-text-primary shadow-sm border border-border-primary bg-bg-card dark:bg-neutral-900"
+          className="rounded-xl md:rounded-2xl p-4 md:p-6 text-text-primary shadow-sm border border-border-primary bg-bg-card"
         >
           <div className="flex items-center justify-between">
             <div>
@@ -197,26 +200,33 @@ export default function Dashboard() {
             </Button>
           </div>
           <div className="grid grid-cols-3 gap-4 mt-6">
-            <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
-              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-300 mb-1">
+            {/* 收入模块 */}
+            <div className="bg-status-income-bg dark:bg-success/10 rounded-xl p-4 border border-status-income-border dark:border-success/30">
+              <div className="flex items-center gap-2 text-success dark:text-success-400 mb-1">
                 <TrendingUp className="w-4 h-4" />
-                <span className="text-sm">收入</span>
+                <span className="text-sm font-medium">收入</span>
               </div>
-              <p className="text-xl font-bold">¥{financeStats.income.toLocaleString()}</p>
+              <p className="text-xl font-bold text-success dark:text-success-400">¥{financeStats.income.toLocaleString()}</p>
             </div>
-            <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
-              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-300 mb-1">
+            {/* 支出模块 */}
+            <div className="bg-status-expense-bg dark:bg-error/10 rounded-xl p-4 border border-status-expense-border dark:border-error/30">
+              <div className="flex items-center gap-2 text-error dark:text-error-400 mb-1">
                 <TrendingDown className="w-4 h-4" />
-                <span className="text-sm">支出</span>
+                <span className="text-sm font-medium">支出</span>
               </div>
-              <p className="text-xl font-bold">¥{financeStats.expense.toLocaleString()}</p>
+              <p className="text-xl font-bold text-error dark:text-error-400">¥{financeStats.expense.toLocaleString()}</p>
             </div>
-            <div className="bg-bg-secondary rounded-xl p-4 backdrop-blur-sm">
-              <div className="flex items-center gap-2 text-text-muted mb-1">
+            {/* 净收益模块 */}
+            <div className={`rounded-xl p-4 border ${
+              financeStats.profit >= 0
+                ? 'bg-status-income-bg dark:bg-success/10 border-status-income-border dark:border-success/30'
+                : 'bg-status-expense-bg dark:bg-error/10 border-status-expense-border dark:border-error/30'
+            }`}>
+              <div className="flex items-center gap-2 text-text-secondary dark:text-text-muted mb-1">
                 <Wallet className="w-4 h-4" />
-                <span className="text-sm">净收益</span>
+                <span className="text-sm font-medium">净收益</span>
               </div>
-              <p className={`text-xl font-bold ${financeStats.profit >= 0 ? 'text-emerald-600 dark:text-emerald-300' : 'text-rose-600 dark:text-rose-300'}`}>
+              <p className={`text-xl font-bold ${financeStats.profit >= 0 ? 'text-success dark:text-success-400' : 'text-error dark:text-error-400'}`}>
                 ¥{financeStats.profit.toLocaleString()}
               </p>
             </div>

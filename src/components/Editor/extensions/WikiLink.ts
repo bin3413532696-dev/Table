@@ -1,6 +1,10 @@
-import { Node, mergeAttributes } from '@tiptap/core';
+import { Node, mergeAttributes, InputRule } from '@tiptap/core';
 
-export const WikiLink = Node.create({
+export interface WikiLinkOptions {
+  notes?: Array<{ id: string; title: string }>;
+}
+
+export const WikiLink = Node.create<WikiLinkOptions>({
   name: 'wikiLink',
 
   group: 'inline',
@@ -12,6 +16,12 @@ export const WikiLink = Node.create({
   selectable: true,
 
   draggable: false,
+
+  addOptions() {
+    return {
+      notes: [],
+    };
+  },
 
   addAttributes() {
     return {
@@ -70,6 +80,29 @@ export const WikiLink = Node.create({
         HTMLAttributes
       ),
       `[[${node.attrs.name}]]`,
+    ];
+  },
+
+  addInputRules() {
+    return [
+      new InputRule({
+        find: /\[\[([^\]]+)\]\]$/,
+        handler: ({ state, range, match, chain }) => {
+          const name = match[1].trim();
+          // 尝试匹配现有笔记
+          const matchedNote = this.options.notes?.find(
+            (n) => n.title.toLowerCase() === name.toLowerCase()
+          );
+          const id = matchedNote?.id || name.toLowerCase().replace(/\s+/g, '-');
+          chain().deleteRange(range).insertContent({
+            type: this.name,
+            attrs: {
+              id,
+              name,
+            },
+          });
+        },
+      }),
     ];
   },
 

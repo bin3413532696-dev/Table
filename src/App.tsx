@@ -2,6 +2,7 @@ import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { PinLock } from './components/PinLock';
+import { AgentTrigger } from './components/Agent';
 import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
 
@@ -31,7 +32,7 @@ function App() {
   if (checkingPin) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-secondary">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -57,6 +58,7 @@ function App() {
           </Routes>
         </Suspense>
       </HashRouter>
+      <AgentTrigger />
     </ErrorBoundary>
   );
 }

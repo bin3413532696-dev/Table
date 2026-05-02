@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, ArrowLeft, Save, Search, Network, MessageSquare, Loader2 } from 'lucide-react';
+import { BookOpen, ArrowLeft, Save, Search, Network, MessageSquare, Loader2, Clock, Calendar } from 'lucide-react';
 import { KnowledgeNote, noteOperations } from '../../db/knowledge';
 import PKMEditor from '../../components/Editor/PKMEditor';
-import { NoteList, BacklinksPanel } from '../../components/Knowledge';
+import { NoteList, BacklinksPanel, TagEditor } from '../../components/Knowledge';
 import { GraphView, buildGraphData } from '../../components/Graph';
 import { AIChatPanel } from '../../components/AI';
 import { initEmbedder, isLoaded } from '../../lib/embeddings';
-import { initVectorStore, searchVectors, addDocument, reindexAll, getIndexedCount } from '../../lib/vectorStore';
+import { initVectorStore, searchVectors, addDocument, reindexAll, getIndexedCount, deleteDocument } from '../../lib/vectorStore';
 
 type ViewMode = 'editor' | 'graph' | 'ai';
 
@@ -16,6 +16,7 @@ export default function Knowledge() {
   const [selectedNote, setSelectedNote] = useState<KnowledgeNote | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState('');
+  const [editTags, setEditTags] = useState<string[]>([]);
   const [backlinks, setBacklinks] = useState<KnowledgeNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('editor');
@@ -24,6 +25,27 @@ export default function Knowledge() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Array<{ id: string; text: string; score: number }>>([]);
   const [indexedCount, setIndexedCount] = useState(0);
+
+  // 快捷键支持
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+S / Cmd+S 保存
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (isEditing && selectedNote) {
+          handleSave();
+        }
+      }
+      // Escape 取消编辑
+      if (e.key === 'Escape' && isEditing) {
+        e.preventDefault();
+        handleCancelEdit();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isEditing, selectedNote]);
 
   const loadNotes = useCallback(async () => {
     const allNotes = await noteOperations.getAll();
@@ -104,9 +126,34 @@ export default function Knowledge() {
     }
   }, [loadNotes, embedderReady]);
 
+  const handleDeleteNote = useCallback(async (note: KnowledgeNote) => {
+    // 如果删除的是当前选中的笔记，先清除选中状态
+    if (selectedNote?.id === note.id) {
+      setSelectedNote(null);
+      setIsEditing(false);
+      setEditContent('');
+    }
+
+    // 删除笔记
+    await noteOperations.delete(note.id);
+
+    // 同步删除向量索引
+    if (embedderReady) {
+      try {
+        await deleteDocument(note.id);
+        setIndexedCount((c) => Math.max(0, c - 1));
+      } catch (e) {
+        console.warn('Failed to delete vector index:', e);
+      }
+    }
+
+    await loadNotes();
+  }, [selectedNote, loadNotes, embedderReady]);
+
   const handleSelectNote = useCallback((note: KnowledgeNote) => {
     setSelectedNote(note);
     setEditContent(note.content);
+    setEditTags(note.tags);
     setIsEditing(false);
     setSearchQuery('');
     setSearchResults([]);
@@ -114,33 +161,60 @@ export default function Knowledge() {
 
   const handleEdit = useCallback(() => {
     setIsEditing(true);
-  }, []);
+    setEditTags(selectedNote?.tags || []);
+  }, [selectedNote]);
 
   const handleSave = useCallback(async () => {
     if (!selectedNote) return;
-    await noteOperations.update(selectedNote.id, { content: editContent });
 
+    // 从内容中提取标题
     const titleMatch = editContent.match(/^#\s+(.+)$/m);
     const title = titleMatch ? titleMatch[1] : selectedNote.title;
-    if (title !== selectedNote.title) {
-      await noteOperations.update(selectedNote.id, { title });
+
+    // 使用新的 updateContent 方法，自动更新 links
+    await noteOperations.updateContent(selectedNote.id, editContent, title !== selectedNote.title ? title : undefined);
+
+    // 更新标签
+    if (editTags !== selectedNote.tags) {
+      await noteOperations.update(selectedNote.id, { tags: editTags });
     }
 
     await loadNotes();
     const updated = await noteOperations.getById(selectedNote.id);
     if (updated) setSelectedNote(updated);
     setIsEditing(false);
-  }, [selectedNote, editContent, loadNotes]);
+
+    // 更新向量索引
+    if (embedderReady) {
+      await addDocument({ id: selectedNote.id, text: editContent });
+    }
+  }, [selectedNote, editContent, editTags, loadNotes, embedderReady]);
 
   const handleCancelEdit = useCallback(() => {
     if (selectedNote) {
       setEditContent(selectedNote.content);
+      setEditTags(selectedNote.tags);
     }
     setIsEditing(false);
   }, [selectedNote]);
 
   const handleNavigateToBacklink = useCallback((noteId: string) => {
     const note = notes.find((n) => n.id === noteId);
+    if (note) {
+      setSelectedNote(note);
+      setEditContent(note.content);
+      setIsEditing(false);
+    }
+  }, [notes]);
+
+  // WikiLink 点击导航
+  const handleWikiLinkClick = useCallback((id: string, name: string) => {
+    // 首先尝试通过 ID 查找
+    let note = notes.find((n) => n.id === id);
+    // 如果找不到，尝试通过标题查找
+    if (!note) {
+      note = notes.find((n) => n.title.toLowerCase() === name.toLowerCase());
+    }
     if (note) {
       setSelectedNote(note);
       setEditContent(note.content);
@@ -245,15 +319,27 @@ export default function Knowledge() {
           <div className="space-y-2">
             {searchResults.map((result) => {
               const note = notes.find((n) => n.id === result.id);
+              // 高亮显示搜索关键词
+              const highlightText = (text: string) => {
+                if (!searchQuery.trim()) return text;
+                const parts = text.split(new RegExp(`(${searchQuery.trim()})`, 'gi'));
+                return parts.map((part, i) =>
+                  part.toLowerCase() === searchQuery.trim().toLowerCase()
+                    ? <span key={i} className="bg-primary/20 text-primary font-medium">{part}</span>
+                    : part
+                );
+              };
               return (
                 <button
                   key={result.id}
                   onClick={() => note && handleSelectNote(note)}
                   className="w-full text-left p-2 bg-bg-secondary rounded hover:bg-bg-tertiary"
                 >
-                  <div className="text-sm font-medium">{note?.title || result.id}</div>
+                  <div className="text-sm font-medium">
+                    {note ? highlightText(note.title) : result.id}
+                  </div>
                   <div className="text-xs text-text-muted">
-                    相关度: {(result.score * 100).toFixed(0)}% - {result.text.slice(0, 60)}...
+                    相关度: {(result.score * 100).toFixed(0)}% - {highlightText(result.text.slice(0, 80))}...
                   </div>
                 </button>
               );
@@ -269,7 +355,7 @@ export default function Knowledge() {
           transition={{ delay: 0.1 }}
           className="rounded-xl shadow-sm border bg-bg-card border-border-primary overflow-hidden"
         >
-          <NoteList notes={notes} onSelect={handleSelectNote} onCreate={handleCreateNote} />
+          <NoteList notes={notes} onSelect={handleSelectNote} onCreate={handleCreateNote} onDelete={handleDeleteNote} />
         </motion.div>
 
         <motion.div
@@ -288,25 +374,37 @@ export default function Knowledge() {
                   >
                     <ArrowLeft className="w-4 h-4" />
                   </button>
-                  <h2 className="font-medium text-text-primary">
-                    {selectedNote.title || '无标题'}
-                  </h2>
+                  <div className="flex flex-col">
+                    <h2 className="font-medium text-text-primary">
+                      {selectedNote.title || '无标题'}
+                    </h2>
+                    <div className="flex items-center gap-3 text-xs text-text-muted">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        创建: {new Date(selectedNote.createdAt).toLocaleDateString('zh-CN')}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        更新: {new Date(selectedNote.updatedAt).toLocaleDateString('zh-CN')}
+                      </span>
+                    </div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => setViewMode('editor')}
+                    onClick={() => { setViewMode('editor'); setIsEditing(false); }}
                     className={`p-2 rounded-lg transition-colors ${viewMode === 'editor' ? 'bg-primary text-white' : 'hover:bg-bg-secondary'}`}
                   >
                     <Save className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => setViewMode('graph')}
+                    onClick={() => { setViewMode('graph'); setIsEditing(false); }}
                     className={`p-2 rounded-lg transition-colors ${viewMode === 'graph' ? 'bg-primary text-white' : 'hover:bg-bg-secondary'}`}
                   >
                     <Network className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => setViewMode('ai')}
+                    onClick={() => { setViewMode('ai'); setIsEditing(false); }}
                     className={`p-2 rounded-lg transition-colors ${viewMode === 'ai' ? 'bg-primary text-white' : 'hover:bg-bg-secondary'}`}
                   >
                     <MessageSquare className="w-4 h-4" />
@@ -340,16 +438,34 @@ export default function Knowledge() {
               <div className="flex-1 overflow-hidden">
                 {viewMode === 'editor' && (
                   isEditing ? (
-                    <div className="h-full">
-                      <PKMEditor
-                        content={editContent}
-                        onChange={setEditContent}
-                        notes={notes.map((n) => ({ id: n.id, title: n.title }))}
-                      />
+                    <div className="h-full flex flex-col">
+                      <div className="p-3 border-b border-border-primary">
+                        <TagEditor
+                          tags={editTags}
+                          onChange={setEditTags}
+                          suggestedTags={Array.from(new Set(notes.flatMap((n) => n.tags)))}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <PKMEditor
+                          content={editContent}
+                          onChange={setEditContent}
+                          notes={notes.map((n) => ({ id: n.id, title: n.title }))}
+                          onWikiLinkClick={handleWikiLinkClick}
+                        />
+                      </div>
                     </div>
                   ) : (
-                    <div className="p-6 prose prose-slate dark:prose-invert max-w-none h-full overflow-auto">
-                      <pre className="whitespace-pre-wrap text-sm">{selectedNote.content}</pre>
+                    <div
+                      className="p-6 prose prose-slate dark:prose-invert max-w-none h-full overflow-auto"
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (target.dataset.type === 'wiki-link' && target.dataset.id) {
+                          handleWikiLinkClick(target.dataset.id, target.dataset.name || '');
+                        }
+                      }}
+                    >
+                      <div className="whitespace-pre-wrap text-sm">{selectedNote.content}</div>
                     </div>
                   )
                 )}
@@ -358,8 +474,6 @@ export default function Knowledge() {
                     nodes={nodes}
                     links={links}
                     onNodeClick={handleNodeClick}
-                    width={600}
-                    height={400}
                   />
                 )}
                 {viewMode === 'ai' && (

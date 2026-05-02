@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Wallet, Plus, Download, Filter, X,
-  CheckSquare, AlertTriangle, BarChart3, PieChart
+  CheckSquare, AlertTriangle, BarChart3, PieChart, Trash2
 } from 'lucide-react';
 import {
   BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -20,7 +20,9 @@ const DEFAULT_CATEGORIES = {
 };
 
 const DEFAULT_MODELS = ['GPT-4', 'GPT-3.5', 'Claude', 'Gemini', '其他'];
-const CHART_COLORS = ['#165DFF', '#00B42A', '#FF7D00', '#F53F3F', '#757575', '#8B5CF6', '#06B6D4', '#84CC16'];
+
+const getChartColor = (index: number) => `var(--chart-${(index % 8) + 1})`;
+const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)'];
 
 const useDB = createUseDB(React);
 
@@ -46,7 +48,7 @@ export default function Finance() {
     model: ''
   });
 
-  const [formErrors, setFormErrors] = useState<{ amount?: string; description?: string }>({});
+  const [formErrors, setFormErrors] = useState<{ amount?: string; description?: string; category?: string }>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchActions, setShowBatchActions] = useState(false);
@@ -86,18 +88,18 @@ export default function Finance() {
 
   const modelStats = useMemo(() => {
     const stats: Record<string, { expense: number; income: number }> = {};
-    records.forEach(r => {
+    filteredRecords.forEach(r => {
       const model = r.model || '其他';
       if (!stats[model]) stats[model] = { expense: 0, income: 0 };
       if (r.type === 'expense') stats[model].expense += r.amount;
       else stats[model].income += r.amount;
     });
     return stats;
-  }, [records]);
+  }, [filteredRecords]);
 
   const monthlyTrend = useMemo(() => {
     const monthMap = new Map<string, { income: number; expense: number }>();
-    records.forEach(r => {
+    filteredRecords.forEach(r => {
       const month = r.date.slice(0, 7);
       if (!monthMap.has(month)) monthMap.set(month, { income: 0, expense: 0 });
       const data = monthMap.get(month)!;
@@ -114,7 +116,7 @@ export default function Finance() {
         expense: data.expense,
         profit: data.income - data.expense
       }));
-  }, [records]);
+  }, [filteredRecords]);
 
   const modelPieData = useMemo(() => {
     return Object.entries(modelStats)
@@ -128,14 +130,14 @@ export default function Finance() {
 
   const categoryStats = useMemo(() => {
     const stats: Record<string, { income: number; expense: number }> = {};
-    records.forEach(r => {
+    filteredRecords.forEach(r => {
       const cat = r.category || '其他';
       if (!stats[cat]) stats[cat] = { income: 0, expense: 0 };
       if (r.type === 'income') stats[cat].income += r.amount;
       else stats[cat].expense += r.amount;
     });
     return stats;
-  }, [records]);
+  }, [filteredRecords]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -203,8 +205,17 @@ export default function Finance() {
 
   const exportToCSV = () => {
     const headers = ['日期', '类型', '金额', '描述', '分类', '模型'];
-    const rows = filteredRecords.map(r => [r.date, r.type === 'income' ? '收入' : '支出', r.amount.toString(), r.description, r.category || '', r.model || '']);
-    const csvContent = [headers.join(','), ...rows.map(row => row.map(cell => `"${cell}"`).join(','))].join('\n');
+    const escapeCSVField = (cell: string) => {
+      if (cell.includes('"') || cell.includes(',') || cell.includes('\n')) {
+        return `"${cell.replace(/"/g, '""')}"`;
+      }
+      return cell;
+    };
+    const rows = filteredRecords.map(r => [
+      r.date, r.type === 'income' ? '收入' : '支出', r.amount.toString(),
+      r.description, r.category || '', r.model || ''
+    ].map(escapeCSVField));
+    const csvContent = [headers.join(','), rows.join('\n')].join('\n');
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -226,7 +237,7 @@ export default function Finance() {
       selectedIds={selectedIds}
       onToggleSelect={toggleSelect}
       onEdit={handleEdit}
-      onDelete={handleDelete}
+      onDelete={(id) => setShowDeleteConfirm(id)}
       index={index}
     />
   );
@@ -236,7 +247,7 @@ export default function Finance() {
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 md:mb-8">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+            <div className="w-10 h-10 bg-neutral-800 dark:bg-neutral-700 rounded-lg flex items-center justify-center">
               <Wallet className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -261,16 +272,20 @@ export default function Finance() {
               <h2 className="text-base font-semibold text-text-primary">月度收支趋势</h2>
             </div>
             <div className="h-48 md:h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyTrend}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-primary)" />
-                  <XAxis dataKey="month" stroke="var(--text-muted)" fontSize={11} />
-                  <YAxis stroke="var(--text-muted)" fontSize={11} />
-                  <Tooltip contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: '8px' }} labelStyle={{ color: 'var(--text-primary)' }} />
-                  <Bar dataKey="income" name="收入" fill="#10B981" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="expense" name="支出" fill="#EF4444" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {monthlyTrend.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={monthlyTrend}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-primary)" />
+                    <XAxis dataKey="month" stroke="var(--text-muted)" fontSize={11} />
+                    <YAxis stroke="var(--text-muted)" fontSize={11} />
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-primary)', borderRadius: '8px' }} labelStyle={{ color: 'var(--text-primary)' }} />
+                    <Bar dataKey="income" name="收入" fill="var(--chart-positive)" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expense" name="支出" fill="var(--chart-negative)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-text-muted text-sm">暂无数据</div>
+              )}
             </div>
           </div>
           <div className="rounded-xl shadow-sm border p-4 md:p-5 bg-bg-card border-border-primary">
@@ -305,8 +320,8 @@ export default function Finance() {
                 {selectedIds.size > 0 ? (
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-text-muted">已选择 {selectedIds.size} 项</span>
-                    <button onClick={() => setShowDeleteConfirm('batch')} className="px-3 py-1.5 bg-rose-500 text-white rounded-lg text-sm hover:bg-rose-600 transition-colors flex items-center gap-1"><Download className="w-4 h-4" />删除</button>
-                    <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 bg-bg-tertiary rounded-lg text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">取消</button>
+                    <button onClick={() => setShowDeleteConfirm('batch')} className="px-3 py-1.5 bg-error text-white rounded-lg text-sm hover:bg-error-dark transition-colors flex items-center gap-1"><Trash2 className="w-4 h-4" />删除</button>
+                    <button onClick={() => setSelectedIds(new Set())} className="px-3 py-1.5 bg-bg-tertiary rounded-lg text-sm hover:bg-bg-secondary transition-colors">取消</button>
                   </div>
                 ) : (
                   <h2 className="text-base font-semibold text-text-primary">收支记录</h2>
@@ -314,16 +329,16 @@ export default function Finance() {
               </div>
               <div className="flex gap-2">
                 {filteredRecords.length > 0 && (
-                  <button onClick={() => setShowBatchActions(!showBatchActions)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showBatchActions ? 'bg-primary-50 text-primary dark:bg-primary-900/20' : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'}`}><CheckSquare className="w-4 h-4" />批量</button>
+                  <button onClick={() => setShowBatchActions(!showBatchActions)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showBatchActions ? 'bg-primary-50 text-primary dark:bg-primary-900/20' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'}`}><CheckSquare className="w-4 h-4" />批量</button>
                 )}
-                <button onClick={() => setShowFilters(!showFilters)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showFilters || hasFilters ? 'bg-primary-50 text-primary dark:bg-primary-900/20' : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'}`}><Filter className="w-4 h-4" />筛选</button>
+                <button onClick={() => setShowFilters(!showFilters)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${showFilters || hasFilters ? 'bg-primary-50 text-primary dark:bg-primary-900/20' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'}`}><Filter className="w-4 h-4" />筛选</button>
                 <Button variant="primary" size="sm" onClick={() => setShowForm(true)} icon={<Plus className="w-4 h-4" />}>添加</Button>
               </div>
             </div>
 
             <div className="flex gap-2 mb-4">
               {(['all', 'income', 'expense'] as const).map((f) => (
-                <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === f ? 'bg-primary text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-neutral-200 dark:hover:bg-neutral-700'}`}>
+                <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${filter === f ? 'bg-primary text-white' : 'bg-bg-tertiary text-text-secondary hover:bg-bg-secondary'}`}>
                   {f === 'all' ? '全部' : f === 'income' ? '收入' : '支出'}
                 </button>
               ))}
@@ -335,16 +350,16 @@ export default function Finance() {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs mb-1 text-text-muted">开始日期</label>
-                      <input type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-bg-card border-border-primary" />
+                      <input type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-primary bg-bg-card border-border-primary" />
                     </div>
                     <div>
                       <label className="block text-xs mb-1 text-text-muted">结束日期</label>
-                      <input type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-bg-card border-border-primary" />
+                      <input type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-primary bg-bg-card border-border-primary" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-xs mb-1 text-text-muted">模型筛选</label>
-                    <select value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-bg-card border-border-primary">
+                    <select value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-primary bg-bg-card border-border-primary">
                       <option value="">全部模型</option>
                       {models.map(m => <option key={m} value={m}>{m}</option>)}
                     </select>
@@ -364,12 +379,20 @@ export default function Finance() {
                 action={{ label: '添加记录', onClick: () => setShowForm(true) }}
               />
             ) : filteredRecords.length > 20 ? (
-              <VirtualList<FinanceRecord> items={filteredRecords} itemHeight={72} containerHeight={400} renderItem={renderRecordItem} />
+              <>
+                {showBatchActions && (
+                  <div className="p-3 flex items-center gap-3 bg-bg-secondary border-b border-border-primary sticky top-0 z-10">
+                    <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-primary" />
+                    <span className="text-sm text-text-muted">全选 ({filteredRecords.length} 条记录)</span>
+                  </div>
+                )}
+                <VirtualList<FinanceRecord> items={filteredRecords} itemHeight={72} containerHeight={400} renderItem={renderRecordItem} />
+              </>
             ) : (
               <>
                 {showBatchActions && (
                   <div className="p-3 flex items-center gap-3 bg-bg-secondary border-b border-border-primary">
-                    <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-blue-500" />
+                    <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-primary" />
                     <span className="text-sm text-text-muted">全选</span>
                   </div>
                 )}
@@ -390,8 +413,8 @@ export default function Finance() {
                 <div key={model} className="flex items-center justify-between text-sm">
                   <span className="text-text-secondary">{model}</span>
                   <div className="flex gap-3">
-                    {stat.income > 0 && <span className="text-emerald-600 dark:text-emerald-400">+¥{stat.income.toLocaleString()}</span>}
-                    <span className="text-rose-600 dark:text-rose-400">-¥{stat.expense.toLocaleString()}</span>
+                    {stat.income > 0 && <span className="text-success dark:text-success-400">+¥{stat.income.toLocaleString()}</span>}
+                    {stat.expense > 0 && <span className="text-error dark:text-error-400">-¥{stat.expense.toLocaleString()}</span>}
                   </div>
                 </div>
               ))}
@@ -407,10 +430,10 @@ export default function Finance() {
             <div className="space-y-3">
               {Object.entries(categoryStats).map(([cat, stat]) => (
                 <div key={cat} className="flex items-center justify-between text-sm">
-                  <span className="text-text-secondary truncate max-w-[100px]">{cat}</span>
+                  <span className="text-text-secondary truncate max-w-[120px]" title={cat}>{cat}</span>
                   <div className="flex gap-3 shrink-0">
-                    {stat.income > 0 && <span className="text-emerald-600 dark:text-emerald-400">+¥{stat.income.toLocaleString()}</span>}
-                    {stat.expense > 0 && <span className="text-rose-600 dark:text-rose-400">-¥{stat.expense.toLocaleString()}</span>}
+                    {stat.income > 0 && <span className="text-success dark:text-success-400">+¥{stat.income.toLocaleString()}</span>}
+                    {stat.expense > 0 && <span className="text-error dark:text-error-400">-¥{stat.expense.toLocaleString()}</span>}
                   </div>
                 </div>
               ))}
@@ -444,8 +467,8 @@ export default function Finance() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="rounded-xl p-6 w-full max-w-sm bg-bg-card shadow-xl border border-border-primary">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center">
-                  <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                <div className="w-10 h-10 rounded-full bg-error-light dark:bg-error/20 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-error dark:text-error-400" />
                 </div>
                 <h3 className="text-lg font-semibold text-text-primary">确认删除</h3>
               </div>
@@ -456,7 +479,7 @@ export default function Finance() {
               </p>
               <div className="flex gap-3">
                 <button onClick={() => setShowDeleteConfirm(null)} className="flex-1 py-2 border rounded-lg transition-colors border-border-primary text-text-secondary hover:bg-bg-tertiary">取消</button>
-                <button onClick={showDeleteConfirm === 'batch' ? handleBatchDelete : () => handleDelete(showDeleteConfirm)} className="flex-1 py-2 bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors">删除</button>
+                <button onClick={showDeleteConfirm === 'batch' ? handleBatchDelete : () => handleDelete(showDeleteConfirm)} className="flex-1 py-2 bg-error text-white rounded-lg hover:bg-error-dark transition-colors">删除</button>
               </div>
             </motion.div>
           </motion.div>

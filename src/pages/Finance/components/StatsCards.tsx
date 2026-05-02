@@ -12,11 +12,21 @@ interface StatsCardsProps {
   stats: Stats;
 }
 
+const formatCurrency = (value: number): string => {
+  if (value >= 1000000) {
+    return `¥${(value / 1000000).toFixed(1)}M`;
+  }
+  if (value >= 1000) {
+    return `¥${(value / 1000).toFixed(1)}K`;
+  }
+  return `¥${value.toLocaleString()}`;
+};
+
 export const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
   const items = [
-    { label: '总收入', value: stats.income, icon: TrendingUp, color: 'success', prefix: '¥' },
-    { label: '总支出', value: stats.expense, icon: TrendingDown, color: 'error', prefix: '¥' },
-    { label: '净收益', value: stats.profit, icon: DollarSign, color: stats.profit >= 0 ? 'success' : 'error', prefix: stats.profit >= 0 ? '+¥' : '¥' },
+    { label: '总收入', value: stats.income, icon: TrendingUp, color: 'success', prefix: '+' },
+    { label: '总支出', value: stats.expense, icon: TrendingDown, color: 'error', prefix: '-' },
+    { label: '净收益', value: stats.profit, icon: DollarSign, color: stats.profit >= 0 ? 'success' : 'error', prefix: stats.profit >= 0 ? '+' : '' },
   ];
 
   return (
@@ -45,11 +55,16 @@ export const StatsCards: React.FC<StatsCardsProps> = ({ stats }) => {
               }`} />
             </div>
           </div>
-          <p className={`text-2xl font-bold ${
+          <p className={`text-2xl font-bold tabular-nums ${
             item.color === 'success' ? 'text-success' : 'text-error'
           }`}>
-            {item.prefix}{Math.abs(item.value).toLocaleString()}
+            {item.prefix}{formatCurrency(Math.abs(item.value))}
           </p>
+          {item.value >= 1000 && (
+            <p className="text-xs text-text-muted mt-1">
+              = ¥{Math.abs(item.value).toLocaleString()}
+            </p>
+          )}
         </motion.div>
       ))}
     </motion.div>

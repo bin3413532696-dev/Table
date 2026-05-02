@@ -52,7 +52,7 @@ function ProfileSettings() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4 mb-6">
-        <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+        <div className="w-20 h-20 bg-gradient-to-br from-primary to-primary-700 rounded-full flex items-center justify-center text-white text-2xl font-bold">
           {profile.name.charAt(0)}
         </div>
         <div>
@@ -69,7 +69,7 @@ function ProfileSettings() {
             value={profile.name}
             onChange={(e) => setProfile({ ...profile, name: e.target.value })}
             maxLength={50}
-            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
+            className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-primary"
           />
         </div>
         <div>
@@ -79,9 +79,9 @@ function ProfileSettings() {
             value={profile.email}
             onChange={(e) => { setProfile({ ...profile, email: e.target.value }); setEmailError(''); }}
             placeholder="your@email.com"
-            className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card text-text-primary ${emailError ? 'border-rose-500' : 'border-border-primary'}`}
+            className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card text-text-primary ${emailError ? 'border-error' : 'border-border-primary'}`}
           />
-          {emailError && <p className="text-rose-500 text-xs mt-1">{emailError}</p>}
+          {emailError && <p className="text-error text-xs mt-1">{emailError}</p>}
         </div>
         <div>
           <label className="block text-sm font-medium mb-1 text-text-secondary">个人简介</label>
@@ -145,12 +145,12 @@ function SecuritySettings() {
 
   return (
     <div className="space-y-6">
-      <div className="p-4 border rounded-xl bg-amber-50 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800">
+      <div className="p-4 border rounded-xl bg-warning-light border-warning/30 dark:bg-warning/20 dark:border-warning/30">
         <div className="flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 mt-0.5 text-amber-600 dark:text-amber-300" />
+          <AlertCircle className="w-5 h-5 mt-0.5 text-warning dark:text-warning-400" />
           <div>
-            <h4 className="font-medium text-amber-900 dark:text-amber-100">本地数据安全</h4>
-            <p className="text-sm mt-1 text-amber-700 dark:text-amber-200">
+            <h4 className="font-medium text-warning-dark dark:text-warning-100">本地数据安全</h4>
+            <p className="text-sm mt-1 text-warning dark:text-warning-200">
               所有数据存储在浏览器本地，清除浏览器数据将导致数据丢失。建议定期导出备份。
             </p>
           </div>
@@ -181,14 +181,14 @@ function SecuritySettings() {
               value={confirmPin}
               onChange={(e) => { setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6)); setPinError(''); }}
               placeholder="再次输入密码确认"
-              className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-bg-card border-border-primary text-text-primary"
+              className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary bg-bg-card border-border-primary text-text-primary"
             />
-            {pinError && <p className="text-rose-500 text-xs">{pinError}</p>}
+            {pinError && <p className="text-error text-xs">{pinError}</p>}
             <Button variant="primary" onClick={handleSavePin}>启用密码保护</Button>
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-emerald-500 dark:text-emerald-400 flex items-center gap-2">
+            <p className="text-sm text-success dark:text-success-400 flex items-center gap-2">
               <Check className="w-4 h-4" /> 密码保护已启用
             </p>
             <Button variant="secondary" onClick={handleClearPin}>关闭密码保护</Button>
@@ -200,8 +200,8 @@ function SecuritySettings() {
         <h4 className="font-medium text-text-primary">主题设置</h4>
         <div className="flex items-center justify-between p-4 rounded-xl bg-bg-secondary">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-200 dark:bg-gray-700">
-              {theme === 'dark' ? <Moon className="w-5 h-5 text-text-secondary" /> : <Sun className="w-5 h-5 text-amber-500 dark:text-amber-300" />}
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-bg-tertiary">
+              {theme === 'dark' ? <Moon className="w-5 h-5 text-text-secondary" /> : <Sun className="w-5 h-5 text-warning dark:text-warning-400" />}
             </div>
             <div>
               <div className="font-medium text-text-primary">外观主题</div>
@@ -277,13 +277,13 @@ function DataManager() {
       </div>
 
       <div className="flex items-center gap-2 text-xs text-text-muted bg-bg-secondary rounded-lg px-3 py-2">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block shrink-0" />
+        <span className="w-1.5 h-1.5 rounded-full bg-success inline-block shrink-0" />
         导出备份包含：业务数据、用户资料、主题设置
       </div>
 
       <div className="space-y-1">
         <button onClick={handleExport} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-bg-secondary transition-colors text-left">
-          <Download className="w-4 h-4 text-blue-500 shrink-0" />
+          <Download className="w-4 h-4 text-primary shrink-0" />
           <div>
             <div className="text-sm font-medium text-text-primary">导出数据</div>
             <div className="text-xs text-text-muted">备份所有数据和设置</div>
@@ -291,7 +291,7 @@ function DataManager() {
         </button>
 
         <label className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-bg-secondary transition-colors cursor-pointer text-left">
-          <Upload className="w-4 h-4 text-emerald-500 dark:text-emerald-400 shrink-0" />
+          <Upload className="w-4 h-4 text-success dark:text-success-400 shrink-0" />
           <div>
             <div className="text-sm font-medium text-text-primary">导入数据</div>
             <div className="text-xs text-text-muted">从备份文件恢复</div>
@@ -306,8 +306,8 @@ function DataManager() {
           animate={{ opacity: 1, y: 0 }}
           className={'flex items-center gap-2 px-3 py-2 rounded-lg text-sm ' + (
             importStatus === 'success'
-              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-              : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
+              ? 'bg-success-light text-success-dark dark:bg-success/20 dark:text-success-400'
+              : 'bg-error-light text-error-dark dark:bg-error/20 dark:text-error-400'
           )}
         >
           {importStatus === 'success' ? <CheckCircle className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
@@ -315,7 +315,7 @@ function DataManager() {
         </motion.div>
       )}
 
-      <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-2 text-xs text-text-muted hover:text-rose-500 dark:hover:text-rose-400 transition-colors">
+      <button onClick={() => setShowClearConfirm(true)} className="flex items-center gap-2 text-xs text-text-muted hover:text-error dark:hover:text-error-400 transition-colors">
         <Trash2 className="w-3.5 h-3.5" />
         清空所有数据
       </button>
@@ -342,7 +342,7 @@ function DataManager() {
               </p>
               <div className="flex gap-3">
                 <button onClick={() => setShowClearConfirm(false)} className="flex-1 py-2 border rounded-lg text-sm text-text-secondary hover:bg-bg-secondary transition-colors">取消</button>
-                <button onClick={handleClear} className="flex-1 py-2 bg-rose-500 text-white rounded-lg text-sm hover:bg-rose-600 transition-colors">确认清空</button>
+                <button onClick={handleClear} className="flex-1 py-2 bg-error text-white rounded-lg text-sm hover:bg-error-dark transition-colors">确认清空</button>
               </div>
             </motion.div>
           </motion.div>
@@ -371,7 +371,7 @@ export default function Settings() {
         animate={{ opacity: 1, y: 0 }}
         className="flex items-center gap-3 mb-6 md:mb-8"
       >
-        <div className="w-10 h-10 bg-gray-900 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+        <div className="w-10 h-10 bg-neutral-800 dark:bg-neutral-700 rounded-lg flex items-center justify-center">
           <SettingsIcon className="w-5 h-5 text-white" />
         </div>
         <h1 className="text-xl md:text-2xl font-bold text-text-primary">设置</h1>

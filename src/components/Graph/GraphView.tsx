@@ -27,11 +27,37 @@ export default function GraphView({
   nodes,
   links,
   onNodeClick,
-  width = 600,
-  height = 400,
+  width: propWidth,
+  height: propHeight,
 }: GraphViewProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [dimensions, setDimensions] = useState({ width: 600, height: 400 });
+
+  // 监听容器尺寸变化
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setDimensions({
+          width: propWidth || rect.width || 600,
+          height: propHeight || rect.height || 400,
+        });
+      }
+    };
+
+    updateDimensions();
+
+    const resizeObserver = new ResizeObserver(updateDimensions);
+    resizeObserver.observe(containerRef.current);
+
+    return () => resizeObserver.disconnect();
+  }, [propWidth, propHeight]);
+
+  const { width, height } = dimensions;
 
   useEffect(() => {
     if (!svgRef.current || nodes.length === 0) return;
@@ -142,8 +168,8 @@ export default function GraphView({
   }
 
   return (
-    <div className="graph-container" style={{ width, height, overflow: 'hidden' }}>
-      <svg ref={svgRef} width="100%" height="100%" />
+    <div ref={containerRef} className="graph-container h-full w-full" style={{ overflow: 'hidden' }}>
+      <svg ref={svgRef} width={width} height={height} />
     </div>
   );
 }

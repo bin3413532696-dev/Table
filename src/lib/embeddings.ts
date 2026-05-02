@@ -30,12 +30,27 @@ export async function initEmbedder(onProgress?: ProgressCallback): Promise<void>
 
   initPromise = (async () => {
     try {
+      // 尝试 WebGPU，失败则回退到 WASM
+      let device: 'webgpu' | 'wasm' = 'wasm';
+
+      try {
+        // 检测 WebGPU 支持
+        if ('gpu' in navigator) {
+          const adapter = await (navigator as any).gpu.requestAdapter();
+          if (adapter) {
+            device = 'webgpu';
+          }
+        }
+      } catch {
+        console.log('[Embedder] WebGPU not available, falling back to WASM');
+      }
+
       extractor = await pipeline(
         'feature-extraction',
         'Xenova/all-MiniLM-L6-v2',
         {
-          device: 'webgpu',
-          dtype: 'q8',
+          device,
+          dtype: device === 'webgpu' ? 'q8' : 'q8',
           progress_callback: (progress: any) => {
             if (progress.status === 'progress') {
               const percent = Math.round(progress.progress * 100);
