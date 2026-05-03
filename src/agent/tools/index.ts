@@ -1,7 +1,5 @@
 import type { Tool, ToolResult, JSONSchema } from '../types';
 import { financeDB, taskDB, type FinanceRecord, type Task } from '../../db';
-import { searchVectors, getIndexedCount } from '../../lib/vectorStore';
-import { isLoaded as isEmbeddingLoaded } from '../../lib/embeddings';
 
 /** 简单参数验证 */
 function validateParams(params: Record<string, unknown>, schema: JSONSchema): string | null {
