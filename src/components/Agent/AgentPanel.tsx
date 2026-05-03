@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, X, Send, Loader2, AlertCircle, Settings, Trash2, CheckCircle, XCircle } from 'lucide-react';
+import { Bot, X, Send, Loader2, AlertCircle, Settings, Trash2, CheckCircle, XCircle, Square } from 'lucide-react';
 import { useAgent } from '../../agent/AgentContext';
 import { agentEngine } from '../../agent/AgentEngine';
 import { AgentMessage } from '../../agent/types';
@@ -11,7 +11,7 @@ interface AgentPanelProps {
 }
 
 export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
-  const { state, sendMessage, confirmAction, rejectAction, clearConversation, selectModel } = useAgent();
+  const { state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, selectModel } = useAgent();
   const [input, setInput] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -48,7 +48,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
       name: state.confirmationRequest.toolName,
       arguments: state.confirmationRequest.arguments,
     };
-    await confirmAction(() => agentEngine.executeTool(toolCall));
+    await confirmAction(() => agentEngine.executeTool(toolCall, true));
   }, [state.confirmationRequest, confirmAction]);
 
   const renderMessage = (message: AgentMessage) => {
@@ -82,13 +82,12 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
         >
           <div className="whitespace-pre-wrap">{message.content}</div>
 
-          {/* 工具调用展示 */}
           {message.toolCalls && message.toolCalls.length > 0 && (
             <div className="mt-2 pt-2 border-t border-border-primary/50">
-              {message.toolCalls.map((tc) => (
-                <div key={tc.id} className="text-xs">
+              {message.toolCalls.map((toolCall) => (
+                <div key={toolCall.id} className="text-xs">
                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-primary/10 text-primary rounded">
-                    {tc.name}
+                    {toolCall.name}
                   </span>
                   {message.toolResult && (
                     <span className="ml-2">
@@ -118,7 +117,6 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
           transition={{ duration: 0.2 }}
           className="fixed bottom-4 right-4 w-96 h-[500px] bg-bg-card border border-border-primary rounded-xl shadow-2xl flex flex-col z-50 overflow-hidden"
         >
-          {/* Header */}
           <div className="p-3 border-b border-border-primary flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center">
@@ -161,7 +159,6 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          {/* Settings Panel */}
           <AnimatePresence>
             {showSettings && (
               <motion.div
@@ -181,27 +178,26 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
                     {state.availableModels.length === 0 ? (
                       <option>无可用模型</option>
                     ) : (
-                      state.availableModels.map((m) => (
-                        <option key={m} value={m}>{m}</option>
+                      state.availableModels.map((model) => (
+                        <option key={model} value={model}>{model}</option>
                       ))
                     )}
                   </select>
                   <p className="text-xs text-text-muted">
-                    可用工具: {agentEngine.getAvailableTools().length} 个
+                    可用工具：{agentEngine.getAvailableTools().length} 个
                   </p>
                 </div>
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Messages */}
           <div className="flex-1 overflow-auto p-3 space-y-3">
             {state.messages.length === 0 && (
               <div className="h-full flex items-center justify-center text-center text-text-muted text-sm">
                 <div>
                   <Bot className="w-10 h-10 mx-auto mb-2 opacity-50" />
                   <p>有什么可以帮您的？</p>
-                  <p className="text-xs mt-1 opacity-70">试试："查询我的财务状况" 或 "创建一个任务"</p>
+                  <p className="text-xs mt-1 opacity-70">试试：“查询我的财务状况” 或 “创建一个任务”</p>
                 </div>
               </div>
             )}
@@ -218,7 +214,6 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Confirmation Dialog */}
           <AnimatePresence>
             {state.confirmationRequest && (
               <motion.div
@@ -255,14 +250,12 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
             )}
           </AnimatePresence>
 
-          {/* Error Display */}
           {state.error && (
             <div className="p-2 bg-error/10 text-error text-xs text-center shrink-0">
               {state.error}
             </div>
           )}
 
-          {/* Input */}
           <div className="p-3 border-t border-border-primary shrink-0">
             <div className="flex gap-2">
               <textarea
@@ -273,11 +266,20 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
                 placeholder="输入指令或问题..."
                 className="flex-1 resize-none border border-border-primary rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary bg-bg-card placeholder:text-text-muted"
                 rows={2}
-                disabled={!state.isConnected || state.isProcessing || state.confirmationRequest}
+                disabled={!state.isConnected || state.isProcessing || !!state.confirmationRequest}
               />
+              {state.isProcessing && (
+                <button
+                  onClick={stopThinking}
+                  className="px-3 border border-error/40 text-error rounded-lg hover:bg-error/10 transition-colors"
+                  title="强行终止思考"
+                >
+                  <Square className="w-4 h-4" />
+                </button>
+              )}
               <button
                 onClick={handleSend}
-                disabled={!input.trim() || state.isProcessing || !state.isConnected || state.confirmationRequest}
+                disabled={!input.trim() || state.isProcessing || !state.isConnected || !!state.confirmationRequest}
                 className="px-3 bg-primary text-white rounded-lg disabled:opacity-50 hover:bg-primary-dark transition-colors"
               >
                 <Send className="w-4 h-4" />

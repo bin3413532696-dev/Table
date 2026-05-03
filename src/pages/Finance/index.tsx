@@ -157,7 +157,9 @@ export default function Finance() {
         description: formData.description || '',
         category: formData.category || (formData.type === 'income' ? '其他收入' : '其他支出'),
         date: formData.date || new Date().toISOString().split('T')[0],
-        model: formData.model
+        model: formData.model,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
       });
     }
     setShowForm(false);

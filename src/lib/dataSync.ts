@@ -9,6 +9,7 @@
 import { syncEngine, SyncStatus, SyncResult, LoadResult } from '../sync';
 import { financeStore, taskStore } from '../store/impl';
 import { subscribeDataChange } from '../core/events';
+import type { FinanceRecord, Task } from '../core/types';
 
 // ==================== 类型导出 ====================
 
@@ -142,7 +143,8 @@ async function handleServerChange(message: { type: string; file: string; timesta
   if (Array.isArray(finance)) {
     const localFinance = await financeStore.getAll();
     const localMap = new Map(localFinance.map(r => [r.id, r]));
-    const serverMap = new Map(finance.map(r => [r.id, r]));
+    const serverFinance = finance as FinanceRecord[];
+    const serverMap = new Map(serverFinance.map(r => [r.id, r]));
 
     for (const [id, serverRecord] of serverMap) {
       const localRecord = localMap.get(id);
@@ -162,7 +164,8 @@ async function handleServerChange(message: { type: string; file: string; timesta
   if (Array.isArray(tasks)) {
     const localTasks = await taskStore.getAll();
     const localMap = new Map(localTasks.map(t => [t.id, t]));
-    const serverMap = new Map(tasks.map(t => [t.id, t]));
+    const serverTasks = tasks as Task[];
+    const serverMap = new Map(serverTasks.map(t => [t.id, t]));
 
     for (const [id, serverTask] of serverMap) {
       const localTask = localMap.get(id);

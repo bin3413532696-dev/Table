@@ -1,23 +1,32 @@
-import { streamChat, ollamaClient, OllamaMessage } from '../lib/ollama';
-import { Tool, ToolResult, AgentMessage, ToolCall } from './types';
-import { toolRegistry } from './tools/index';
+import { OllamaMessage, streamChat } from '../lib/ollama';
+import { AgentMessage, Tool, ToolCall, ToolResult } from './types';
+import { toolRegistry } from './tools';
 
-/** 系统提示词模板 - 使用字符串拼接避免模板解析问题 */
-const TOOL_FORMAT = '使用工具时，请按以下格式输出：\n```tool\n{"name": "工具名", "arguments": {...参数}}\n```';
+const TOOL_FORMAT = `使用工具时，必须严格按以下格式输出：
+\`\`\`tool
+{"name":"工具名","arguments":{"参数名":"参数值"}}
+\`\`\``;
 
-const SYSTEM_PROMPT_TEMPLATE = `你是一个全局智能助手，可以帮助用户管理任务、财务和知识库。
+const SYSTEM_PROMPT_TEMPLATE = `你是这个个人工作站应用的全局智能助手。
+你可以帮助用户：
+- 查询和管理任务
+- 查询和管理财务记录
+- 使用工具模块能力
+- 读取和修改设置模块中的可管理配置
+- 做跨模块汇总和分析
 
-你可以使用以下工具：
+可用工具如下：
 {TOOL_DESCRIPTIONS}
 
 ${TOOL_FORMAT}
 
-重要规则：
-1. 对于修改、删除操作，必须先向用户确认
-2. 查询操作可以直接执行
-3. 跨模块分析时，综合使用多个数据源
-4. 回答时使用简洁清晰的中文
-5. 如果不确定用户意图，先询问澄清`;
+规则：
+1. 查询类请求可以直接调用工具。
+2. 会修改数据、设置或状态的操作，必须先输出工具调用，由前端弹出确认；不要在自然语言里假装已经执行成功。
+3. 如果用户消息中明确点名某个工具名，例如 get_task_stats、parse_color、create_task，你必须优先且精确调用该工具，不能替换成其他工具。
+4. 如果缺少必要参数，先用自然语言追问，不要猜测参数。
+5. 回复默认使用简体中文，简洁直接。
+6. 工具调用完成后，如果你还输出自然语言，总结必须严格基于工具结果，不能编造结果。`;
 
 export class AgentEngine {
   private tools: Map<string, Tool>;
@@ -30,15 +39,20 @@ export class AgentEngine {
 
   private buildSystemPrompt(): string {
     const toolDescriptions = Array.from(this.tools.values())
-      .map(t => {
-        const paramsStr = t.parameters.properties
-          ? Object.entries(t.parameters.properties)
-              .map(([key, val]) => `    ${key}: ${val.type}${val.description ? ` (${val.description})` : ''}${t.parameters.required?.includes(key) ? ' [必需]' : ''}`)
+      .map((tool) => {
+        const params = tool.parameters.properties
+          ? Object.entries(tool.parameters.properties)
+              .map(([key, value]) => {
+                const required = tool.parameters.required?.includes(key) ? ' [必填]' : '';
+                const description = value.description ? ` - ${value.description}` : '';
+                return `    ${key}: ${value.type}${required}${description}`;
+              })
               .join('\n')
-          : '无参数';
-        return `- ${t.name}: ${t.description}${t.requiresConfirmation ? ' (需确认)' : ''}
+          : '    无参数';
+
+        return `- ${tool.name}: ${tool.description}${tool.requiresConfirmation ? '（需确认）' : ''}
   参数:
-${paramsStr}`;
+${params}`;
       })
       .join('\n\n');
 
@@ -49,12 +63,38 @@ ${paramsStr}`;
     return this.systemPrompt;
   }
 
-  /** 解析助手回复中的工具调用 */
+  findDirectToolCall(content: string): ToolCall | null {
+    const normalized = content.trim();
+    if (!normalized || !/(只调用|调用|使用)/.test(normalized)) {
+      return null;
+    }
+
+    const matchedTools = Array.from(this.tools.values()).filter((tool) =>
+      normalized.includes(tool.name)
+    );
+
+    if (matchedTools.length !== 1) {
+      return null;
+    }
+
+    const tool = matchedTools[0];
+    const requiredParams = tool.parameters.required || [];
+    if (requiredParams.length > 0) {
+      return null;
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      name: tool.name,
+      arguments: {},
+    };
+  }
+
   parseToolCalls(content: string): { textContent: string; toolCalls: ToolCall[] } {
     const toolCalls: ToolCall[] = [];
     const toolBlockRegex = /```tool\n([\s\S]*?)```/g;
 
-    let match;
+    let match: RegExpExecArray | null;
     while ((match = toolBlockRegex.exec(content)) !== null) {
       try {
         const parsed = JSON.parse(match[1]);
@@ -66,40 +106,32 @@ ${paramsStr}`;
           });
         }
       } catch {
-        console.warn('Failed to parse tool call:', match[1]);
+        // Ignore malformed tool blocks.
       }
     }
 
-    const textContent = content.replace(toolBlockRegex, '').trim();
-    return { textContent, toolCalls };
+    return {
+      textContent: content.replace(toolBlockRegex, '').trim(),
+      toolCalls,
+    };
   }
 
-  /** 执行工具调用 */
-  async executeTool(toolCall: ToolCall): Promise<ToolResult> {
+  async executeTool(toolCall: ToolCall, skipConfirmation = false): Promise<ToolResult> {
     const tool = this.tools.get(toolCall.name);
     if (!tool) {
       return { success: false, error: `未知工具: ${toolCall.name}` };
     }
 
+    if (tool.requiresConfirmation && !skipConfirmation) {
+      return {
+        success: true,
+        requiresConfirmation: true,
+        confirmationMessage: `即将执行 ${tool.name}，参数如下：\n${JSON.stringify(toolCall.arguments, null, 2)}`,
+      };
+    }
+
     try {
-      const result = await tool.execute(toolCall.arguments);
-
-      // 如果工具本身返回需要确认，直接返回
-      if (result.requiresConfirmation) {
-        return result;
-      }
-
-      // 如果工具标记为需要确认，添加确认信息
-      if (tool.requiresConfirmation) {
-        const argStr = JSON.stringify(toolCall.arguments, null, 2);
-        return {
-          ...result,
-          requiresConfirmation: true,
-          confirmationMessage: `即将执行: ${tool.name}\n参数: ${argStr}\n\n请确认是否执行此操作？`,
-        };
-      }
-
-      return result;
+      return await tool.execute(toolCall.arguments);
     } catch (error) {
       return {
         success: false,
@@ -108,40 +140,38 @@ ${paramsStr}`;
     }
   }
 
-  /** 流式处理对话 */
   async *processMessage(
     messages: AgentMessage[],
-    model: string
+    model: string,
+    signal?: AbortSignal
   ): AsyncGenerator<string | { type: 'tool_call'; toolCall: ToolCall }> {
     const conversationHistory: OllamaMessage[] = [
       { role: 'system', content: this.systemPrompt },
       ...messages
-        .filter(m => m.role !== 'tool')
-        .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        .filter((message) => message.role !== 'tool')
+        .map((message) => ({
+          role: message.role as 'user' | 'assistant',
+          content: message.content,
+        })),
     ];
 
     let fullResponse = '';
 
-    // 流式获取响应
-    for await (const chunk of streamChat(conversationHistory, model)) {
+    for await (const chunk of streamChat(conversationHistory, model, undefined, { signal })) {
       fullResponse += chunk;
       yield chunk;
     }
 
-    // 检查是否有工具调用
     const { toolCalls } = this.parseToolCalls(fullResponse);
-
     for (const toolCall of toolCalls) {
       yield { type: 'tool_call', toolCall };
     }
   }
 
-  /** 获取可用工具列表 */
   getAvailableTools(): string[] {
     return Array.from(this.tools.keys());
   }
 
-  /** 获取工具详情 */
   getTool(name: string): Tool | undefined {
     return this.tools.get(name);
   }

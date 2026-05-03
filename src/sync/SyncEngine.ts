@@ -27,6 +27,7 @@ class SyncEngineClass {
   private isSyncing = false;
   private lastSyncTime: number | null = null;
   private lastError: string | null = null;
+  private listeners = new Set<() => void>();
 
   private constructor() {}
 
@@ -45,6 +46,13 @@ class SyncEngineClass {
       status: this.isSyncing ? 'syncing' : (this.lastError ? 'error' : 'idle'),
       lastSyncTime: this.lastSyncTime,
       lastError: this.lastError,
+    };
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
     };
   }
 
@@ -83,6 +91,7 @@ class SyncEngineClass {
     if (this.isSyncing || this.syncQueue.length === 0) return;
 
     this.isSyncing = true;
+    this.notifyListeners();
     eventEmitter.emit(EventTopics.SYNC_STARTED);
 
     try {
@@ -94,17 +103,25 @@ class SyncEngineClass {
       if (result.success) {
         this.lastSyncTime = result.timestamp || Date.now();
         this.lastError = null;
+        this.notifyListeners();
         eventEmitter.emit(EventTopics.SYNC_COMPLETED);
       } else {
         this.lastError = result.error || 'Unknown error';
+        this.notifyListeners();
         eventEmitter.emit(EventTopics.SYNC_FAILED, result.error);
       }
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : 'Unknown error';
+      this.notifyListeners();
       eventEmitter.emit(EventTopics.SYNC_FAILED, this.lastError);
     } finally {
       this.isSyncing = false;
+      this.notifyListeners();
     }
+  }
+
+  private notifyListeners(): void {
+    this.listeners.forEach((listener) => listener());
   }
 
   private getMergedTypes(): SyncDataType[] {

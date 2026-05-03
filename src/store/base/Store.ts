@@ -102,7 +102,7 @@ export abstract class BaseStore<T extends BaseEntity, CreateDTO, UpdateDTO>
         id: generateId(),
         createdAt: now,
         updatedAt: now,
-      } as T;
+      } as unknown as T;
 
       this.data = [entity, ...this.data];
       this.persist();

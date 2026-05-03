@@ -86,9 +86,10 @@ const Tasks: React.FC = () => {
     await taskDB.add({
       title: trimmedTitle,
       completed: false,
-      createdAt: new Date().toISOString(),
       priority: newTaskPriority,
       dueDate: newTaskDueDate || undefined,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     });
     setNewTask('');
     setNewTaskPriority('medium');

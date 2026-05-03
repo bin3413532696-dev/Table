@@ -37,6 +37,16 @@ export interface SyncResult {
   error?: string;
 }
 
+export interface LoadResult {
+  success: boolean;
+  data?: {
+    finance: unknown[];
+    tasks: unknown[];
+    notes?: unknown[];
+  };
+  error?: string;
+}
+
 /**
  * 同步数据类型
  */

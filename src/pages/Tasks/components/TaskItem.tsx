@@ -155,7 +155,7 @@ export const TaskItem: React.FC<TaskItemProps> = ({
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
               <span className="flex items-center gap-1 text-xs text-text-muted shrink-0">
                 <Calendar size={12} />
-                {formatDisplayDate(task.createdAt)}
+                {formatDisplayDate(new Date(task.createdAt).toISOString())}
               </span>
               <span className={`text-xs px-2 py-0.5 rounded-full ${config.bgColor}/10 ${config.color} border border-current/20 shrink-0`}>
                 {config.label}

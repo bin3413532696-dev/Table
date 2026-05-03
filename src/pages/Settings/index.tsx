@@ -1,21 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon, Shield, HardDrive } from 'lucide-react';
+import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon, Shield, HardDrive, Plus, Edit2, Trash2 as TrashIcon, Globe, ChevronDown, ChevronUp, Power } from 'lucide-react';
 import { dataManager, hashPin } from '../../db';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Button, Toggle } from '../../components/ui';
+import { ApiProvider, ensureBootstrappedApiConfig, getApiConfigs, saveApiConfigs } from '../../lib/apiConfig';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User, desc: '管理您的个人信息' },
   { id: 'security', label: '安全隐私', icon: Shield, desc: '保护账户和数据安全' },
   { id: 'data', label: '数据管理', icon: HardDrive, desc: '导入导出与备份' },
+  { id: 'api', label: 'API配置', icon: Globe, desc: '管理第三方API连接' },
 ];
 
 const tabContent: Record<string, { title: string; desc: string }> = {
   profile: { title: '个人资料', desc: '管理您的个人信息和账户设置' },
   security: { title: '安全隐私', desc: '保护您的账户和数据安全' },
   data: { title: '数据管理', desc: '浏览数据统计，导入导出备份' },
+  api: { title: 'API配置', desc: '管理第三方API连接和密钥' },
 };
+
+type ApiConfig = ApiProvider;
 
 function isValidEmail(email: string): boolean {
   if (!email) return true;
@@ -210,7 +215,11 @@ function SecuritySettings() {
 function DataManager() {
   const [importStatus, setImportStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const stats = dataManager.getStats();
+  const [stats, setStats] = useState({ finance: 0, tasks: 0, totalSize: 0 });
+
+  useEffect(() => {
+    dataManager.getStats().then(setStats);
+  }, []);
 
   const handleExport = () => {
     const data = dataManager.exportAll();
@@ -340,6 +349,435 @@ function DataManager() {
   );
 }
 
+function ApiConfigSettings() {
+  const [providers, setProviders] = useState<ApiProvider[]>([]);
+  const [editingProvider, setEditingProvider] = useState<ApiProvider | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<{ name: string; label: string }[]>([]);
+  const [fetchModelsError, setFetchModelsError] = useState('');
+  const [formData, setFormData] = useState<{
+    name: string;
+    apiFormat: 'anthropic' | 'openai' | 'gemini' | 'custom';
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    headers: string;
+  }>({
+    name: '',
+    apiFormat: 'openai',
+    baseUrl: '',
+    apiKey: '',
+    model: '',
+    headers: '',
+  });
+
+  const apiFormats = [
+    { value: 'openai', label: 'OpenAI Chat Completions' },
+    { value: 'anthropic', label: 'Anthropic Messages' },
+    { value: 'gemini', label: 'Gemini Native generateContent' },
+    { value: 'custom', label: '自定义 API' },
+  ];
+
+  const defaultModelsByFormat: Record<string, string> = {
+    openai: 'gpt-4o',
+    anthropic: 'claude-3-5-sonnet-20241022',
+    gemini: 'gemini-1.5-pro',
+    custom: '',
+  };
+
+  const getDefaultBaseUrl = (format: string) => {
+    switch (format) {
+      case 'openai': return 'https://api.openai.com/v1';
+      case 'anthropic': return 'https://api.anthropic.com/v1';
+      case 'gemini': return 'https://generativelanguage.googleapis.com/v1';
+      default: return '';
+    }
+  };
+
+  const fetchModels = async () => {
+    setFetchingModels(true);
+    setFetchModelsError('');
+    
+    try {
+      const { baseUrl, apiKey, apiFormat } = formData;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      const endpoints = ['/models', '/v1/models', '/api/models'];
+      
+      for (const endpoint of endpoints) {
+        try {
+          const fullUrl = new URL(endpoint, baseUrl).href;
+          const response = await fetch(fullUrl, { headers });
+          
+          if (response.ok) {
+            const data = await response.json();
+            const models = parseModels(data, apiFormat);
+            
+            if (models.length > 0) {
+              setFetchedModels(models);
+              setFetchingModels(false);
+              return;
+            }
+          }
+        } catch { continue; }
+      }
+      
+      setFetchModelsError('无法获取模型列表，请手动配置模型名称');
+    } catch (error) {
+      setFetchModelsError(error instanceof Error ? error.message : '获取模型列表失败');
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+  
+  const parseModels = (data: unknown, apiFormat: string): { name: string; label: string }[] => {
+    if (typeof data !== 'object' || data === null) return [];
+    const obj = data as Record<string, unknown>;
+    
+    if (apiFormat === 'openai' || apiFormat === 'custom') {
+      const dataArray = obj.data as { id: string; name?: string }[] || [];
+      return dataArray.map(m => ({ name: m.id, label: m.name || m.id }));
+    } else if (apiFormat === 'gemini') {
+      const modelsArray = obj.models as { name: string; displayName?: string }[] || [];
+      return modelsArray.map(m => ({
+        name: m.name.replace('models/', ''),
+        label: m.displayName || m.name.replace('models/', ''),
+      }));
+    }
+    return [];
+  };
+
+  useEffect(() => {
+    ensureBootstrappedApiConfig();
+    setProviders(getApiConfigs());
+  }, []);
+
+  const handleAdd = () => {
+    setEditingProvider(null);
+    setFormData({
+      name: '',
+      apiFormat: 'openai',
+      baseUrl: getDefaultBaseUrl('openai'),
+      apiKey: '',
+      model: defaultModelsByFormat['openai'],
+      headers: '',
+    });
+    setFetchedModels([]);
+    setFetchModelsError('');
+    setShowForm(true);
+  };
+
+  const handleEdit = (provider: ApiProvider) => {
+    setEditingProvider(provider);
+    setFormData({
+      name: provider.name,
+      apiFormat: provider.apiFormat,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey,
+      model: provider.model || '',
+      headers: provider.headers ? JSON.stringify(provider.headers, null, 2) : '',
+    });
+    setFetchedModels([]);
+    setFetchModelsError('');
+    setShowForm(true);
+  };
+
+  const handleApiFormatChange = (format: string) => {
+    setFormData(prev => ({
+      ...prev,
+      apiFormat: format as ApiProvider['apiFormat'],
+      baseUrl: getDefaultBaseUrl(format),
+      model: defaultModelsByFormat[format] || '',
+    }));
+  };
+
+  const handleActivate = (id: string) => {
+    const newProviders = providers.map(p => ({
+      ...p,
+      isActive: p.id === id,
+    }));
+    setProviders(newProviders);
+    saveApiConfigs(newProviders);
+  };
+
+  const handleDelete = (id: string) => {
+    const newProviders = providers.filter(p => p.id !== id);
+    setProviders(newProviders);
+    saveApiConfigs(newProviders);
+  };
+
+  const handleSave = () => {
+    if (!formData.name || !formData.baseUrl) {
+      alert('请填写名称和基础URL');
+      return;
+    }
+
+    let headers: Record<string, string> | undefined;
+    if (formData.headers) {
+      try {
+        headers = JSON.parse(formData.headers);
+      } catch {
+        alert('headers 格式不正确，应为 JSON');
+        return;
+      }
+    }
+
+    const newProvider: ApiProvider = {
+      id: editingProvider?.id || crypto.randomUUID(),
+      name: formData.name,
+      isActive: editingProvider?.isActive ?? (providers.length === 0),
+      apiFormat: formData.apiFormat,
+      baseUrl: formData.baseUrl,
+      apiKey: formData.apiKey,
+      model: formData.model,
+      headers,
+    };
+
+    let newProviders: ApiProvider[];
+    if (editingProvider) {
+      newProviders = providers.map(p => p.id === editingProvider.id ? newProvider : p);
+    } else {
+      newProviders = [...providers, newProvider];
+    }
+
+    setProviders(newProviders);
+    saveApiConfigs(newProviders);
+    setShowForm(false);
+    setEditingProvider(null);
+  };
+
+  const activeProvider = providers.find(p => p.isActive);
+
+  return (
+    <div className="space-y-6">
+      <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
+        <div className="flex items-start gap-3">
+          <Globe className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-medium text-text-primary">Provider 配置</h4>
+            <p className="text-sm mt-1 text-text-secondary">配置 AI Provider，激活的 Provider 将被智能体使用。</p>
+          </div>
+        </div>
+      </div>
+
+      {activeProvider && (
+        <div className="p-4 rounded-xl bg-success/10 border border-success/20">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-success/20 flex items-center justify-center">
+              <Power className="w-5 h-5 text-success" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <h4 className="font-medium text-text-primary">{activeProvider.name}</h4>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-success/20 text-success">已激活</span>
+              </div>
+              <p className="text-sm text-text-muted">{activeProvider.baseUrl}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleEdit(activeProvider)}
+                className="p-2 text-text-secondary hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          {activeProvider.model && (
+            <div className="mt-3">
+              <span className="text-xs px-2 py-1 rounded-full bg-bg-secondary text-text-secondary">
+                模型: {activeProvider.model}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      <Button variant="primary" onClick={handleAdd} icon={<Plus className="w-4 h-4" />}>
+        添加 Provider
+      </Button>
+
+      <AnimatePresence>
+        {showForm && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="p-4 rounded-xl bg-bg-secondary border border-border-primary">
+            <h4 className="font-medium text-text-primary mb-4">{editingProvider ? '编辑 Provider' : '添加 Provider'}</h4>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-text-secondary">Provider 名称 *</label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="例如：OpenAI、Claude、Gemini"
+                  className="input"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2 text-text-secondary">API 格式</label>
+                <select
+                  value={formData.apiFormat}
+                  onChange={(e) => handleApiFormatChange(e.target.value)}
+                  className="input"
+                >
+                  {apiFormats.map(format => (
+                    <option key={format.value} value={format.value}>{format.label}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2 text-text-secondary">Base URL *</label>
+                <input
+                  type="text"
+                  value={formData.baseUrl}
+                  onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+                  placeholder="https://api.example.com/v1"
+                  className="input"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2 text-text-secondary">API Key</label>
+                <div className="relative">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={formData.apiKey}
+                    onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+                    placeholder="输入 API Key"
+                    className="input pr-10"
+                  />
+                  <button onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary">
+                    {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {formData.baseUrl && formData.apiKey && (
+                <div>
+                  <Button variant="secondary" onClick={fetchModels} disabled={fetchingModels} className="w-full">
+                    {fetchingModels ? '获取中...' : '获取模型列表'}
+                  </Button>
+                  {fetchModelsError && <p className="text-error text-sm mt-2">{fetchModelsError}</p>}
+                  {fetchedModels.length > 0 && <p className="text-success text-sm mt-2">已获取 {fetchedModels.length} 个模型</p>}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium mb-2 text-text-secondary">模型</label>
+                <select
+                  value={formData.model}
+                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                  className="input mb-2"
+                >
+                  <option value="">请选择模型（或手动输入）</option>
+                  {(fetchedModels.length > 0 ? fetchedModels : [{ name: defaultModelsByFormat[formData.apiFormat], label: defaultModelsByFormat[formData.apiFormat] || '默认模型' }]).map(m => (
+                    m.name && <option key={m.name} value={m.name}>{m.label}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={formData.model}
+                  onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                  placeholder="或直接输入模型名称"
+                  className="input"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2 text-text-secondary">自定义 Headers (JSON)</label>
+                <textarea
+                  value={formData.headers}
+                  onChange={(e) => setFormData({ ...formData, headers: e.target.value })}
+                  placeholder='{"X-Custom-Header": "value"}'
+                  rows={2}
+                  className="input resize-none font-mono text-sm"
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <Button variant="secondary" onClick={() => setShowForm(false)}>取消</Button>
+                <Button variant="primary" onClick={handleSave}>保存</Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="space-y-3">
+        {providers.length === 0 ? (
+          <div className="text-center py-12 text-text-muted">
+            <Globe className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <p>暂无 Provider 配置</p>
+            <p className="text-sm mt-1">点击上方按钮添加第一个 Provider</p>
+          </div>
+        ) : (
+          providers.map((provider) => (
+            <motion.div key={provider.id} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} className="rounded-xl bg-bg-secondary border border-border-primary overflow-hidden">
+              <div className="p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${provider.isActive ? 'bg-success/20' : 'bg-bg-hover'}`}>
+                    <Globe className={`w-5 h-5 ${provider.isActive ? 'text-success' : 'text-text-muted'}`} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-medium text-text-primary">{provider.name}</h4>
+                      {provider.isActive && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-success/10 text-success">激活</span>
+                      )}
+                    </div>
+                    <p className="text-sm text-text-muted">{provider.baseUrl}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!provider.isActive && (
+                    <button
+                      onClick={() => handleActivate(provider.id)}
+                      className="p-2 text-text-secondary hover:text-success hover:bg-success/5 rounded-lg transition-colors"
+                      title="激活"
+                    >
+                      <Power className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleEdit(provider)}
+                    className="p-2 text-text-secondary hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(provider.id)}
+                    className="p-2 text-text-secondary hover:text-error hover:bg-error/5 rounded-lg transition-colors"
+                  >
+                    <TrashIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              {provider.model && (
+                <div className="px-4 pb-4">
+                  <span className="text-xs px-2 py-1 rounded-full bg-bg-primary text-text-secondary">
+                    模型: {provider.model}
+                  </span>
+                </div>
+              )}
+            </motion.div>
+          ))
+        )}
+      </div>
+
+      <div className="p-4 rounded-xl bg-info/10 border border-info/20">
+        <h4 className="font-medium text-text-primary mb-2">使用说明</h4>
+        <ul className="text-sm text-text-secondary space-y-1">
+          <li>• 激活的 Provider 将被智能体使用</li>
+          <li>• 配置模型名称后，智能体将使用指定的模型</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const [activeTab, setActiveTab] = useState('profile');
 
@@ -348,6 +786,7 @@ export default function Settings() {
       case 'profile': return <ProfileSettings />;
       case 'security': return <SecuritySettings />;
       case 'data': return <DataManager />;
+      case 'api': return <ApiConfigSettings />;
       default: return null;
     }
   };

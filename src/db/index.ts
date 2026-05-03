@@ -164,7 +164,7 @@ export const taskDB = {
   async add(record: Omit<Task, 'id'>): Promise<Task> {
     const result = await taskStore.create({
       ...record,
-      dueDate: record.dueDate ? new Date(record.dueDate).getTime() : undefined
+      dueDate: record.dueDate
     });
     if (!result.success || !result.data) {
       throw new Error('Failed to create task');
@@ -174,9 +174,6 @@ export const taskDB = {
 
   async update(id: string, updates: Partial<Task>): Promise<void> {
     const updateData: Partial<Task> = { ...updates };
-    if (updates.dueDate && typeof updates.dueDate === 'string') {
-      updateData.dueDate = new Date(updates.dueDate).getTime();
-    }
     await taskStore.update(id, updateData);
   },
 
@@ -220,7 +217,7 @@ export const dataManager = {
 
       // 导入财务数据
       if (Array.isArray(data.finance)) {
-        const validRecords = data.finance.filter((r): r is FinanceRecord => {
+        const validRecords = data.finance.filter((r: any): r is FinanceRecord => {
           return isValidId(r.id) &&
                  (r.type === 'income' || r.type === 'expense') &&
                  typeof r.amount === 'number';
@@ -231,7 +228,7 @@ export const dataManager = {
 
       // 导入任务数据
       if (Array.isArray(data.tasks)) {
-        const validRecords = data.tasks.filter((r): r is Task => {
+        const validRecords = data.tasks.filter((r: any): r is Task => {
           return isValidId(r.id) &&
                  typeof r.title === 'string' &&
                  typeof r.completed === 'boolean';
@@ -271,13 +268,18 @@ export const dataManager = {
     localStorage.removeItem('security_pin_hashed');
   },
 
-  getStats() {
+  async getStats() {
+    const [finance, tasks] = await Promise.all([
+      financeStore.getAll(),
+      taskStore.getAll(),
+    ]);
+
     return {
-      finance: financeStore.getAll().length,
-      tasks: taskStore.getAll().length,
+      finance: finance.length,
+      tasks: tasks.length,
       totalSize: JSON.stringify({
-        finance: financeStore.getAll(),
-        tasks: taskStore.getAll()
+        finance,
+        tasks
       }).length
     };
   },
