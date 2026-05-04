@@ -20,9 +20,31 @@ interface ActiveRequestState {
   controller: AbortController;
   assistantMessageId: string;
   content: string;
+  committedContent: string;
   canceled: boolean;
   stopHandled: boolean;
+  toolCalls: ToolCall[];
 }
+
+interface ToolExecutionRecord {
+  toolCall: ToolCall;
+  result: ToolResult;
+}
+
+interface PendingAgentContinuation {
+  assistantMessageId: string;
+  model: string;
+  iteration: number;
+  conversationMessages: AgentMessage[];
+  assistantText: string;
+  pendingToolCalls: ToolCall[];
+  nextToolIndex: number;
+  toolResults: ToolExecutionRecord[];
+  renderedContent: string;
+  accumulatedToolCalls: ToolCall[];
+}
+
+const MAX_AGENT_ITERATIONS = 5;
 
 const initialState: AgentState = {
   messages: [],
@@ -68,6 +90,15 @@ function appendToolSummary(content: string, summary: string): string {
   return content ? `${content}\n\n${summary}` : summary;
 }
 
+function appendAssistantText(content: string, text: string): string {
+  const normalized = text.trim();
+  if (!normalized) {
+    return content;
+  }
+
+  return content ? `${content}\n\n${normalized}` : normalized;
+}
+
 function appendManualStopMessage(content: string): string {
   const stopMessage = '已手动终止本次思考。';
   if (!content.trim()) {
@@ -95,6 +126,50 @@ function formatToolResultSummary(result: ToolResult, toolName: string): string {
   } catch {
     return `工具 ${toolName} 已执行成功。`;
   }
+}
+
+function mergeToolCalls(existing: ToolCall[], incoming: ToolCall[]): ToolCall[] {
+  if (incoming.length === 0) {
+    return existing;
+  }
+
+  const merged = [...existing];
+  const seen = new Set(existing.map((toolCall) => toolCall.id));
+
+  for (const toolCall of incoming) {
+    if (!seen.has(toolCall.id)) {
+      merged.push(toolCall);
+      seen.add(toolCall.id);
+    }
+  }
+
+  return merged;
+}
+
+function createHistoryMessage(role: AgentMessage['role'], content: string): AgentMessage {
+  return {
+    id: crypto.randomUUID(),
+    role,
+    content,
+    timestamp: Date.now(),
+    status: 'completed',
+  };
+}
+
+function buildToolLoopPrompt(records: ToolExecutionRecord[]): string {
+  const summaries = records
+    .map(({ toolCall, result }) => {
+      if (result.success && result.data !== undefined) {
+        return `工具 ${toolCall.name} 执行成功，结果如下：\n${JSON.stringify(result.data, null, 2)}`;
+      }
+      if (result.success) {
+        return `工具 ${toolCall.name} 执行成功。`;
+      }
+      return `工具 ${toolCall.name} 执行失败：${result.error || '未知错误'}`;
+    })
+    .join('\n\n');
+
+  return `以下是工具执行的结果：\n\n${summaries}\n\n请根据这些结果继续处理或给出最终回复。`;
 }
 
 function agentReducer(state: AgentState, action: AgentAction): AgentState {
@@ -161,6 +236,7 @@ const AgentContext = createContext<AgentContextType | null>(null);
 export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(agentReducer, initialState);
   const activeRequestRef = useRef<ActiveRequestState | null>(null);
+  const pendingContinuationRef = useRef<PendingAgentContinuation | null>(null);
 
   const handleManualStop = useCallback((requestState: ActiveRequestState) => {
     if (requestState.stopHandled) {
@@ -261,8 +337,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       controller: new AbortController(),
       assistantMessageId: assistantMessage.id,
       content: '',
+      committedContent: '',
       canceled: false,
       stopHandled: false,
+      toolCalls: [],
     };
     activeRequestRef.current = requestState;
 
@@ -272,33 +350,177 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    const updateAssistantMessage = (updates: Partial<AgentMessage>) => {
+      dispatch({
+        type: 'UPDATE_MESSAGE',
+        payload: { id: assistantMessage.id, updates },
+      });
+    };
+
+    const appendChunkToAssistant = (chunk: string) => {
+      requestState.content += chunk;
+      updateAssistantMessage({ content: requestState.content });
+    };
+
+    const persistToolResult = (toolCall: ToolCall, result: ToolResult) => {
+      dispatch({
+        type: 'ADD_TOOL_RESULT',
+        payload: {
+          toolCallId: toolCall.id,
+          result,
+          summary: formatToolResultSummary(result, toolCall.name),
+        },
+      });
+    };
+
+    const setConfirmation = (
+      toolCall: ToolCall,
+      description: string,
+      continuation: PendingAgentContinuation | null
+    ) => {
+      pendingContinuationRef.current = continuation;
+      dispatch({
+        type: 'SET_CONFIRMATION',
+        payload: {
+          id: toolCall.id,
+          toolName: toolCall.name,
+          arguments: toolCall.arguments,
+          description,
+          pendingMessageId: assistantMessage.id,
+        },
+      });
+    };
+
+    const runToolCalls = async (
+      continuation: PendingAgentContinuation
+    ): Promise<'continue' | 'paused'> => {
+      for (let index = continuation.nextToolIndex; index < continuation.pendingToolCalls.length; index += 1) {
+        const toolCall = continuation.pendingToolCalls[index];
+        continuation.nextToolIndex = index;
+        ensureRequestActive();
+        const result = await agentEngine.executeTool(toolCall);
+        ensureRequestActive();
+
+        if (result.requiresConfirmation) {
+          setConfirmation(toolCall, result.confirmationMessage || '', continuation);
+
+          if (activeRequestRef.current === requestState) {
+            activeRequestRef.current = null;
+            dispatch({ type: 'SET_PROCESSING', payload: false });
+          }
+          return 'paused';
+        }
+
+        continuation.toolResults.push({ toolCall, result });
+        continuation.nextToolIndex = index + 1;
+        persistToolResult(toolCall, result);
+      }
+
+      return 'continue';
+    };
+
+    const continueAgentLoop = async (
+      baseMessages: AgentMessage[],
+      model: string,
+      initialPrompt: string
+    ) => {
+      let iteration = 0;
+      let conversationMessages = baseMessages;
+      let prompt = initialPrompt;
+
+      while (iteration < MAX_AGENT_ITERATIONS) {
+        ensureRequestActive();
+
+        let loopRawResponse = '';
+        const loopInput = prompt ? conversationMessages.concat(createHistoryMessage('user', prompt)) : conversationMessages;
+
+        for await (const chunk of agentEngine.processMessage(
+          loopInput,
+          model,
+          requestState.controller.signal
+        )) {
+          ensureRequestActive();
+
+          if (typeof chunk === 'string') {
+            loopRawResponse += chunk;
+            appendChunkToAssistant(chunk);
+          } else if (chunk.type === 'tool_call') {
+            requestState.toolCalls = mergeToolCalls(requestState.toolCalls, [chunk.toolCall]);
+            updateAssistantMessage({ toolCalls: requestState.toolCalls });
+          }
+        }
+
+        ensureRequestActive();
+
+        const { textContent, toolCalls } = agentEngine.parseToolCalls(loopRawResponse);
+        if (textContent.trim()) {
+          requestState.committedContent = appendAssistantText(requestState.committedContent, textContent);
+          requestState.content = requestState.committedContent;
+          updateAssistantMessage({ content: requestState.committedContent });
+        } else {
+          requestState.content = requestState.committedContent;
+          updateAssistantMessage({ content: requestState.committedContent });
+        }
+
+        if (textContent.trim()) {
+          conversationMessages = conversationMessages.concat(createHistoryMessage('assistant', textContent));
+        }
+
+        if (toolCalls.length === 0) {
+          return;
+        }
+
+        requestState.toolCalls = mergeToolCalls(requestState.toolCalls, toolCalls);
+        updateAssistantMessage({ toolCalls: requestState.toolCalls });
+
+        const continuation: PendingAgentContinuation = {
+          assistantMessageId: assistantMessage.id,
+          model,
+          iteration,
+          conversationMessages,
+          assistantText: textContent,
+          pendingToolCalls: toolCalls,
+          nextToolIndex: 0,
+          toolResults: [],
+          renderedContent: requestState.committedContent,
+          accumulatedToolCalls: requestState.toolCalls,
+        };
+
+        const executionState = await runToolCalls(continuation);
+        if (executionState === 'paused') {
+          return;
+        }
+
+        prompt = buildToolLoopPrompt(continuation.toolResults);
+        conversationMessages = conversationMessages.concat(createHistoryMessage('user', prompt));
+        iteration += 1;
+        prompt = '';
+      }
+    };
+
     try {
       const directToolCall = agentEngine.findDirectToolCall(content);
-      const pendingToolCalls: ToolCall[] = [];
 
       if (directToolCall) {
-        dispatch({
-          type: 'UPDATE_MESSAGE',
-          payload: {
-            id: assistantMessage.id,
-            updates: { toolCalls: [directToolCall] },
-          },
-        });
+        requestState.toolCalls = [directToolCall];
+        updateAssistantMessage({ toolCalls: [directToolCall] });
 
         ensureRequestActive();
         const result = await agentEngine.executeTool(directToolCall);
         ensureRequestActive();
 
         if (result.requiresConfirmation) {
-          dispatch({
-            type: 'SET_CONFIRMATION',
-            payload: {
-              id: directToolCall.id,
-              toolName: directToolCall.name,
-              arguments: directToolCall.arguments,
-              description: result.confirmationMessage || '',
-              pendingMessageId: assistantMessage.id,
-            },
+          setConfirmation(directToolCall, result.confirmationMessage || '', {
+            assistantMessageId: assistantMessage.id,
+            model: state.selectedModel,
+            iteration: 0,
+            conversationMessages: state.messages.concat(userMessage),
+            assistantText: '',
+            pendingToolCalls: [directToolCall],
+            nextToolIndex: 0,
+            toolResults: [],
+            renderedContent: '',
+            accumulatedToolCalls: [directToolCall],
           });
 
           if (activeRequestRef.current === requestState) {
@@ -308,102 +530,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        dispatch({
-          type: 'ADD_TOOL_RESULT',
-          payload: {
-            toolCallId: directToolCall.id,
-            result,
-            summary: formatToolResultSummary(result, directToolCall.name),
-          },
-        });
+        persistToolResult(directToolCall, result);
 
         if (activeRequestRef.current === requestState) {
-          dispatch({
-            type: 'UPDATE_MESSAGE',
-            payload: { id: assistantMessage.id, updates: { status: 'completed' } },
-          });
+          updateAssistantMessage({ status: 'completed' });
         }
         return;
       }
 
-      for await (const chunk of agentEngine.processMessage(
-        state.messages.concat(userMessage),
-        state.selectedModel,
-        requestState.controller.signal
-      )) {
-        ensureRequestActive();
-
-        if (typeof chunk === 'string') {
-          requestState.content += chunk;
-          dispatch({
-            type: 'UPDATE_MESSAGE',
-            payload: { id: assistantMessage.id, updates: { content: requestState.content } },
-          });
-        } else if (chunk.type === 'tool_call') {
-          pendingToolCalls.push(chunk.toolCall);
-        }
-      }
-
-      ensureRequestActive();
-
-      const { textContent } = agentEngine.parseToolCalls(requestState.content);
-      const assistantBaseContent = textContent !== requestState.content ? textContent : requestState.content;
-      requestState.content = assistantBaseContent;
-
-      if (pendingToolCalls.length > 0) {
-        dispatch({
-          type: 'UPDATE_MESSAGE',
-          payload: {
-            id: assistantMessage.id,
-            updates: { content: assistantBaseContent, toolCalls: pendingToolCalls },
-          },
-        });
-
-        for (const toolCall of pendingToolCalls) {
-          ensureRequestActive();
-          const result = await agentEngine.executeTool(toolCall);
-          ensureRequestActive();
-
-          if (result.requiresConfirmation) {
-            dispatch({
-              type: 'SET_CONFIRMATION',
-              payload: {
-                id: toolCall.id,
-                toolName: toolCall.name,
-                arguments: toolCall.arguments,
-                description: result.confirmationMessage || '',
-                pendingMessageId: assistantMessage.id,
-              },
-            });
-
-            if (activeRequestRef.current === requestState) {
-              activeRequestRef.current = null;
-              dispatch({ type: 'SET_PROCESSING', payload: false });
-            }
-            return;
-          }
-
-          dispatch({
-            type: 'ADD_TOOL_RESULT',
-            payload: {
-              toolCallId: toolCall.id,
-              result,
-              summary: formatToolResultSummary(result, toolCall.name),
-            },
-          });
-        }
-      } else if (assistantBaseContent !== requestState.content) {
-        dispatch({
-          type: 'UPDATE_MESSAGE',
-          payload: { id: assistantMessage.id, updates: { content: assistantBaseContent } },
-        });
-      }
+      await continueAgentLoop(state.messages.concat(userMessage), state.selectedModel, '');
 
       if (activeRequestRef.current === requestState) {
-        dispatch({
-          type: 'UPDATE_MESSAGE',
-          payload: { id: assistantMessage.id, updates: { status: 'completed' } },
-        });
+        updateAssistantMessage({ status: 'completed' });
       }
     } catch (error) {
       if (requestState.canceled || requestState.controller.signal.aborted) {
@@ -457,6 +595,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const continuation = pendingContinuationRef.current;
     dispatch({ type: 'SET_CONFIRMATION', payload: null });
     dispatch({ type: 'SET_PROCESSING', payload: true });
 
@@ -472,13 +611,196 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         },
       });
 
+      if (continuation) {
+        continuation.toolResults.push({
+          toolCall: {
+            id: confirmationRequest.id,
+            name: confirmationRequest.toolName,
+            arguments: confirmationRequest.arguments,
+          },
+          result,
+        });
+        continuation.nextToolIndex += 1;
+        pendingContinuationRef.current = continuation;
+      }
+
       dispatch({
         type: 'UPDATE_MESSAGE',
         payload: {
           id: confirmationRequest.pendingMessageId,
-          updates: { status: 'completed' },
+          updates: { status: continuation ? 'streaming' : 'completed' },
         },
       });
+
+      if (continuation) {
+        const requestState: ActiveRequestState = {
+          controller: new AbortController(),
+          assistantMessageId: continuation.assistantMessageId,
+          content: continuation.renderedContent,
+          committedContent: continuation.renderedContent,
+          canceled: false,
+          stopHandled: false,
+          toolCalls: continuation.accumulatedToolCalls,
+        };
+        activeRequestRef.current = requestState;
+
+        const ensureRequestActive = () => {
+          if (requestState.canceled || requestState.controller.signal.aborted || activeRequestRef.current !== requestState) {
+            throw new DOMException('The operation was aborted.', 'AbortError');
+          }
+        };
+
+        const updateAssistantMessage = (updates: Partial<AgentMessage>) => {
+          dispatch({
+            type: 'UPDATE_MESSAGE',
+            payload: { id: continuation.assistantMessageId, updates },
+          });
+        };
+
+        try {
+          for (let index = continuation.nextToolIndex; index < continuation.pendingToolCalls.length; index += 1) {
+            const toolCall = continuation.pendingToolCalls[index];
+            ensureRequestActive();
+            const toolResult = await agentEngine.executeTool(toolCall);
+            ensureRequestActive();
+
+            if (toolResult.requiresConfirmation) {
+              pendingContinuationRef.current = {
+                ...continuation,
+                nextToolIndex: index,
+                renderedContent: requestState.committedContent,
+              };
+              dispatch({
+                type: 'SET_CONFIRMATION',
+                payload: {
+                  id: toolCall.id,
+                  toolName: toolCall.name,
+                  arguments: toolCall.arguments,
+                  description: toolResult.confirmationMessage || '',
+                  pendingMessageId: continuation.assistantMessageId,
+                },
+              });
+              activeRequestRef.current = null;
+              dispatch({ type: 'SET_PROCESSING', payload: false });
+              return;
+            }
+
+            continuation.toolResults.push({ toolCall, result: toolResult });
+            continuation.nextToolIndex = index + 1;
+
+            dispatch({
+              type: 'ADD_TOOL_RESULT',
+              payload: {
+                toolCallId: toolCall.id,
+                result: toolResult,
+                summary: formatToolResultSummary(toolResult, toolCall.name),
+              },
+            });
+          }
+
+          pendingContinuationRef.current = null;
+
+          if (continuation.iteration + 1 < MAX_AGENT_ITERATIONS) {
+            const followupPrompt = buildToolLoopPrompt(continuation.toolResults);
+            const requestMessages = continuation.conversationMessages.concat(
+              createHistoryMessage('user', followupPrompt)
+            );
+
+            let rawResponse = '';
+            for await (const chunk of agentEngine.processMessage(
+              requestMessages,
+              continuation.model,
+              requestState.controller.signal
+            )) {
+              ensureRequestActive();
+
+              if (typeof chunk === 'string') {
+                rawResponse += chunk;
+                requestState.content += chunk;
+                updateAssistantMessage({ content: requestState.content });
+              } else if (chunk.type === 'tool_call') {
+                requestState.toolCalls = mergeToolCalls(requestState.toolCalls, [chunk.toolCall]);
+                continuation.accumulatedToolCalls = requestState.toolCalls;
+                updateAssistantMessage({ toolCalls: requestState.toolCalls });
+              }
+            }
+
+            const { textContent, toolCalls } = agentEngine.parseToolCalls(rawResponse);
+            if (textContent.trim()) {
+              requestState.committedContent = appendAssistantText(requestState.committedContent, textContent);
+              requestState.content = requestState.committedContent;
+              updateAssistantMessage({ content: requestState.committedContent });
+            } else {
+              requestState.content = requestState.committedContent;
+              updateAssistantMessage({ content: requestState.committedContent });
+            }
+
+            if (toolCalls.length > 0) {
+              const nextContinuation: PendingAgentContinuation = {
+                assistantMessageId: continuation.assistantMessageId,
+                model: continuation.model,
+                iteration: continuation.iteration + 1,
+                conversationMessages: textContent.trim()
+                  ? requestMessages.concat(createHistoryMessage('assistant', textContent))
+                  : requestMessages,
+                assistantText: textContent,
+                pendingToolCalls: toolCalls,
+                nextToolIndex: 0,
+                toolResults: [],
+                renderedContent: requestState.committedContent,
+                accumulatedToolCalls: mergeToolCalls(requestState.toolCalls, toolCalls),
+              };
+              pendingContinuationRef.current = nextContinuation;
+              requestState.toolCalls = nextContinuation.accumulatedToolCalls;
+              updateAssistantMessage({ toolCalls: requestState.toolCalls });
+
+              for (let index = 0; index < toolCalls.length; index += 1) {
+                const toolCall = toolCalls[index];
+                ensureRequestActive();
+                const toolResult = await agentEngine.executeTool(toolCall);
+                ensureRequestActive();
+
+                if (toolResult.requiresConfirmation) {
+                  nextContinuation.nextToolIndex = index;
+                  nextContinuation.renderedContent = requestState.committedContent;
+                  dispatch({
+                    type: 'SET_CONFIRMATION',
+                    payload: {
+                      id: toolCall.id,
+                      toolName: toolCall.name,
+                      arguments: toolCall.arguments,
+                      description: toolResult.confirmationMessage || '',
+                      pendingMessageId: continuation.assistantMessageId,
+                    },
+                  });
+                  activeRequestRef.current = null;
+                  dispatch({ type: 'SET_PROCESSING', payload: false });
+                  return;
+                }
+
+                nextContinuation.toolResults.push({ toolCall, result: toolResult });
+                nextContinuation.nextToolIndex = index + 1;
+                dispatch({
+                  type: 'ADD_TOOL_RESULT',
+                  payload: {
+                    toolCallId: toolCall.id,
+                    result: toolResult,
+                    summary: formatToolResultSummary(toolResult, toolCall.name),
+                  },
+                });
+              }
+
+              pendingContinuationRef.current = null;
+            }
+          }
+
+          updateAssistantMessage({ status: 'completed' });
+        } finally {
+          if (activeRequestRef.current === requestState) {
+            activeRequestRef.current = null;
+          }
+        }
+      }
     } catch (error) {
       dispatch({
         type: 'SET_ERROR',
@@ -510,6 +832,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       },
     });
 
+    pendingContinuationRef.current = null;
     dispatch({ type: 'SET_CONFIRMATION', payload: null });
   }, [state.confirmationRequest, state.messages]);
 

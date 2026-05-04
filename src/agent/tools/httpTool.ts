@@ -3,6 +3,8 @@ import { ApiProvider, getApiConfigs, saveApiConfigs } from '../../lib/apiConfig'
 
 type ApiConfig = ApiProvider;
 
+const PUBLIC_HTTPS_PROTOCOL = 'https:';
+
 // SSRF 防护：禁止访问的危险端口
 const BLOCKED_PORTS = [
   22,    // SSH
@@ -31,6 +33,133 @@ const PRIVATE_IP_PATTERNS = [
   /^fe80:/i,                         // IPv6 link-local
 ];
 
+const BLOCKED_HOSTNAME_PATTERNS = [
+  /\.local$/i,
+  /\.localhost$/i,
+  /\.internal$/i,
+  /\.home\.arpa$/i,
+];
+
+function isPrivateIpv4(hostname: string): boolean {
+  return PRIVATE_IP_PATTERNS.some((pattern) => pattern.test(hostname));
+}
+
+function normalizeHostname(hostname: string): string {
+  if (!hostname) {
+    return hostname;
+  }
+
+  try {
+    return hostname.toLowerCase();
+  } catch {
+    return hostname;
+  }
+}
+
+function parseNumericIpv4(hostname: string): string | null {
+  if (!/^\d+$/.test(hostname)) {
+    return null;
+  }
+
+  const value = Number(hostname);
+  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+    return null;
+  }
+
+  return [
+    (value >>> 24) & 255,
+    (value >>> 16) & 255,
+    (value >>> 8) & 255,
+    value & 255,
+  ].join('.');
+}
+
+function parseAlternativeIpv4(hostname: string): string | null {
+  const parts = hostname.split('.');
+  if (parts.length !== 4) {
+    return null;
+  }
+
+  const normalized = parts.map((part) => {
+    if (!part) {
+      return null;
+    }
+
+    let value: number;
+    if (/^0x[0-9a-f]+$/i.test(part)) {
+      value = parseInt(part, 16);
+    } else if (/^0[0-7]+$/.test(part) && part !== '0') {
+      value = parseInt(part, 8);
+    } else if (/^\d+$/.test(part)) {
+      value = parseInt(part, 10);
+    } else {
+      return null;
+    }
+
+    if (!Number.isInteger(value) || value < 0 || value > 255) {
+      return null;
+    }
+
+    return String(value);
+  });
+
+  if (normalized.some((part) => part === null)) {
+    return null;
+  }
+
+  return normalized.join('.');
+}
+
+function isBlockedHostname(hostname: string): { blocked: boolean; reason?: string } {
+  const normalized = normalizeHostname(hostname);
+  if (!normalized) {
+    return { blocked: true, reason: '缺少主机名' };
+  }
+
+  if (normalized.includes('%')) {
+    return { blocked: true, reason: `禁止使用带作用域的主机名: ${hostname}` };
+  }
+
+  if (PRIVATE_IP_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return { blocked: true, reason: `禁止访问内网地址: ${hostname}` };
+  }
+
+  if (BLOCKED_HOSTNAME_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return { blocked: true, reason: `禁止访问本地域名: ${hostname}` };
+  }
+
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(normalized);
+  if (ipv4Match) {
+    const octets = [
+      parseInt(ipv4Match[1], 10),
+      parseInt(ipv4Match[2], 10),
+      parseInt(ipv4Match[3], 10),
+      parseInt(ipv4Match[4], 10),
+    ];
+    if (octets.some((octet) => octet > 255)) {
+      return { blocked: true, reason: `无效的 IP 地址: ${hostname}` };
+    }
+    if (isPrivateIpv4(normalized)) {
+      return { blocked: true, reason: `禁止访问内网 IP: ${hostname}` };
+    }
+    return { blocked: false };
+  }
+
+  const numericIpv4 = parseNumericIpv4(normalized) || parseAlternativeIpv4(normalized);
+  if (numericIpv4) {
+    if (isPrivateIpv4(numericIpv4)) {
+      return { blocked: true, reason: `禁止访问内网 IP 变体: ${hostname}` };
+    }
+    return { blocked: false };
+  }
+
+  if (normalized.startsWith('[') || normalized.includes(':')) {
+    return { blocked: true, reason: `暂不允许直接访问 IPv6 主机: ${hostname}` };
+  }
+
+  return { blocked: false };
+}
+
 /**
  * SSRF 防护：验证 URL 是否安全
  * 返回 { safe: boolean, reason?: string }
@@ -39,39 +168,20 @@ function validateUrlSafety(url: string): { safe: boolean; reason?: string } {
   try {
     const parsed = new URL(url);
 
-    // 只允许 HTTP/HTTPS 协议
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return { safe: false, reason: `不允许使用 ${parsed.protocol} 协议` };
+    // 仅允许 HTTPS 公网地址
+    if (parsed.protocol !== PUBLIC_HTTPS_PROTOCOL) {
+      return { safe: false, reason: `仅允许使用 ${PUBLIC_HTTPS_PROTOCOL} 协议` };
     }
 
     // 检查端口
-    const port = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === 'https:' ? 443 : 80);
+    const port = parsed.port ? parseInt(parsed.port, 10) : 443;
     if (BLOCKED_PORTS.includes(port)) {
       return { safe: false, reason: `禁止访问端口 ${port}` };
     }
 
-    // 检查是否为内网地址
-    const hostname = parsed.hostname;
-    for (const pattern of PRIVATE_IP_PATTERNS) {
-      if (pattern.test(hostname)) {
-        return { safe: false, reason: `禁止访问内网地址: ${hostname}` };
-      }
-    }
-
-    // 检查是否为 IP 地址（防止通过 IP 访问内网）
-    const ipMatch = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
-    if (ipMatch) {
-      const octets = [parseInt(ipMatch[1], 10), parseInt(ipMatch[2], 10), parseInt(ipMatch[3], 10), parseInt(ipMatch[4], 10)];
-      // 验证 IP 格式
-      if (octets.some(o => o > 255)) {
-        return { safe: false, reason: `无效的 IP 地址: ${hostname}` };
-      }
-      // 检查是否为私有 IP
-      for (const pattern of PRIVATE_IP_PATTERNS) {
-        if (pattern.test(hostname)) {
-          return { safe: false, reason: `禁止访问内网 IP: ${hostname}` };
-        }
-      }
+    const hostnameCheck = isBlockedHostname(parsed.hostname);
+    if (hostnameCheck.blocked) {
+      return { safe: false, reason: hostnameCheck.reason };
     }
 
     return { safe: true };
@@ -187,7 +297,7 @@ function formatResponse(config: ApiConfig, responseBody: unknown): string | unde
 
 export const httpRequestTool: Tool = {
   name: 'http_request',
-  description: '发送 HTTP 请求到第三方 API（仅允许 HTTPS 公网地址）',
+  description: '发送 HTTP 请求到第三方 API（仅允许 HTTPS 公网地址，且不跟随重定向）',
   parameters: {
     type: 'object',
     required: ['method'],
@@ -259,6 +369,7 @@ export const httpRequestTool: Tool = {
       const response = await fetch(requestUrl, {
         method,
         headers,
+        redirect: 'error',
         body: method === 'POST' || method === 'PUT' || method === 'PATCH'
           ? serializeBody(requestBody || {}, contentType)
           : undefined,

@@ -398,6 +398,37 @@ async function main() {
       await waitForAgentReady(cdp);
     }
 
+    const explainBefore = await getPageState(cdp);
+    const explainTaskCountBefore = explainBefore.tasksCount;
+    const explainBadgeCountBefore = explainBefore.toolBadges.filter(
+      (badge) => badge === 'create_task'
+    ).length;
+
+    await sendPrompt(cdp, '如何使用 create_task？请说明它需要哪些参数，不要执行任何操作。');
+    await waitForProcessingStop(cdp);
+    await waitForAgentReady(cdp);
+
+    const explainAfter = await getPageState(cdp);
+    const explainText = String(explainAfter.bodyText || '');
+    const explainTriggeredTool =
+      explainAfter.toolBadges.filter((badge) => badge === 'create_task').length > explainBadgeCountBefore ||
+      explainText.includes('即将执行 create_task') ||
+      explainText.includes('工具 create_task 执行结果') ||
+      explainText.includes('工具 create_task 已执行成功');
+
+    summary.tests.push({
+      test: 'create_task_explanation_no_execute',
+      toolCalled: explainTriggeredTool,
+      taskCountChanged: explainAfter.tasksCount !== explainTaskCountBefore,
+    });
+
+    if (explainTriggeredTool) {
+      summary.failures.push('create_task_explanation_no_execute: 解释型问句错误触发了工具执行');
+    }
+    if (explainAfter.tasksCount !== explainTaskCountBefore) {
+      summary.failures.push('create_task_explanation_no_execute: 解释型问句意外修改了任务数据');
+    }
+
     const taskCountBefore = (await getPageState(cdp)).tasksCount;
     const createTaskToolName = 'create_task';
     const createTaskPrompt = '请严格只调用 create_task 工具，创建一个标题为 CDP联调任务 的任务，不要调用其他工具。';

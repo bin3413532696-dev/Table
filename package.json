@@ -5,6 +5,7 @@
     "dev": "webpack serve",
     "build": "webpack --mode production",
     "typecheck": "tsc --noEmit",
+    "agent:e2e": "node scripts/agent-e2e-cdp.mjs",
     "knowledge:e2e": "node scripts/knowledge-e2e-cdp.mjs",
     "agent:modules:e2e": "node scripts/agent-modules-e2e-cdp.mjs"
   },

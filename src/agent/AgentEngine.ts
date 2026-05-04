@@ -102,9 +102,80 @@ ${params}`;
     return null;
   }
 
+  private extractInlineToolJson(content: string): string[] {
+    const candidates: string[] = [];
+    let searchStart = 0;
+
+    while (searchStart < content.length) {
+      const nameIndex = content.indexOf('"name"', searchStart);
+      if (nameIndex === -1) {
+        break;
+      }
+
+      const start = content.lastIndexOf('{', nameIndex);
+      if (start === -1) {
+        break;
+      }
+
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      let end = -1;
+
+      for (let index = start; index < content.length; index += 1) {
+        const char = content[index];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+
+        if (char === '\\') {
+          escaped = true;
+          continue;
+        }
+
+        if (char === '"') {
+          inString = !inString;
+          continue;
+        }
+
+        if (inString) {
+          continue;
+        }
+
+        if (char === '{') {
+          depth += 1;
+        } else if (char === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            end = index;
+            break;
+          }
+        }
+      }
+
+      if (end === -1) {
+        break;
+      }
+
+      const candidate = content.slice(start, end + 1).trim();
+      if (candidate.includes('"arguments"')) {
+        candidates.push(candidate);
+      }
+      searchStart = end + 1;
+    }
+
+    return candidates;
+  }
+
   findDirectToolCall(content: string): ToolCall | null {
     const normalized = content.trim();
-    if (!normalized || !/(只调用|调用|使用)/.test(normalized)) {
+    if (
+      !normalized ||
+      !/(严格只调用|请严格只调用|只调用|仅调用)/.test(normalized) ||
+      /[？?]/.test(normalized) ||
+      /(如何|怎么|怎样|为什么|需要什么|哪些参数|参数是什么|能否|是否|解释|说明|介绍)/.test(normalized)
+    ) {
       return null;
     }
 
@@ -158,9 +229,6 @@ ${params}`;
     const toolBlockRegex = /```tool\s*\n?([\s\S]*?)```/g;
     // 格式2: ```json\n{"name": "...", "arguments": {...}}\n```
     const jsonBlockRegex = /```json\s*\n?([\s\S]*?)```/g;
-    // 格式3: OpenAI 风格的内联 JSON
-    const inlineToolRegex = /\{"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\}/g;
-
     // 解析 ```tool 块
     let match: RegExpExecArray | null;
     while ((match = toolBlockRegex.exec(content)) !== null) {
@@ -194,20 +262,21 @@ ${params}`;
       }
     }
 
-    // 解析内联 JSON 格式
-    while ((match = inlineToolRegex.exec(content)) !== null) {
+    // 解析内联 JSON 格式，支持嵌套对象
+    for (const candidate of this.extractInlineToolJson(content)) {
       try {
-        const name = match[1];
-        const args = JSON.parse(match[2]);
-        toolCalls.push({
-          id: crypto.randomUUID(),
-          name,
-          arguments: args,
-        });
+        const parsed = JSON.parse(candidate);
+        if (parsed.name && typeof parsed.name === 'string') {
+          toolCalls.push({
+            id: crypto.randomUUID(),
+            name: parsed.name,
+            arguments: parsed.arguments || {},
+          });
+        }
       } catch {
         // Ignore malformed inline JSON.
       }
-    }
+    };
 
     // 去重（基于 name + arguments 的 JSON 字符串）
     const seen = new Set<string>();
@@ -224,7 +293,7 @@ ${params}`;
     let textContent = content
       .replace(toolBlockRegex, '')
       .replace(jsonBlockRegex, '')
-      .replace(inlineToolRegex, '')
+      .replace(/\{"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
       .trim();
 
     return {
