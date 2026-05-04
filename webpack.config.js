@@ -12,11 +12,6 @@ const webpack = require('webpack');
 // │   └── finance.json      # 财务记录数组
 // ├── tasks/
 // │   └── tasks.json        # 任务记录数组
-// ├── notes/
-// │   ├── index.json        # 笔记索引（元数据）
-// │   └── *.md              # 笔记文件（Markdown + YAML frontmatter）
-// ├── folders/
-// │   └── folders.json      # 文件夹结构
 // └── backup/
 //     └── *.json            # 备份文件（按日期）
 // ─────────────────────────────────────────────────────────────
@@ -25,18 +20,13 @@ const DATA_DIR = path.join(__dirname, 'data');
 
 // 确保目录结构存在
 function ensureDataDirs() {
-  const dirs = ['tasks', 'finance', 'notes', 'folders', 'backup'];
+  const dirs = ['tasks', 'finance', 'backup', 'knowledge'];
   dirs.forEach(d => {
     const dirPath = path.join(DATA_DIR, d);
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true });
     }
   });
-}
-
-// 清理文件名
-function sanitizeFileName(name) {
-  return String(name).replace(/[<>:"/\\|?*]/g, '_').replace(/\s+/g, ' ').trim() || 'untitled';
 }
 
 // ── 写入数据到文件 ─────────────────────────────────────────
@@ -53,7 +43,7 @@ function writeSyncData(data) {
     );
   }
 
-  // 2. 财务 → JSON
+  // 2. 务 → JSON
   if (Array.isArray(data.finance)) {
     fs.writeFileSync(
       path.join(DATA_DIR, 'finance', 'finance.json'),
@@ -62,31 +52,27 @@ function writeSyncData(data) {
     );
   }
 
-  // 3. 知识库笔记 → Markdown 文件 + 索引
-  if (Array.isArray(data.notes)) {
-    // 写入索引文件
-    const indexData = data.notes.map(note => ({
-      id: note.id,
-      title: note.title,
-      tags: note.tags,
-      createdAt: note.createdAt,
-      updatedAt: note.updatedAt,
-    }));
-    fs.writeFileSync(
-      path.join(DATA_DIR, 'notes', 'index.json'),
-      JSON.stringify(indexData, null, 2),
-      'utf-8'
-    );
+  if (data.knowledge && typeof data.knowledge === 'object') {
+    const knowledgeDir = path.join(DATA_DIR, 'knowledge');
+    const knowledge = data.knowledge;
 
-    }
+    const writeJsonFile = (filename, payload) => {
+      if (payload === undefined) {
+        return;
+      }
 
-  // 4. 文件夹结构
-  if (Array.isArray(data.folders)) {
-    fs.writeFileSync(
-      path.join(DATA_DIR, 'folders', 'folders.json'),
-      JSON.stringify(data.folders, null, 2),
-      'utf-8'
-    );
+      fs.writeFileSync(
+        path.join(knowledgeDir, filename),
+        JSON.stringify(payload, null, 2),
+        'utf-8'
+      );
+    };
+
+    writeJsonFile('context.jsonld', knowledge.context);
+    writeJsonFile('ontology.jsonld', knowledge.ontology);
+    writeJsonFile('entities.jsonld', knowledge.entities);
+    writeJsonFile('documents.jsonld', knowledge.documents);
+    writeJsonFile('assertions.jsonld', knowledge.assertions);
   }
 }
 
@@ -98,8 +84,18 @@ function readSyncData() {
   const result = {
     tasks: [],
     finance: [],
-    folders: [],
     config: {},
+    knowledge: {
+      context: {},
+      ontology: {
+        classes: [],
+        relations: [],
+      },
+      entities: [],
+      documents: [],
+      assertions: [],
+      updatedAt: 0,
+    },
   };
 
   // 读取任务
@@ -122,16 +118,6 @@ function readSyncData() {
     console.warn('[Data] Failed to read finance:', e.message);
   }
 
-  // 读取文件夹
-  try {
-    const foldersPath = path.join(DATA_DIR, 'folders', 'folders.json');
-    if (fs.existsSync(foldersPath)) {
-      result.folders = JSON.parse(fs.readFileSync(foldersPath, 'utf-8'));
-    }
-  } catch (e) {
-    console.warn('[Data] Failed to read folders:', e.message);
-  }
-
   // 读取全局配置
   try {
     const configPath = path.join(DATA_DIR, 'config.json');
@@ -142,23 +128,79 @@ function readSyncData() {
     console.warn('[Data] Failed to read config:', e.message);
   }
 
+  try {
+    const knowledgeDir = path.join(DATA_DIR, 'knowledge');
+    const readJsonFile = (filename, fallback) => {
+      const filePath = path.join(knowledgeDir, filename);
+      if (!fs.existsSync(filePath)) {
+        return fallback;
+      }
+      return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    };
+
+    result.knowledge = {
+      context: readJsonFile('context.jsonld', {}),
+      ontology: readJsonFile('ontology.jsonld', { classes: [], relations: [] }),
+      entities: readJsonFile('entities.jsonld', []),
+      documents: readJsonFile('documents.jsonld', []),
+      assertions: readJsonFile('assertions.jsonld', []),
+      updatedAt: Date.now(),
+    };
+  } catch (e) {
+    console.warn('[Data] Failed to read knowledge:', e.message);
+  }
+
   return result;
 }
 
+function readKnowledgeFileDebugInfo() {
+  ensureDataDirs();
 
+  const knowledgeDir = path.join(DATA_DIR, 'knowledge');
+  const files = [
+    'context.jsonld',
+    'ontology.jsonld',
+    'entities.jsonld',
+    'documents.jsonld',
+    'assertions.jsonld',
+  ];
 
-// 解析数组值 [\"a\", \"b\"]
-function parseArrayValue(value) {
-  try {
-    const match = value.match(/^\[(.*)\]$/);
-    if (!match) return [];
-    return match[1]
-      .split(',')
-      .map(s => s.trim().replace(/^"|"$/g, ''))
-      .filter(s => s);
-  } catch {
-    return [];
-  }
+  return files.map((filename) => {
+    const filePath = path.join(knowledgeDir, filename);
+    const exists = fs.existsSync(filePath);
+
+    if (!exists) {
+      return {
+        filename,
+        exists: false,
+        size: 0,
+        mtimeMs: 0,
+        itemCount: null,
+      };
+    }
+
+    const stat = fs.statSync(filePath);
+    let itemCount = null;
+
+    try {
+      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      if (Array.isArray(parsed)) {
+        itemCount = parsed.length;
+      } else if (parsed && typeof parsed === 'object') {
+        itemCount = Object.keys(parsed).length;
+      }
+    } catch (error) {
+      itemCount = -1;
+    }
+
+    return {
+      filename,
+      exists: true,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      itemCount,
+    };
+  });
 }
 
 // ── 文件监听 ───────────────────────────────────────────────
@@ -209,7 +251,9 @@ module.exports = (env, argv) => {
     entry: './src/index.tsx',
     output: {
       path: path.resolve(__dirname, 'dist'),
-      filename: 'bundle.js',
+      filename: isDev ? 'bundle.js' : '[name].[contenthash:8].js',
+      chunkFilename: isDev ? '[name].bundle.js' : '[name].[contenthash:8].bundle.js',
+      clean: true,
     },
     module: {
       rules: [
@@ -286,6 +330,15 @@ module.exports = (env, argv) => {
           }
         });
 
+        app.get('/api/debug/knowledge-files', (req, res, next) => {
+          try {
+            const files = readKnowledgeFileDebugInfo();
+            res.json({ success: true, files, timestamp: Date.now() });
+          } catch (err) {
+            res.status(500).json({ success: false, error: err.message });
+          }
+        });
+
         
 
         // 启动文件监听
@@ -305,5 +358,33 @@ module.exports = (env, argv) => {
         inject: false,
       }),
     ],
+    optimization: {
+      splitChunks: {
+        chunks: 'all',
+        cacheGroups: {
+          reactVendor: {
+            test: /[\\/]node_modules[\\/](react|react-dom|react-router-dom|scheduler)[\\/]/,
+            name: 'react-vendor',
+            priority: 30,
+          },
+          chartVendor: {
+            test: /[\\/]node_modules[\\/](recharts|d3)[\\/]/,
+            name: 'chart-vendor',
+            priority: 25,
+          },
+          animationVendor: {
+            test: /[\\/]node_modules[\\/]framer-motion[\\/]/,
+            name: 'animation-vendor',
+            priority: 20,
+          },
+          miscVendor: {
+            test: /[\\/]node_modules[\\/]/,
+            name: 'vendor',
+            priority: 10,
+          },
+        },
+      },
+      runtimeChunk: 'single',
+    },
   };
 };

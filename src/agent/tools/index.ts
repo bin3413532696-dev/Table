@@ -1,6 +1,20 @@
 import type { JSONSchema, Tool, ToolResult } from '../types';
 import { financeDB, taskDB, type FinanceRecord, type Task } from '../../db';
 import { getWeatherTool, getCurrentTimeTool, httpRequestTool, manageApiConfigTool } from './httpTool';
+import {
+  createKnowledgeRelation,
+  deleteKnowledgeAssertion,
+  deleteKnowledgeDocument,
+  deleteKnowledgeEntity,
+  deleteKnowledgeRelation,
+  getKnowledgeEntityById,
+  getKnowledgeOverview,
+  getKnowledgeRelatedById,
+  searchKnowledge,
+  upsertKnowledgeAssertion,
+  upsertKnowledgeDocument,
+  upsertKnowledgeEntity,
+} from '../../kb';
 
 function validateParams(params: Record<string, unknown>, schema: JSONSchema): string | null {
   if (!schema.required) {
@@ -27,6 +41,35 @@ function getUserProfile(): { name: string; email: string; bio: string } | null {
 
 function setUserProfile(profile: { name: string; email: string; bio: string }) {
   localStorage.setItem('user_profile', JSON.stringify(profile));
+}
+
+function toStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function toRecordObject(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function toKnowledgeScalar(value: unknown): string | number | boolean | null | undefined {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+
+  return undefined;
 }
 
 const queryFinanceTool: Tool = {
@@ -340,12 +383,29 @@ const calculateExpressionTool: Tool = {
   category: 'query',
   execute: async (params) => {
     const expression = (params.expression as string).trim();
-    if (!/^[\d+\-*/().\s]+$/.test(expression)) {
+
+    // 严格校验：只允许数字、小数点、括号、空格和基本运算符
+    // 使用更精确的正则，避免 + - 在字符类中的歧义
+    if (!/^[0-9.\s()+\-*/]+$/.test(expression)) {
       return { success: false, error: '表达式包含不支持的字符' };
     }
 
+    // 检查括号匹配
+    let parenCount = 0;
+    for (const char of expression) {
+      if (char === '(') parenCount++;
+      if (char === ')') parenCount--;
+      if (parenCount < 0) {
+        return { success: false, error: '括号不匹配' };
+      }
+    }
+    if (parenCount !== 0) {
+      return { success: false, error: '括号不匹配' };
+    }
+
+    // 使用安全的表达式解析器
     try {
-      const result = Function(`"use strict"; return (${expression});`)();
+      const result = safeEvaluate(expression);
       if (typeof result !== 'number' || Number.isNaN(result) || !Number.isFinite(result)) {
         return { success: false, error: '计算结果无效' };
       }
@@ -355,6 +415,85 @@ const calculateExpressionTool: Tool = {
     }
   },
 };
+
+/**
+ * 安全的数学表达式解析器
+ * 使用递归下降解析，避免代码注入风险
+ */
+function safeEvaluate(expression: string): number {
+  let pos = 0;
+  const chars = expression.replace(/\s+/g, '');
+
+  function parseNumber(): number {
+    let num = '';
+    while (pos < chars.length && (chars[pos] === '.' || /[0-9]/.test(chars[pos]))) {
+      num += chars[pos++];
+    }
+    const result = parseFloat(num);
+    if (Number.isNaN(result)) {
+      throw new Error('无效的数字格式');
+    }
+    return result;
+  }
+
+  function parseFactor(): number {
+    if (chars[pos] === '(') {
+      pos++; // skip '('
+      const result = parseExpression();
+      if (chars[pos] !== ')') {
+        throw new Error('缺少右括号');
+      }
+      pos++; // skip ')'
+      return result;
+    }
+    if (chars[pos] === '-') {
+      pos++;
+      return -parseFactor();
+    }
+    if (chars[pos] === '+') {
+      pos++;
+      return parseFactor();
+    }
+    return parseNumber();
+  }
+
+  function parseTerm(): number {
+    let left = parseFactor();
+    while (pos < chars.length && (chars[pos] === '*' || chars[pos] === '/')) {
+      const op = chars[pos++];
+      const right = parseFactor();
+      if (op === '*') {
+        left = left * right;
+      } else {
+        if (right === 0) {
+          throw new Error('除数不能为零');
+        }
+        left = left / right;
+      }
+    }
+    return left;
+  }
+
+  function parseExpression(): number {
+    let left = parseTerm();
+    while (pos < chars.length && (chars[pos] === '+' || chars[pos] === '-')) {
+      const op = chars[pos++];
+      const right = parseTerm();
+      if (op === '+') {
+        left = left + right;
+      } else {
+        left = left - right;
+      }
+    }
+    return left;
+  }
+
+  const result = parseExpression();
+  if (pos !== chars.length) {
+    throw new Error('表达式解析不完整');
+  }
+  return result;
+}
 
 const parseColorTool: Tool = {
   name: 'parse_color',
@@ -501,6 +640,387 @@ const setThemeTool: Tool = {
   },
 };
 
+const getKnowledgeOverviewTool: Tool = {
+  name: 'get_knowledge_overview',
+  description: '获取知识库概览，包括本体类、关系、实体、文档和断言数量',
+  parameters: { type: 'object', properties: {} },
+  requiresConfirmation: false,
+  category: 'query',
+  execute: async () => ({
+    success: true,
+    data: getKnowledgeOverview(),
+  }),
+};
+
+const searchKnowledgeTool: Tool = {
+  name: 'search_knowledge',
+  description: '按关键词、类型和标签搜索知识库中的实体与文档',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: '搜索关键词，可为空；为空时返回最近更新项' },
+      typeIds: { type: 'object', description: '实体类型 ID 数组，例如 [\"class:concept\"]' } as JSONSchema,
+      tags: { type: 'object', description: '标签数组，例如 [\"architecture\"]' } as JSONSchema,
+      includeDocuments: { type: 'boolean', description: '是否同时搜索文档，默认 true' },
+      limit: { type: 'number', description: '返回数量限制，默认 8' },
+    },
+  },
+  requiresConfirmation: false,
+  category: 'query',
+  execute: async (params) => ({
+    success: true,
+    data: searchKnowledge((params.query as string) || '', {
+      typeIds: Array.isArray(params.typeIds)
+        ? params.typeIds.filter((item): item is string => typeof item === 'string')
+        : undefined,
+      tags: Array.isArray(params.tags)
+        ? params.tags.filter((item): item is string => typeof item === 'string')
+        : undefined,
+      includeDocuments: params.includeDocuments !== false,
+      limit: typeof params.limit === 'number' ? params.limit : 8,
+    }),
+  }),
+};
+
+const getKnowledgeEntityTool: Tool = {
+  name: 'get_knowledge_entity',
+  description: '获取知识库实体详情，包括属性、关系和关联实体',
+  parameters: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      id: { type: 'string', description: '实体 ID' },
+      relationDepth: { type: 'number', description: '关联实体展开深度，默认 1，最大 2' },
+    },
+  },
+  requiresConfirmation: false,
+  category: 'query',
+  execute: async (params) => {
+    const id = params.id as string;
+    const entity = getKnowledgeEntityById(id);
+    if (!entity) {
+      return { success: false, error: `未找到知识实体: ${id}` };
+    }
+
+    const relationDepth = Math.max(1, Math.min(typeof params.relationDepth === 'number' ? params.relationDepth : 1, 2));
+    return {
+      success: true,
+      data: {
+        entity,
+        relatedEntities: getKnowledgeRelatedById(id, relationDepth),
+      },
+    };
+  },
+};
+
+const upsertKnowledgeEntityTool: Tool = {
+  name: 'upsert_knowledge_entity',
+  description: '新增或更新知识库实体，可写入类型、标题、摘要、标签、别名、来源、置信度和结构化属性',
+  parameters: {
+    type: 'object',
+    required: ['typeId', 'title'],
+    properties: {
+      id: { type: 'string', description: '实体 ID；传入时更新，不传时创建' },
+      typeId: { type: 'string', description: '实体类型 ID，例如 class:project' },
+      title: { type: 'string', description: '实体标题' },
+      summary: { type: 'string', description: '实体摘要' },
+      aliases: { type: 'object', description: '别名数组，例如 [\"Workspace\"]' } as JSONSchema,
+      tags: { type: 'object', description: '标签数组，例如 [\"project\", \"workspace\"]' } as JSONSchema,
+      attributes: { type: 'object', description: '结构化属性对象，例如 {\"status\":\"active\"}' } as JSONSchema,
+      source: { type: 'string', description: '来源说明' },
+      confidence: { type: 'number', description: '置信度，范围 0-1' },
+    },
+  },
+  requiresConfirmation: true,
+  category: 'mutation',
+  execute: async (params) => {
+    const error = validateParams(params, upsertKnowledgeEntityTool.parameters);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      const entity = await upsertKnowledgeEntity({
+        id: params.id as string | undefined,
+        typeId: params.typeId as string,
+        title: params.title as string,
+        summary: params.summary as string | undefined,
+        aliases: toStringArray(params.aliases),
+        tags: toStringArray(params.tags),
+        attributes: toRecordObject(params.attributes) as Record<string, string | number | boolean | null | Array<string | number | boolean | null> | Record<string, string | number | boolean | null>> | undefined,
+        source: params.source as string | undefined,
+        confidence: typeof params.confidence === 'number' ? params.confidence : undefined,
+      });
+
+      return { success: true, data: entity };
+    } catch (toolError) {
+      return {
+        success: false,
+        error: toolError instanceof Error ? toolError.message : '知识实体写入失败',
+      };
+    }
+  },
+};
+
+const createKnowledgeRelationTool: Tool = {
+  name: 'create_knowledge_relation',
+  description: '为两个知识实体创建结构化关系边，并同步生成对应断言',
+  parameters: {
+    type: 'object',
+    required: ['subjectId', 'predicateId', 'targetId'],
+    properties: {
+      subjectId: { type: 'string', description: '起点实体 ID' },
+      predicateId: { type: 'string', description: '关系类型 ID，例如 relation:relatedTo' },
+      targetId: { type: 'string', description: '目标实体 ID' },
+      source: { type: 'string', description: '来源说明' },
+      confidence: { type: 'number', description: '置信度，范围 0-1' },
+    },
+  },
+  requiresConfirmation: true,
+  category: 'mutation',
+  execute: async (params) => {
+    const error = validateParams(params, createKnowledgeRelationTool.parameters);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      const assertion = await createKnowledgeRelation({
+        subjectId: params.subjectId as string,
+        predicateId: params.predicateId as string,
+        targetId: params.targetId as string,
+        source: params.source as string | undefined,
+        confidence: typeof params.confidence === 'number' ? params.confidence : undefined,
+      });
+
+      return { success: true, data: assertion };
+    } catch (toolError) {
+      return {
+        success: false,
+        error: toolError instanceof Error ? toolError.message : '知识关系创建失败',
+      };
+    }
+  },
+};
+
+const upsertKnowledgeDocumentTool: Tool = {
+  name: 'upsert_knowledge_document',
+  description: '新增或更新知识库文档，可写入正文、标签、关联实体和来源',
+  parameters: {
+    type: 'object',
+    required: ['title'],
+    properties: {
+      id: { type: 'string', description: '文档 ID；传入时更新，不传时创建' },
+      title: { type: 'string', description: '文档标题' },
+      summary: { type: 'string', description: '文档摘要' },
+      content: { type: 'string', description: '正文内容' },
+      tags: { type: 'object', description: '标签数组' } as JSONSchema,
+      entityIds: { type: 'object', description: '关联实体 ID 数组' } as JSONSchema,
+      source: { type: 'string', description: '来源说明' },
+    },
+  },
+  requiresConfirmation: true,
+  category: 'mutation',
+  execute: async (params) => {
+    const error = validateParams(params, upsertKnowledgeDocumentTool.parameters);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      const document = await upsertKnowledgeDocument({
+        id: params.id as string | undefined,
+        title: params.title as string,
+        summary: params.summary as string | undefined,
+        content: params.content as string | undefined,
+        tags: toStringArray(params.tags),
+        entityIds: toStringArray(params.entityIds),
+        source: params.source as string | undefined,
+      });
+
+      return { success: true, data: document };
+    } catch (toolError) {
+      return {
+        success: false,
+        error: toolError instanceof Error ? toolError.message : '知识文档写入失败',
+      };
+    }
+  },
+};
+
+const upsertKnowledgeAssertionTool: Tool = {
+  name: 'upsert_knowledge_assertion',
+  description: '新增或更新知识断言，可记录主体、谓词、目标对象、标量值、证据文档、来源和置信度',
+  parameters: {
+    type: 'object',
+    required: ['subjectId', 'predicateId'],
+    properties: {
+      id: { type: 'string', description: '断言 ID；传入时更新，不传时创建' },
+      subjectId: { type: 'string', description: '断言主体实体 ID' },
+      predicateId: { type: 'string', description: '谓词 ID' },
+      objectId: { type: 'string', description: '目标对象 ID，可为实体或文档' },
+      value: { type: 'string', description: '标量值；支持字符串、数字、布尔值或 null' },
+      evidenceDocumentIds: { type: 'object', description: '证据文档 ID 数组' } as JSONSchema,
+      source: { type: 'string', description: '来源说明' },
+      confidence: { type: 'number', description: '置信度，范围 0-1' },
+    },
+  },
+  requiresConfirmation: true,
+  category: 'mutation',
+  execute: async (params) => {
+    const error = validateParams(params, upsertKnowledgeAssertionTool.parameters);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      const assertion = await upsertKnowledgeAssertion({
+        id: params.id as string | undefined,
+        subjectId: params.subjectId as string,
+        predicateId: params.predicateId as string,
+        objectId: params.objectId as string | undefined,
+        value: toKnowledgeScalar(params.value),
+        evidenceDocumentIds: toStringArray(params.evidenceDocumentIds),
+        source: params.source as string | undefined,
+        confidence: typeof params.confidence === 'number' ? params.confidence : undefined,
+      });
+
+      return { success: true, data: assertion };
+    } catch (toolError) {
+      return {
+        success: false,
+        error: toolError instanceof Error ? toolError.message : '知识断言写入失败',
+      };
+    }
+  },
+};
+
+const deleteKnowledgeEntityTool: Tool = {
+  name: 'delete_knowledge_entity',
+  description: '删除知识库实体，并级联清理相关文档关联、关系边和断言',
+  parameters: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      id: { type: 'string', description: '实体 ID' },
+    },
+  },
+  requiresConfirmation: true,
+  category: 'mutation',
+  execute: async (params) => {
+    const error = validateParams(params, deleteKnowledgeEntityTool.parameters);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      await deleteKnowledgeEntity(params.id as string);
+      return { success: true };
+    } catch (toolError) {
+      return {
+        success: false,
+        error: toolError instanceof Error ? toolError.message : '知识实体删除失败',
+      };
+    }
+  },
+};
+
+const deleteKnowledgeDocumentTool: Tool = {
+  name: 'delete_knowledge_document',
+  description: '删除知识库文档，并清理相关证据引用和指向该文档的断言',
+  parameters: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      id: { type: 'string', description: '文档 ID' },
+    },
+  },
+  requiresConfirmation: true,
+  category: 'mutation',
+  execute: async (params) => {
+    const error = validateParams(params, deleteKnowledgeDocumentTool.parameters);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      await deleteKnowledgeDocument(params.id as string);
+      return { success: true };
+    } catch (toolError) {
+      return {
+        success: false,
+        error: toolError instanceof Error ? toolError.message : '知识文档删除失败',
+      };
+    }
+  },
+};
+
+const deleteKnowledgeAssertionTool: Tool = {
+  name: 'delete_knowledge_assertion',
+  description: '删除知识断言；如果断言对应结构化关系边，也会同步撤销',
+  parameters: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      id: { type: 'string', description: '断言 ID' },
+    },
+  },
+  requiresConfirmation: true,
+  category: 'mutation',
+  execute: async (params) => {
+    const error = validateParams(params, deleteKnowledgeAssertionTool.parameters);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      await deleteKnowledgeAssertion(params.id as string);
+      return { success: true };
+    } catch (toolError) {
+      return {
+        success: false,
+        error: toolError instanceof Error ? toolError.message : '知识断言删除失败',
+      };
+    }
+  },
+};
+
+const deleteKnowledgeRelationTool: Tool = {
+  name: 'delete_knowledge_relation',
+  description: '删除两个实体间的结构化关系，并同步移除对应断言',
+  parameters: {
+    type: 'object',
+    required: ['subjectId', 'predicateId', 'targetId'],
+    properties: {
+      subjectId: { type: 'string', description: '起点实体 ID' },
+      predicateId: { type: 'string', description: '关系类型 ID' },
+      targetId: { type: 'string', description: '目标实体 ID' },
+    },
+  },
+  requiresConfirmation: true,
+  category: 'mutation',
+  execute: async (params) => {
+    const error = validateParams(params, deleteKnowledgeRelationTool.parameters);
+    if (error) {
+      return { success: false, error };
+    }
+
+    try {
+      await deleteKnowledgeRelation(
+        params.subjectId as string,
+        params.predicateId as string,
+        params.targetId as string
+      );
+      return { success: true };
+    } catch (toolError) {
+      return {
+        success: false,
+        error: toolError instanceof Error ? toolError.message : '知识关系删除失败',
+      };
+    }
+  },
+};
+
 export const toolRegistry: Map<string, Tool> = new Map([
   [queryFinanceTool.name, queryFinanceTool],
   [getFinanceStatsTool.name, getFinanceStatsTool],
@@ -515,6 +1035,18 @@ export const toolRegistry: Map<string, Tool> = new Map([
 
   [getOverviewTool.name, getOverviewTool],
   [crossModuleAnalysisTool.name, crossModuleAnalysisTool],
+
+  [getKnowledgeOverviewTool.name, getKnowledgeOverviewTool],
+  [searchKnowledgeTool.name, searchKnowledgeTool],
+  [getKnowledgeEntityTool.name, getKnowledgeEntityTool],
+  [upsertKnowledgeEntityTool.name, upsertKnowledgeEntityTool],
+  [createKnowledgeRelationTool.name, createKnowledgeRelationTool],
+  [upsertKnowledgeDocumentTool.name, upsertKnowledgeDocumentTool],
+  [upsertKnowledgeAssertionTool.name, upsertKnowledgeAssertionTool],
+  [deleteKnowledgeEntityTool.name, deleteKnowledgeEntityTool],
+  [deleteKnowledgeDocumentTool.name, deleteKnowledgeDocumentTool],
+  [deleteKnowledgeAssertionTool.name, deleteKnowledgeAssertionTool],
+  [deleteKnowledgeRelationTool.name, deleteKnowledgeRelationTool],
 
   [calculateExpressionTool.name, calculateExpressionTool],
   [parseColorTool.name, parseColorTool],

@@ -3,6 +3,83 @@ import { ApiProvider, getApiConfigs, saveApiConfigs } from '../../lib/apiConfig'
 
 type ApiConfig = ApiProvider;
 
+// SSRF 防护：禁止访问的危险端口
+const BLOCKED_PORTS = [
+  22,    // SSH
+  23,    // Telnet
+  25,    // SMTP
+  3306,  // MySQL
+  5432,  // PostgreSQL
+  6379,  // Redis
+  27017, // MongoDB
+  9200,  // Elasticsearch
+  5672,  // RabbitMQ
+  11211, // Memcached
+];
+
+// SSRF 防护：禁止访问的内网 IP 模式
+const PRIVATE_IP_PATTERNS = [
+  /^127\./,                          // 127.0.0.0/8 (loopback)
+  /^10\./,                           // 10.0.0.0/8
+  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,  // 172.16.0.0/12
+  /^192\.168\./,                     // 192.168.0.0/16
+  /^169\.254\./,                     // 169.254.0.0/16 (link-local)
+  /^0\.0\.0\.0/,                     // 0.0.0.0
+  /^localhost/i,                     // localhost
+  /^::1$/,                           // IPv6 loopback
+  /^fc00:/i,                         // IPv6 private
+  /^fe80:/i,                         // IPv6 link-local
+];
+
+/**
+ * SSRF 防护：验证 URL 是否安全
+ * 返回 { safe: boolean, reason?: string }
+ */
+function validateUrlSafety(url: string): { safe: boolean; reason?: string } {
+  try {
+    const parsed = new URL(url);
+
+    // 只允许 HTTP/HTTPS 协议
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { safe: false, reason: `不允许使用 ${parsed.protocol} 协议` };
+    }
+
+    // 检查端口
+    const port = parsed.port ? parseInt(parsed.port, 10) : (parsed.protocol === 'https:' ? 443 : 80);
+    if (BLOCKED_PORTS.includes(port)) {
+      return { safe: false, reason: `禁止访问端口 ${port}` };
+    }
+
+    // 检查是否为内网地址
+    const hostname = parsed.hostname;
+    for (const pattern of PRIVATE_IP_PATTERNS) {
+      if (pattern.test(hostname)) {
+        return { safe: false, reason: `禁止访问内网地址: ${hostname}` };
+      }
+    }
+
+    // 检查是否为 IP 地址（防止通过 IP 访问内网）
+    const ipMatch = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+    if (ipMatch) {
+      const octets = [parseInt(ipMatch[1], 10), parseInt(ipMatch[2], 10), parseInt(ipMatch[3], 10), parseInt(ipMatch[4], 10)];
+      // 验证 IP 格式
+      if (octets.some(o => o > 255)) {
+        return { safe: false, reason: `无效的 IP 地址: ${hostname}` };
+      }
+      // 检查是否为私有 IP
+      for (const pattern of PRIVATE_IP_PATTERNS) {
+        if (pattern.test(hostname)) {
+          return { safe: false, reason: `禁止访问内网 IP: ${hostname}` };
+        }
+      }
+    }
+
+    return { safe: true };
+  } catch {
+    return { safe: false, reason: '无效的 URL 格式' };
+  }
+}
+
 function buildHeaders(config: ApiConfig, customHeaders?: Record<string, string>): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -110,13 +187,13 @@ function formatResponse(config: ApiConfig, responseBody: unknown): string | unde
 
 export const httpRequestTool: Tool = {
   name: 'http_request',
-  description: '发送 HTTP 请求到第三方 API',
+  description: '发送 HTTP 请求到第三方 API（仅允许 HTTPS 公网地址）',
   parameters: {
     type: 'object',
     required: ['method'],
     properties: {
       method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], description: 'HTTP 方法', default: 'POST' },
-      url: { type: 'string', description: '完整请求 URL（当不使用 apiConfigId 时必填）' },
+      url: { type: 'string', description: '完整请求 URL（必须是 HTTPS 公网地址）' },
       apiConfigId: { type: 'string', description: '预配置的 API 配置 ID（使用配置时优先）' },
       headers: { type: 'object', description: '自定义请求头（可选）' } as JSONSchema,
       body: { type: 'object', description: '请求体（POST/PUT/PATCH 时使用，可选）' } as JSONSchema,
@@ -124,16 +201,25 @@ export const httpRequestTool: Tool = {
       timeout: { type: 'number', description: '超时时间（毫秒）', default: 30000 },
     },
   },
-  requiresConfirmation: true,
+  requiresConfirmation: true, // 所有 HTTP 请求都需要确认
   category: 'mutation',
   execute: async (params): Promise<ToolResult> => {
     const method = (params.method as string) || 'POST';
+    const confirmed = params.__confirmed === true;
     const url = params.url as string;
     const apiConfigId = params.apiConfigId as string;
     const customHeaders = params.headers as Record<string, string>;
     const body = params.body as Record<string, unknown>;
     const customModel = params.model as string;
-    const timeout = (params.timeout as number) || 30000;
+    const timeout = Math.min((params.timeout as number) || 30000, 60000); // 最大 60 秒
+
+    if (!confirmed) {
+      return {
+        success: true,
+        requiresConfirmation: true,
+        confirmationMessage: `即将执行 http_request，请求方法：${method}\n目标：${apiConfigId || url || '未指定'}`,
+      };
+    }
 
     try {
       let requestUrl = url;
@@ -159,6 +245,12 @@ export const httpRequestTool: Tool = {
         }
       } else if (!url) {
         return { success: false, error: '请提供 url 或 apiConfigId' };
+      }
+
+      // SSRF 防护：验证 URL 安全性
+      const urlSafety = validateUrlSafety(requestUrl);
+      if (!urlSafety.safe) {
+        return { success: false, error: `URL 安全检查失败: ${urlSafety.reason}` };
       }
 
       const controller = new AbortController();
@@ -218,10 +310,11 @@ export const manageApiConfigTool: Tool = {
       headers: { type: 'object', description: '自定义请求头' } as JSONSchema,
     },
   },
-  requiresConfirmation: true,
+  requiresConfirmation: false,
   category: 'system',
   execute: async (params): Promise<ToolResult> => {
     const action = params.action as string;
+    const confirmed = params.__confirmed === true;
     const id = params.id as string;
     const name = params.name as string;
     const apiFormat = (params.apiFormat as ApiProvider['apiFormat']) || 'openai';
@@ -232,6 +325,14 @@ export const manageApiConfigTool: Tool = {
 
     try {
       let configs = getApiConfigs();
+
+      if (!confirmed && action !== 'list') {
+        return {
+          success: true,
+          requiresConfirmation: true,
+          confirmationMessage: `即将执行 manage_api_config.${action}${id ? `\n目标 ID: ${id}` : ''}`,
+        };
+      }
 
       switch (action) {
         case 'list':
@@ -330,14 +431,21 @@ export const getWeatherTool: Tool = {
     required: ['city'],
     properties: {
       city: { type: 'string', description: '城市名称（中文或英文）' },
-      apiKey: { type: 'string', description: 'OpenWeatherMap API Key（可选）' },
+      apiKey: { type: 'string', description: 'OpenWeatherMap API Key（必填，可在 openweathermap.org 免费申请）' },
     },
   },
   requiresConfirmation: false,
   category: 'query',
   execute: async (params): Promise<ToolResult> => {
     const city = params.city as string;
-    const apiKey = (params.apiKey as string) || '7453d2a468f7ee10523b38d59d62b9e0';
+    const apiKey = params.apiKey as string;
+
+    if (!apiKey) {
+      return {
+        success: false,
+        error: '请提供 OpenWeatherMap API Key。您可以在 https://openweathermap.org/api 免费申请。',
+      };
+    }
 
     try {
       const response = await fetch(

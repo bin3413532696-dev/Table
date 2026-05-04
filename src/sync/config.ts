@@ -42,12 +42,20 @@ export interface LoadResult {
   data?: {
     finance: unknown[];
     tasks: unknown[];
-    notes?: unknown[];
+    knowledge?: unknown;
   };
   error?: string;
+}
+
+export interface SyncStatusSnapshot {
+  status: SyncStatus;
+  lastSyncTime: number | null;
+  lastError: string | null;
+  retryCount: number;
+  lastSuccessfulSync: string | null;
 }
 
 /**
  * 同步数据类型
  */
-export type SyncDataType = 'finance' | 'tasks' | 'notes' | 'all';
+export type SyncDataType = 'finance' | 'tasks' | 'knowledge' | 'all';

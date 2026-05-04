@@ -44,7 +44,7 @@ export interface AgentMessage {
   content: string;
   timestamp: number;
   toolCalls?: ToolCall[];
-  toolResult?: ToolResult;
+  toolResults?: Record<string, ToolResult>;
   status: MessageStatus;
 }
 
@@ -67,3 +67,7 @@ export interface AgentState {
   confirmationRequest: ConfirmationRequest | null;
   error: string | null;
 }
+
+/** 对话历史管理常量 */
+export const MAX_HISTORY_MESSAGES = 50; // 最大保留消息数量
+export const MAX_CONTEXT_CHARS = 50000; // 最大上下文字符数（防止 token 超限）

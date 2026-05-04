@@ -1,25 +1,20 @@
-/**
- * Store Context 和 Hooks
- * 统一状态管理入口
- */
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import type {
+  CreateFinanceDTO,
+  CreateTaskDTO,
+  CrudResult,
+  EntityId,
+  FinanceRecord,
+  Task,
+  UpdateFinanceDTO,
+  UpdateTaskDTO,
+} from '../../core/types';
+import { financeDB, subscribe, taskDB } from '../../db';
 
-import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
-import { EntityId, CrudResult, FinanceRecord, Task, CreateFinanceDTO, UpdateFinanceDTO, CreateTaskDTO, UpdateTaskDTO } from '../../core/types';
-import { eventEmitter, EventTopics, subscribeDataChange } from '../../core/events';
-import { financeStore, taskStore } from '../impl';
-
-/**
- * Store Context 值类型
- */
 interface StoreContextValue {
-  // 数据
   finance: FinanceRecord[];
   tasks: Task[];
-
-  // 加载状态
   loading: boolean;
-
-  // 财务操作
   financeActions: {
     create: (dto: CreateFinanceDTO) => Promise<CrudResult<FinanceRecord>>;
     update: (id: EntityId, dto: UpdateFinanceDTO) => Promise<CrudResult<FinanceRecord>>;
@@ -28,8 +23,6 @@ interface StoreContextValue {
     getStats: () => Promise<{ income: number; expense: number; profit: number }>;
     getModelStats: () => Promise<Record<string, { expense: number; income: number }>>;
   };
-
-  // 任务操作
   taskActions: {
     create: (dto: CreateTaskDTO) => Promise<CrudResult<Task>>;
     update: (id: EntityId, dto: UpdateTaskDTO) => Promise<CrudResult<Task>>;
@@ -42,25 +35,28 @@ interface StoreContextValue {
 
 const StoreContext = createContext<StoreContextValue | null>(null);
 
-/**
- * Store Provider
- */
+function toErrorResult<T>(message: string): CrudResult<T> {
+  return {
+    success: false,
+    error: { message } as any,
+  };
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [finance, setFinance] = useState<FinanceRecord[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // 初始化加载数据
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [financeData, tasksData] = await Promise.all([
-          financeStore.getAll(),
-          taskStore.getAll(),
+        const [financeData, taskData] = await Promise.all([
+          financeDB.getAll(),
+          taskDB.getAll(),
         ]);
         setFinance(financeData);
-        setTasks(tasksData);
+        setTasks(taskData);
       } catch (error) {
         console.error('[Store] Failed to load initial data:', error);
       } finally {
@@ -71,82 +67,103 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     loadData();
   }, []);
 
-  // 订阅数据变更
   useEffect(() => {
-    const unsubFinance = subscribeDataChange('finance', async () => {
-      setFinance(await financeStore.getAll());
-    });
+    return subscribe(async (collection) => {
+      if (collection === 'finance') {
+        setFinance(await financeDB.getAll());
+        return;
+      }
 
-    const unsubTasks = subscribeDataChange('tasks', async () => {
-      setTasks(await taskStore.getAll());
+      if (collection === 'tasks') {
+        setTasks(await taskDB.getAll());
+      }
     });
-
-    return () => {
-      unsubFinance();
-      unsubTasks();
-    };
   }, []);
 
-  // 财务操作
   const financeActions = useMemo(() => ({
-    create: async (dto: CreateFinanceDTO) => {
-      const result = await financeStore.create(dto);
-      if (result.success) {
-        setFinance(await financeStore.getAll());
+    create: async (dto: CreateFinanceDTO): Promise<CrudResult<FinanceRecord>> => {
+      try {
+        const record = await financeDB.add({
+          ...dto,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        setFinance(await financeDB.getAll());
+        return { success: true, data: record };
+      } catch (error) {
+        return toErrorResult<FinanceRecord>(error instanceof Error ? error.message : 'Failed to create finance record');
       }
-      return result;
     },
-    update: async (id: EntityId, dto: UpdateFinanceDTO) => {
-      const result = await financeStore.update(id, dto);
-      if (result.success) {
-        setFinance(await financeStore.getAll());
+    update: async (id: EntityId, dto: UpdateFinanceDTO): Promise<CrudResult<FinanceRecord>> => {
+      try {
+        await financeDB.update(id, dto);
+        const nextFinance = await financeDB.getAll();
+        setFinance(nextFinance);
+        return { success: true, data: nextFinance.find((item) => item.id === id) };
+      } catch (error) {
+        return toErrorResult<FinanceRecord>(error instanceof Error ? error.message : 'Failed to update finance record');
       }
-      return result;
     },
-    delete: async (id: EntityId) => {
-      const result = await financeStore.delete(id);
-      if (result.success) {
-        setFinance(await financeStore.getAll());
+    delete: async (id: EntityId): Promise<CrudResult<void>> => {
+      try {
+        await financeDB.delete(id);
+        setFinance(await financeDB.getAll());
+        return { success: true };
+      } catch (error) {
+        return toErrorResult<void>(error instanceof Error ? error.message : 'Failed to delete finance record');
       }
-      return result;
     },
-    getById: (id: EntityId) => financeStore.getById(id),
-    getStats: () => financeStore.getStats(),
-    getModelStats: () => financeStore.getModelStats(),
+    getById: async (id: EntityId) => (await financeDB.getAll()).find((item) => item.id === id),
+    getStats: () => financeDB.getStats(),
+    getModelStats: () => financeDB.getModelStats(),
   }), []);
 
-  // 任务操作
   const taskActions = useMemo(() => ({
-    create: async (dto: CreateTaskDTO) => {
-      const result = await taskStore.create(dto);
-      if (result.success) {
-        setTasks(await taskStore.getAll());
+    create: async (dto: CreateTaskDTO): Promise<CrudResult<Task>> => {
+      try {
+        const task = await taskDB.add({
+          ...dto,
+          completed: dto.completed ?? false,
+          priority: dto.priority ?? 'medium',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        setTasks(await taskDB.getAll());
+        return { success: true, data: task };
+      } catch (error) {
+        return toErrorResult<Task>(error instanceof Error ? error.message : 'Failed to create task');
       }
-      return result;
     },
-    update: async (id: EntityId, dto: UpdateTaskDTO) => {
-      const result = await taskStore.update(id, dto);
-      if (result.success) {
-        setTasks(await taskStore.getAll());
+    update: async (id: EntityId, dto: UpdateTaskDTO): Promise<CrudResult<Task>> => {
+      try {
+        await taskDB.update(id, dto);
+        const nextTasks = await taskDB.getAll();
+        setTasks(nextTasks);
+        return { success: true, data: nextTasks.find((item) => item.id === id) };
+      } catch (error) {
+        return toErrorResult<Task>(error instanceof Error ? error.message : 'Failed to update task');
       }
-      return result;
     },
-    delete: async (id: EntityId) => {
-      const result = await taskStore.delete(id);
-      if (result.success) {
-        setTasks(await taskStore.getAll());
+    delete: async (id: EntityId): Promise<CrudResult<void>> => {
+      try {
+        await taskDB.delete(id);
+        setTasks(await taskDB.getAll());
+        return { success: true };
+      } catch (error) {
+        return toErrorResult<void>(error instanceof Error ? error.message : 'Failed to delete task');
       }
-      return result;
     },
-    toggle: async (id: EntityId) => {
-      const result = await taskStore.toggle(id);
-      if (result.success) {
-        setTasks(await taskStore.getAll());
+    toggle: async (id: EntityId): Promise<{ success: boolean }> => {
+      try {
+        await taskDB.toggle(id);
+        setTasks(await taskDB.getAll());
+        return { success: true };
+      } catch {
+        return { success: false };
       }
-      return result;
     },
-    getById: (id: EntityId) => taskStore.getById(id),
-    getStats: () => taskStore.getStats(),
+    getById: async (id: EntityId) => (await taskDB.getAll()).find((item) => item.id === id),
+    getStats: () => taskDB.getStats(),
   }), []);
 
   const value = useMemo(() => ({
@@ -164,9 +181,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * 使用完整 Store
- */
 export function useStore() {
   const context = useContext(StoreContext);
   if (!context) {
@@ -175,17 +189,11 @@ export function useStore() {
   return context;
 }
 
-/**
- * 使用财务数据和操作
- */
 export function useFinance() {
   const { finance, loading, financeActions } = useStore();
   return { data: finance, loading, ...financeActions };
 }
 
-/**
- * 使用任务数据和操作
- */
 export function useTasks() {
   const { tasks, loading, taskActions } = useStore();
   return { data: tasks, loading, ...taskActions };

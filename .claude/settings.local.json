@@ -10,18 +10,19 @@
       "Bash(curl *)",
       "Bash(npx tsc *)",
       "WebSearch",
-      "Bash(dir \"D:\\\\project\\\\Table\\\\data\\\\notes\")",
-      "Bash(cat C:\\\\\\\\Users\\\\\\\\MyPC\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\D--project-Table\\\\\\\\dce8b0d8-cb36-4c3e-b2c5-65729acd56ce\\\\\\\\tasks\\\\\\\\bkbjs4pr5.output)",
-      "Bash(rm -rf \"D:/project/Table/src/pages/Notes\")",
-      "Bash(rm -rf \"D:/project/Table/data/notes\")",
-      "Bash(rm -rf \"D:/project/Table/data/folders\")",
       "Bash(cat dist/index.html)",
       "Bash(cat public/index.html)",
       "Bash(netstat -ano)",
       "Bash(findstr :3266)",
       "Bash(taskkill *)",
-      "Bash(cat \"C:\\\\\\\\Users\\\\\\\\MyPC\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\D--project-Table\\\\\\\\b673b027-d99e-47b0-85b5-41d91884d7dd\\\\\\\\tasks\\\\\\\\b805retfb.output\")",
-      "Bash(cat \"C:\\\\\\\\Users\\\\\\\\MyPC\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\D--project-Table\\\\\\\\b673b027-d99e-47b0-85b5-41d91884d7dd\\\\\\\\tasks\\\\\\\\baz7827bd.output\")"
+      "Skill(browse)",
+      "Bash(/c/Users/MyPC/.claude/skills/gstack/browse/dist/browse goto *)",
+      "Bash(/c/Users/MyPC/.claude/skills/gstack/browse/dist/browse snapshot *)",
+      "Bash(/c/Users/MyPC/.claude/skills/gstack/browse/dist/browse screenshot *)",
+      "Bash(/c/Users/MyPC/.claude/skills/gstack/browse/dist/browse click *)",
+      "Bash(/c/Users/MyPC/.claude/skills/gstack/browse/dist/browse js *)",
+      "Bash(/c/Users/MyPC/.claude/skills/gstack/browse/dist/browse url *)",
+      "Bash(/c/Users/MyPC/.claude/skills/gstack/browse/dist/browse fill *)"
     ]
   }
 }

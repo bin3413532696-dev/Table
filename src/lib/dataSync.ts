@@ -1,21 +1,40 @@
-/**
- * 数据同步服务
- * 负责浏览器存储与服务器文件之间的双向同步
- *
- * 注意：此文件作为 sync/ 模块的兼容层
- * 核心同步逻辑已迁移到 src/sync/SyncEngine.ts
- */
-
 import { syncEngine, SyncStatus, SyncResult, LoadResult } from '../sync';
 import { financeStore, taskStore } from '../store/impl';
-import { subscribeDataChange } from '../core/events';
 import type { FinanceRecord, Task } from '../core/types';
-
-// ==================== 类型导出 ====================
+import { hydrateKnowledgeDataset, restoreKnowledgeDatasetFromCache } from '../kb';
 
 export type { SyncStatus, SyncResult, LoadResult };
 
-// ==================== 同步状态 ====================
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function getUpdatedAt(value: unknown): number {
+  if (!isRecordObject(value) || typeof value.updatedAt !== 'number') {
+    return 0;
+  }
+  return value.updatedAt;
+}
+
+function mergeByUpdatedAt<T extends { id: string; updatedAt: number }>(
+  serverItems: T[],
+  localItems: T[]
+): T[] {
+  const merged = new Map<string, T>();
+
+  for (const item of serverItems) {
+    merged.set(item.id, item);
+  }
+
+  for (const localItem of localItems) {
+    const serverItem = merged.get(localItem.id);
+    if (!serverItem || localItem.updatedAt > serverItem.updatedAt) {
+      merged.set(localItem.id, localItem);
+    }
+  }
+
+  return Array.from(merged.values());
+}
 
 export function getSyncStatus() {
   return syncEngine.getStatus();
@@ -25,66 +44,46 @@ export function subscribeSyncStatus(listener: () => void): () => void {
   return syncEngine.subscribe(listener);
 }
 
-// ==================== 初始化加载 ====================
-
 export async function initializeData(): Promise<boolean> {
-  console.log('[Sync] Initializing data from server...');
+  console.log('[Sync] Initializing data from authority source...');
+
+  restoreKnowledgeDatasetFromCache();
 
   const result = await syncEngine.loadFromServer();
-
   if (!result.success || !result.data) {
-    console.warn('[Sync] Failed to load from server:', result.error);
+    console.warn('[Sync] Failed to load authority data, keeping local cache:', result.error);
     return false;
   }
 
-  const { finance, tasks } = result.data;
+  const serverFinance = Array.isArray(result.data.finance) ? result.data.finance as FinanceRecord[] : [];
+  const serverTasks = Array.isArray(result.data.tasks) ? result.data.tasks as Task[] : [];
+  const [localFinance, localTasks] = await Promise.all([
+    financeStore.getAll(),
+    taskStore.getAll(),
+  ]);
 
-  // 合并数据到本地存储
-  // 策略：服务器数据优先，但保留本地更新的数据
+  const nextFinance = mergeByUpdatedAt(serverFinance, localFinance);
+  const nextTasks = mergeByUpdatedAt(serverTasks, localTasks);
 
-  // 财务数据
-  if (Array.isArray(finance) && finance.length > 0) {
-    const localFinance = await financeStore.getAll();
-    if (localFinance.length === 0 || finance.length > localFinance.length) {
-      financeStore.replaceAll(finance as any);
-    }
+  financeStore.replaceAll(nextFinance);
+  taskStore.replaceAll(nextTasks);
+
+  if (result.data.knowledge !== undefined) {
+    await hydrateKnowledgeDataset(result.data.knowledge);
   }
 
-  // 任务数据
-  if (Array.isArray(tasks) && tasks.length > 0) {
-    const localTasks = await taskStore.getAll();
-    if (localTasks.length === 0 || tasks.length > localTasks.length) {
-      taskStore.replaceAll(tasks as any);
-    }
-  }
-
-  console.log('[Sync] Data initialized successfully');
+  console.log('[Sync] Authority data initialized successfully');
   return true;
 }
 
-// ==================== 自动同步 ====================
-
 export function startAutoSync() {
-  // 监听财务变化
-  subscribeDataChange('finance', () => {
-    syncEngine.schedule('finance');
-  });
-
-  // 监听任务变化
-  subscribeDataChange('tasks', () => {
-    syncEngine.schedule('tasks');
-  });
-
-  console.log('[Sync] Auto sync started');
+  console.log('[Sync] Auto sync is disabled in authority-source mode');
 }
-
-// ==================== WebSocket 实时同步 ====================
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 export function startRealtimeSync() {
-  // 仅在开发模式下启用
   if (typeof window === 'undefined') return;
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -100,20 +99,18 @@ export function startRealtimeSync() {
     socket.onmessage = async (event) => {
       try {
         const message = JSON.parse(event.data);
-
         if (message.type === 'data-changed') {
-          console.log('[Sync] Server data changed:', message);
-          await handleServerChange(message);
+          console.log('[Sync] Authority data changed:', message);
+          await handleServerChange();
         }
-      } catch (e) {
-        console.warn('[Sync] Failed to parse WebSocket message:', e);
+      } catch (error) {
+        console.warn('[Sync] Failed to parse WebSocket message:', error);
       }
     };
 
     socket.onclose = () => {
       console.log('[Sync] WebSocket disconnected, reconnecting...');
       socket = null;
-      // 重连
       if (reconnectTimer) clearTimeout(reconnectTimer);
       reconnectTimer = setTimeout(startRealtimeSync, 3000);
     };
@@ -121,64 +118,26 @@ export function startRealtimeSync() {
     socket.onerror = (error) => {
       console.warn('[Sync] WebSocket error:', error);
     };
-  } catch (e) {
-    console.warn('[Sync] WebSocket not available:', e);
+  } catch (error) {
+    console.warn('[Sync] WebSocket not available:', error);
   }
 }
 
-async function handleServerChange(message: { type: string; file: string; timestamp: number }) {
-  // 从服务器重新加载数据
+async function handleServerChange() {
   const result = await syncEngine.loadFromServer();
-
   if (!result.success || !result.data) {
-    console.warn('[Sync] Failed to reload data after server change');
+    console.warn('[Sync] Failed to reload authority data after server change');
     return;
   }
 
-  const { finance, tasks } = result.data;
+  const serverFinance = Array.isArray(result.data.finance) ? result.data.finance as FinanceRecord[] : [];
+  const serverTasks = Array.isArray(result.data.tasks) ? result.data.tasks as Task[] : [];
 
-  // 更新本地数据（触发 UI 更新）
+  financeStore.replaceAll(serverFinance);
+  taskStore.replaceAll(serverTasks);
 
-  // 更新财务数据
-  if (Array.isArray(finance)) {
-    const localFinance = await financeStore.getAll();
-    const localMap = new Map(localFinance.map(r => [r.id, r]));
-    const serverFinance = finance as FinanceRecord[];
-    const serverMap = new Map(serverFinance.map(r => [r.id, r]));
-
-    for (const [id, serverRecord] of serverMap) {
-      const localRecord = localMap.get(id);
-      if (!localRecord || localRecord.updatedAt < serverRecord.updatedAt) {
-        await financeStore.update(id, serverRecord);
-      }
-    }
-
-    for (const [id] of localMap) {
-      if (!serverMap.has(id)) {
-        await financeStore.delete(id);
-      }
-    }
-  }
-
-  // 更新任务数据
-  if (Array.isArray(tasks)) {
-    const localTasks = await taskStore.getAll();
-    const localMap = new Map(localTasks.map(t => [t.id, t]));
-    const serverTasks = tasks as Task[];
-    const serverMap = new Map(serverTasks.map(t => [t.id, t]));
-
-    for (const [id, serverTask] of serverMap) {
-      const localTask = localMap.get(id);
-      if (!localTask || localTask.updatedAt < serverTask.updatedAt) {
-        await taskStore.update(id, serverTask);
-      }
-    }
-
-    for (const [id] of localMap) {
-      if (!serverMap.has(id)) {
-        await taskStore.delete(id);
-      }
-    }
+  if (result.data.knowledge !== undefined) {
+    await hydrateKnowledgeDataset(result.data.knowledge);
   }
 }
 
@@ -192,8 +151,6 @@ export function stopRealtimeSync() {
     reconnectTimer = null;
   }
 }
-
-// ==================== 手动同步 ====================
 
 export async function syncAll(): Promise<SyncResult> {
   return syncEngine.syncNow('all');

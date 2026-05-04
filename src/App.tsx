@@ -7,6 +7,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Knowledge = lazy(() => import('./pages/Knowledge'));
 const Tasks = lazy(() => import('./pages/Tasks'));
 const Tools = lazy(() => import('./pages/Tools'));
 const Finance = lazy(() => import('./pages/Finance'));
@@ -48,6 +49,7 @@ function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
+              <Route path="knowledge" element={<Knowledge />} />
               <Route path="tasks" element={<Tasks />} />
               <Route path="tools" element={<Tools />} />
               <Route path="finance" element={<Finance />} />

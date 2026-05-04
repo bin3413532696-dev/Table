@@ -191,7 +191,6 @@ export abstract class BaseStore<T extends BaseEntity, CreateDTO, UpdateDTO>
    */
   replaceAll(entities: T[]): void {
     this.data = entities.filter(e => this.validate(e));
-    this.saveToStorage(this.data);
     this.persist();
   }
 
@@ -215,24 +214,19 @@ export abstract class BaseStore<T extends BaseEntity, CreateDTO, UpdateDTO>
   protected persist(): void {
     this.saveToStorage(this.data);
     eventEmitter.emit(this.changeTopic);
-    if (this.config.autoSync !== false) {
-      syncEngine.schedule(this.getSyncType());
-    }
   }
 
   /**
    * 获取同步类型
    */
-  protected getSyncType(): 'finance' | 'tasks' | 'notes' {
+  protected getSyncType(): 'finance' | 'tasks' {
     switch (this.changeTopic) {
       case EventTopics.FINANCE_CHANGED:
         return 'finance';
       case EventTopics.TASKS_CHANGED:
         return 'tasks';
-      case EventTopics.NOTES_CHANGED:
-        return 'notes';
       default:
-        return 'notes';
+        return 'tasks';
     }
   }
 }

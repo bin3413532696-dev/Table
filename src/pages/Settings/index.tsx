@@ -215,14 +215,21 @@ function SecuritySettings() {
 function DataManager() {
   const [importStatus, setImportStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [stats, setStats] = useState({ finance: 0, tasks: 0, totalSize: 0 });
+  const [stats, setStats] = useState({
+    finance: 0,
+    tasks: 0,
+    knowledgeEntities: 0,
+    knowledgeDocuments: 0,
+    knowledgeAssertions: 0,
+    totalSize: 0,
+  });
 
   useEffect(() => {
     dataManager.getStats().then(setStats);
   }, []);
 
-  const handleExport = () => {
-    const data = dataManager.exportAll();
+  const handleExport = async () => {
+    const data = await dataManager.exportAll();
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -238,9 +245,9 @@ function DataManager() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const content = event.target?.result as string;
-      const success = dataManager.importAll(content);
+      const success = await dataManager.importAll(content);
       if (success) {
         setImportStatus('success');
         setTimeout(() => window.location.reload(), 1200);
@@ -253,10 +260,16 @@ function DataManager() {
     e.target.value = '';
   };
 
-  const handleClear = () => {
-    dataManager.clearAll();
-    setShowClearConfirm(false);
-    window.location.reload();
+  const handleClear = async () => {
+    try {
+      await dataManager.clearAll();
+      setShowClearConfirm(false);
+      window.location.reload();
+    } catch {
+      setShowClearConfirm(false);
+      setImportStatus('error');
+      setTimeout(() => setImportStatus('idle'), 3000);
+    }
   };
 
   const formatSize = (bytes: number) => {
@@ -268,7 +281,7 @@ function DataManager() {
   return (
     <div className="space-y-5">
       {/* 数据统计 */}
-      <div className="grid grid-cols-3 gap-4 p-4 rounded-xl bg-bg-secondary border border-border-primary">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 rounded-xl bg-bg-secondary border border-border-primary">
         <div className="text-center">
           <p className="text-2xl font-bold text-text-primary">{stats.finance}</p>
           <p className="text-xs text-text-muted">费用记录</p>
@@ -276,6 +289,18 @@ function DataManager() {
         <div className="text-center">
           <p className="text-2xl font-bold text-text-primary">{stats.tasks}</p>
           <p className="text-xs text-text-muted">任务</p>
+        </div>
+        <div className="text-center">
+          <p className="text-2xl font-bold text-text-primary">{stats.knowledgeEntities}</p>
+          <p className="text-xs text-text-muted">知识实体</p>
+        </div>
+        <div className="text-center">
+          <p className="text-2xl font-bold text-text-primary">{stats.knowledgeDocuments}</p>
+          <p className="text-xs text-text-muted">知识文档</p>
+        </div>
+        <div className="text-center">
+          <p className="text-2xl font-bold text-text-primary">{stats.knowledgeAssertions}</p>
+          <p className="text-xs text-text-muted">知识断言</p>
         </div>
         <div className="text-center">
           <p className="text-2xl font-bold text-text-primary">{formatSize(stats.totalSize)}</p>
@@ -291,7 +316,7 @@ function DataManager() {
           </div>
           <div>
             <div className="text-sm font-medium text-text-primary">导出数据</div>
-            <div className="text-xs text-text-muted">备份所有数据和设置</div>
+            <div className="text-xs text-text-muted">备份任务、财务、知识库和设置</div>
           </div>
         </button>
 
@@ -301,7 +326,7 @@ function DataManager() {
           </div>
           <div>
             <div className="text-sm font-medium text-text-primary">导入数据</div>
-            <div className="text-xs text-text-muted">从备份文件恢复</div>
+            <div className="text-xs text-text-muted">从备份文件恢复全部模块数据</div>
           </div>
           <input type="file" accept=".json" onChange={handleImport} className="hidden" />
         </label>

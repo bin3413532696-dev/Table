@@ -86,18 +86,25 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
             <div className="mt-2 pt-2 border-t border-border-primary/50">
               {message.toolCalls.map((toolCall) => (
                 <div key={toolCall.id} className="text-xs">
+                  {(() => {
+                    const result = message.toolResults?.[toolCall.id];
+                    return (
+                      <>
                   <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-primary/10 text-primary rounded">
                     {toolCall.name}
                   </span>
-                  {message.toolResult && (
+                  {result && (
                     <span className="ml-2">
-                      {message.toolResult.success ? (
+                      {result.success ? (
                         <CheckCircle className="w-3 h-3 text-green-500 inline" />
                       ) : (
                         <XCircle className="w-3 h-3 text-red-500 inline" />
                       )}
                     </span>
                   )}
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

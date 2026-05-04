@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
 import { agentEngine } from './AgentEngine';
-import { AgentMessage, AgentState, ConfirmationRequest, ToolCall, ToolResult } from './types';
+import { AgentMessage, AgentState, ConfirmationRequest, ToolCall, ToolResult, MAX_HISTORY_MESSAGES, MAX_CONTEXT_CHARS } from './types';
 import { ollamaClient } from '../lib/ollama';
 import { API_CONFIG_CHANGED_EVENT, ensureBootstrappedApiConfig, getPreferredAgentModel } from '../lib/apiConfig';
 
@@ -33,6 +33,32 @@ const initialState: AgentState = {
   confirmationRequest: null,
   error: null,
 };
+
+/**
+ * 对话历史管理：裁剪消息以符合限制
+ * 保留最近的消息，确保不超过最大数量和字符限制
+ */
+function trimMessagesHistory(messages: AgentMessage[]): AgentMessage[] {
+  if (messages.length === 0) {
+    return messages;
+  }
+
+  // 首先按数量裁剪，保留最近的消息
+  let trimmed = messages.slice(-MAX_HISTORY_MESSAGES);
+
+  // 然后按字符数裁剪
+  let totalChars = trimmed.reduce((sum, msg) => sum + msg.content.length, 0);
+
+  while (totalChars > MAX_CONTEXT_CHARS && trimmed.length > 1) {
+    // 移除最早的消息（但保留最后一条用户消息和所有最近的交互）
+    const removed = trimmed.shift();
+    if (removed) {
+      totalChars -= removed.content.length;
+    }
+  }
+
+  return trimmed;
+}
 
 function appendToolSummary(content: string, summary: string): string {
   if (!summary.trim()) {
@@ -74,7 +100,9 @@ function formatToolResultSummary(result: ToolResult, toolName: string): string {
 function agentReducer(state: AgentState, action: AgentAction): AgentState {
   switch (action.type) {
     case 'ADD_MESSAGE':
-      return { ...state, messages: [...state.messages, action.payload] };
+      // 添加消息后自动裁剪历史
+      const newMessages = [...state.messages, action.payload];
+      return { ...state, messages: trimMessagesHistory(newMessages) };
     case 'UPDATE_MESSAGE':
       return {
         ...state,
@@ -104,7 +132,10 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
             ? {
                 ...message,
                 content: appendToolSummary(message.content, action.payload.summary),
-                toolResult: action.payload.result,
+                toolResults: {
+                  ...(message.toolResults || {}),
+                  [action.payload.toolCallId]: action.payload.result,
+                },
               }
             : message
         ),
@@ -245,6 +276,56 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       const directToolCall = agentEngine.findDirectToolCall(content);
       const pendingToolCalls: ToolCall[] = [];
 
+      if (directToolCall) {
+        dispatch({
+          type: 'UPDATE_MESSAGE',
+          payload: {
+            id: assistantMessage.id,
+            updates: { toolCalls: [directToolCall] },
+          },
+        });
+
+        ensureRequestActive();
+        const result = await agentEngine.executeTool(directToolCall);
+        ensureRequestActive();
+
+        if (result.requiresConfirmation) {
+          dispatch({
+            type: 'SET_CONFIRMATION',
+            payload: {
+              id: directToolCall.id,
+              toolName: directToolCall.name,
+              arguments: directToolCall.arguments,
+              description: result.confirmationMessage || '',
+              pendingMessageId: assistantMessage.id,
+            },
+          });
+
+          if (activeRequestRef.current === requestState) {
+            activeRequestRef.current = null;
+            dispatch({ type: 'SET_PROCESSING', payload: false });
+          }
+          return;
+        }
+
+        dispatch({
+          type: 'ADD_TOOL_RESULT',
+          payload: {
+            toolCallId: directToolCall.id,
+            result,
+            summary: formatToolResultSummary(result, directToolCall.name),
+          },
+        });
+
+        if (activeRequestRef.current === requestState) {
+          dispatch({
+            type: 'UPDATE_MESSAGE',
+            payload: { id: assistantMessage.id, updates: { status: 'completed' } },
+          });
+        }
+        return;
+      }
+
       for await (const chunk of agentEngine.processMessage(
         state.messages.concat(userMessage),
         state.selectedModel,
@@ -311,46 +392,6 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
             },
           });
         }
-      } else if (directToolCall) {
-        dispatch({
-          type: 'UPDATE_MESSAGE',
-          payload: {
-            id: assistantMessage.id,
-            updates: { content: assistantBaseContent, toolCalls: [directToolCall] },
-          },
-        });
-
-        ensureRequestActive();
-        const result = await agentEngine.executeTool(directToolCall);
-        ensureRequestActive();
-
-        if (result.requiresConfirmation) {
-          dispatch({
-            type: 'SET_CONFIRMATION',
-            payload: {
-              id: directToolCall.id,
-              toolName: directToolCall.name,
-              arguments: directToolCall.arguments,
-              description: result.confirmationMessage || '',
-              pendingMessageId: assistantMessage.id,
-            },
-          });
-
-          if (activeRequestRef.current === requestState) {
-            activeRequestRef.current = null;
-            dispatch({ type: 'SET_PROCESSING', payload: false });
-          }
-          return;
-        }
-
-        dispatch({
-          type: 'ADD_TOOL_RESULT',
-          payload: {
-            toolCallId: directToolCall.id,
-            result,
-            summary: formatToolResultSummary(result, directToolCall.name),
-          },
-        });
       } else if (assistantBaseContent !== requestState.content) {
         dispatch({
           type: 'UPDATE_MESSAGE',

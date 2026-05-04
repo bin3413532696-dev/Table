@@ -4,7 +4,9 @@
   "scripts": {
     "dev": "webpack serve",
     "build": "webpack --mode production",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "knowledge:e2e": "node scripts/knowledge-e2e-cdp.mjs",
+    "agent:modules:e2e": "node scripts/agent-modules-e2e-cdp.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",

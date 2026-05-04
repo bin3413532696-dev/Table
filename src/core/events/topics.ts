@@ -19,7 +19,6 @@ export const EventTopics = {
   // 数据变更事件
   FINANCE_CHANGED: { key: 'finance:changed', description: '财务数据变更' },
   TASKS_CHANGED: { key: 'tasks:changed', description: '任务数据变更' },
-  NOTES_CHANGED: { key: 'notes:changed', description: '笔记数据变更' },
 
   // 同步事件
   SYNC_STARTED: { key: 'sync:started', description: '同步开始' },
@@ -40,7 +39,6 @@ export const EventTopics = {
 export const DataChangeTopics = {
   finance: EventTopics.FINANCE_CHANGED,
   tasks: EventTopics.TASKS_CHANGED,
-  notes: EventTopics.NOTES_CHANGED,
 } as const;
 
 export type DataType = keyof typeof DataChangeTopics;

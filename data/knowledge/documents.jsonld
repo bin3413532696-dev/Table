@@ -1,0 +1,16 @@
+[
+  {
+    "id": "doc:handover",
+    "title": "交接文档",
+    "summary": "项目架构、同步策略与后续计划的权威说明。",
+    "content": "当前项目交接文档，包含数据同步、智能体和知识库接入计划。",
+    "tags": [
+      "handover",
+      "documentation"
+    ],
+    "entityIds": [],
+    "source": "交接文档.md",
+    "createdAt": 0,
+    "updatedAt": 1777889435142
+  }
+]

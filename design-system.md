@@ -303,7 +303,6 @@ Danger:
 | Dashboard | 7xl (1280px) |
 | Tasks | 4xl (896px) |
 | Finance | 7xl (1280px) |
-| Knowledge | 7xl (1280px) |
 | Tools | 4xl (896px) |
 | Settings | 6xl (1152px) |
 
@@ -313,5 +312,6 @@ Danger:
 
 | 日期 | 版本 | 变更 |
 |------|------|------|
+| 2026-05-03 | v2.1 | 移除知识库模块，简化应用结构 |
 | 2026-05-02 | v2.0 | 全面升级设计系统：字体改为 Satoshi+DM Sans+Geist Mono，主色调整为 #2563EB，优化动画时长，统一圆角和阴影系统 |
 | 2026-05-01 | v1.0 | 初始设计系统创建 |

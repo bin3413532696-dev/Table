@@ -1,0 +1,55 @@
+[
+  {
+    "id": "entity:finance-mor1vi1j-f86a3is-003",
+    "typeId": "class:finance-record",
+    "title": "收入 测试",
+    "summary": "收入 10000 元，分类 其他收入，日期 2026-05-04",
+    "aliases": [],
+    "tags": [
+      "finance",
+      "income",
+      "其他收入"
+    ],
+    "attributes": {
+      "financeRecordId": "mor1vi1j-f86a3is-003",
+      "type": "income",
+      "amount": 10000,
+      "category": "其他收入",
+      "date": "2026-05-04",
+      "createdAt": 1777890122249,
+      "updatedAt": 1777890122249
+    },
+    "relations": [],
+    "source": "finance-module",
+    "confidence": 1,
+    "createdAt": 1777890122264,
+    "updatedAt": 1777890122264
+  },
+  {
+    "id": "entity:finance-mor1qsoq-8grbzkw-002",
+    "typeId": "class:finance-record",
+    "title": "支出 12",
+    "summary": "支出 123 元，分类 API调用费用，日期 2026-05-04，模型 GPT-4",
+    "aliases": [],
+    "tags": [
+      "finance",
+      "expense",
+      "API调用费用"
+    ],
+    "attributes": {
+      "financeRecordId": "mor1qsoq-8grbzkw-002",
+      "type": "expense",
+      "amount": 123,
+      "category": "API调用费用",
+      "date": "2026-05-04",
+      "createdAt": 1777889902774,
+      "updatedAt": 1777889902774,
+      "model": "GPT-4"
+    },
+    "relations": [],
+    "source": "finance-module",
+    "confidence": 1,
+    "createdAt": 1777889902778,
+    "updatedAt": 1777889902778
+  }
+]

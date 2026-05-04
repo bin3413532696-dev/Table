@@ -392,9 +392,16 @@ export class OllamaClient {
         const response = await fetch(getProviderModelsUrl(activeConfig), {
           headers: buildProviderHeaders(activeConfig),
         });
-        return response.ok;
+        if (response.ok) {
+          return true;
+        }
+
+        // Some OpenAI-compatible providers support chat endpoints but do not
+        // reliably expose a models endpoint to browsers. In that case keep the
+        // agent available and rely on the configured model.
+        return Boolean(activeConfig.baseUrl && activeConfig.model);
       } catch {
-        return false;
+        return Boolean(activeConfig.baseUrl && activeConfig.model);
       }
     }
 

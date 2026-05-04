@@ -52,6 +52,7 @@ export default function Finance() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchActions, setShowBatchActions] = useState(false);
+  const [batchFeedback, setBatchFeedback] = useState('');
 
   const categories = useMemo(() => {
     const incomeCats = new Set(DEFAULT_CATEGORIES.income);
@@ -179,7 +180,13 @@ export default function Finance() {
   };
 
   const handleBatchDelete = async () => {
-    await Promise.all([...selectedIds].map(id => financeDB.delete(id)));
+    const results = await Promise.allSettled([...selectedIds].map(id => financeDB.delete(id)));
+    const failedCount = results.filter((result) => result.status === 'rejected').length;
+    if (failedCount > 0) {
+      setBatchFeedback(`批量删除完成，但有 ${failedCount} 项删除失败。`);
+    } else {
+      setBatchFeedback('');
+    }
     setSelectedIds(new Set());
     setShowBatchActions(false);
     setShowDeleteConfirm(null);
@@ -263,6 +270,12 @@ export default function Finance() {
           </button>
         </div>
       </motion.div>
+
+      {batchFeedback && (
+        <div className="mb-4 rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
+          {batchFeedback}
+        </div>
+      )}
 
       <StatsCards stats={stats} />
 

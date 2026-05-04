@@ -32,6 +32,7 @@ const Tasks: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchActions, setShowBatchActions] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [batchFeedback, setBatchFeedback] = useState<string>('');
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -108,18 +109,30 @@ const Tasks: React.FC = () => {
   }, []);
 
   const handleBatchDelete = useCallback(async () => {
-    await Promise.all([...selectedIds].map(id => taskDB.delete(id)));
+    const results = await Promise.allSettled([...selectedIds].map(id => taskDB.delete(id)));
+    const failedCount = results.filter((result) => result.status === 'rejected').length;
+    if (failedCount > 0) {
+      setBatchFeedback(`批量删除完成，但有 ${failedCount} 项删除失败。`);
+    } else {
+      setBatchFeedback('');
+    }
     setSelectedIds(new Set());
     setShowBatchActions(false);
     setShowDeleteConfirm(null);
   }, [selectedIds]);
 
   const handleBatchToggle = useCallback(async (complete: boolean) => {
-    await Promise.all([...selectedIds].map(id => {
+    const results = await Promise.allSettled([...selectedIds].map(id => {
       const task = tasks.find(t => t.id === id);
       if (task && task.completed !== complete) return taskDB.toggle(id);
       return Promise.resolve();
     }));
+    const failedCount = results.filter((result) => result.status === 'rejected').length;
+    if (failedCount > 0) {
+      setBatchFeedback(`批量更新完成，但有 ${failedCount} 项更新失败。`);
+    } else {
+      setBatchFeedback('');
+    }
     setSelectedIds(new Set());
     setShowBatchActions(false);
   }, [selectedIds, tasks]);
@@ -257,6 +270,12 @@ const Tasks: React.FC = () => {
           <p className="stat-card-label">逾期</p>
         </div>
       </motion.div>
+
+      {batchFeedback && (
+        <div className="mb-4 rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
+          {batchFeedback}
+        </div>
+      )}
 
       {/* 添加任务区 */}
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="card mb-6">

@@ -3,7 +3,7 @@
  * 替代分散在多个文件中的同步逻辑
  */
 
-import { SYNC_CONFIG, SyncStatus, SyncResult, SyncDataType } from './config';
+import { SYNC_CONFIG, SyncStatus, SyncResult, SyncDataType, SyncStatusSnapshot } from './config';
 import { eventEmitter, EventTopics } from '../core/events';
 import { AppError, ErrorCode } from '../core/errors';
 
@@ -13,7 +13,6 @@ import { AppError, ErrorCode } from '../core/errors';
 interface SyncQueueItem {
   type: SyncDataType;
   timestamp: number;
-  retryCount: number;
 }
 
 /**
@@ -27,6 +26,8 @@ class SyncEngineClass {
   private isSyncing = false;
   private lastSyncTime: number | null = null;
   private lastError: string | null = null;
+  private retryCount = 0;
+  private lastSuccessfulSync: string | null = null;
   private listeners = new Set<() => void>();
 
   private constructor() {}
@@ -41,11 +42,19 @@ class SyncEngineClass {
   /**
    * 获取同步状态
    */
-  getStatus(): { status: SyncStatus; lastSyncTime: number | null; lastError: string | null } {
+  getStatus(): SyncStatusSnapshot {
     return {
-      status: this.isSyncing ? 'syncing' : (this.lastError ? 'error' : 'idle'),
+      status: this.isSyncing
+        ? 'syncing'
+        : this.lastError
+          ? 'error'
+          : this.lastSuccessfulSync
+            ? 'success'
+            : 'idle',
       lastSyncTime: this.lastSyncTime,
       lastError: this.lastError,
+      retryCount: this.retryCount,
+      lastSuccessfulSync: this.lastSuccessfulSync,
     };
   }
 
@@ -66,7 +75,6 @@ class SyncEngineClass {
     this.syncQueue.push({
       type,
       timestamp: Date.now(),
-      retryCount: 0,
     });
 
     this.scheduleProcess();
@@ -103,15 +111,19 @@ class SyncEngineClass {
       if (result.success) {
         this.lastSyncTime = result.timestamp || Date.now();
         this.lastError = null;
+        this.retryCount = 0;
+        this.lastSuccessfulSync = new Date(this.lastSyncTime).toISOString();
         this.notifyListeners();
         eventEmitter.emit(EventTopics.SYNC_COMPLETED);
       } else {
         this.lastError = result.error || 'Unknown error';
+        this.retryCount += 1;
         this.notifyListeners();
         eventEmitter.emit(EventTopics.SYNC_FAILED, result.error);
       }
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : 'Unknown error';
+      this.retryCount += 1;
       this.notifyListeners();
       eventEmitter.emit(EventTopics.SYNC_FAILED, this.lastError);
     } finally {
@@ -134,6 +146,7 @@ class SyncEngineClass {
     try {
       // 动态导入 Store 实现以避免循环依赖
       const { financeStore, taskStore } = await import('../store/impl');
+      const { getKnowledgeDataset } = await import('../kb');
 
       const payload: Record<string, unknown> = {};
 
@@ -143,6 +156,9 @@ class SyncEngineClass {
         }
         if (type === 'all' || type === 'tasks') {
           payload.tasks = await taskStore.getAll();
+        }
+        if (type === 'all' || type === 'knowledge') {
+          payload.knowledge = getKnowledgeDataset();
         }
       }
 
@@ -179,7 +195,7 @@ class SyncEngineClass {
     data?: {
       finance: unknown[];
       tasks: unknown[];
-      notes: unknown[];
+      knowledge?: unknown;
     };
     error?: string;
   }> {
@@ -227,4 +243,11 @@ export function syncFinance(): void {
  */
 export function syncTasks(): void {
   syncEngine.schedule('tasks');
+}
+
+/**
+ * 便捷函数：同步知识库数据
+ */
+export function syncKnowledge(): void {
+  syncEngine.schedule('knowledge');
 }
