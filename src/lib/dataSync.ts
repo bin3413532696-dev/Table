@@ -1,40 +1,8 @@
 import { syncEngine, SyncStatus, SyncResult, LoadResult } from '../sync';
-import { financeStore, taskStore } from '../store/impl';
-import type { FinanceRecord, Task } from '../core/types';
 import { hydrateKnowledgeDataset, restoreKnowledgeDatasetFromCache } from '../kb';
+import { SYNC_CONFIG } from '../sync/config';
 
 export type { SyncStatus, SyncResult, LoadResult };
-
-function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function getUpdatedAt(value: unknown): number {
-  if (!isRecordObject(value) || typeof value.updatedAt !== 'number') {
-    return 0;
-  }
-  return value.updatedAt;
-}
-
-function mergeByUpdatedAt<T extends { id: string; updatedAt: number }>(
-  serverItems: T[],
-  localItems: T[]
-): T[] {
-  const merged = new Map<string, T>();
-
-  for (const item of serverItems) {
-    merged.set(item.id, item);
-  }
-
-  for (const localItem of localItems) {
-    const serverItem = merged.get(localItem.id);
-    if (!serverItem || localItem.updatedAt > serverItem.updatedAt) {
-      merged.set(localItem.id, localItem);
-    }
-  }
-
-  return Array.from(merged.values());
-}
 
 export function getSyncStatus() {
   return syncEngine.getStatus();
@@ -45,31 +13,33 @@ export function subscribeSyncStatus(listener: () => void): () => void {
 }
 
 export async function initializeData(): Promise<boolean> {
-  console.log('[Sync] Initializing data from authority source...');
+  console.log('[Sync] Initializing authority data...');
 
   restoreKnowledgeDatasetFromCache();
 
-  const result = await syncEngine.loadFromServer();
+  try {
+    const { financeDB, taskDB } = await import('../db');
+    await Promise.all([
+      financeDB.getAll(),
+      taskDB.getAll(),
+    ]);
+  } catch (error) {
+    console.warn('[Sync] Failed to warm task/finance API cache:', error);
+  }
+
+  const result = await syncEngine.loadKnowledgeFromServer();
   if (!result.success || !result.data) {
-    console.warn('[Sync] Failed to load authority data, keeping local cache:', result.error);
+    console.warn('[Sync] Failed to load knowledge authority data, keeping local cache:', result.error);
     return false;
   }
 
-  const serverFinance = Array.isArray(result.data.finance) ? result.data.finance as FinanceRecord[] : [];
-  const serverTasks = Array.isArray(result.data.tasks) ? result.data.tasks as Task[] : [];
-  const [localFinance, localTasks] = await Promise.all([
-    financeStore.getAll(),
-    taskStore.getAll(),
-  ]);
-
-  const nextFinance = mergeByUpdatedAt(serverFinance, localFinance);
-  const nextTasks = mergeByUpdatedAt(serverTasks, localTasks);
-
-  financeStore.replaceAll(nextFinance);
-  taskStore.replaceAll(nextTasks);
-
   if (result.data.knowledge !== undefined) {
     await hydrateKnowledgeDataset(result.data.knowledge);
+  }
+
+  const metadata = await syncEngine.loadKnowledgeMetadata();
+  if (metadata.success && metadata.data) {
+    lastMetadataKey = `${metadata.data.version}:${metadata.data.updatedAt}`;
   }
 
   console.log('[Sync] Authority data initialized successfully');
@@ -77,64 +47,50 @@ export async function initializeData(): Promise<boolean> {
 }
 
 export function startAutoSync() {
-  console.log('[Sync] Auto sync is disabled in authority-source mode');
+  console.log('[Sync] Auto sync is disabled. Business data now uses direct API reads, knowledge uses explicit sync.');
 }
 
-let socket: WebSocket | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let lastMetadataKey: string | null = null;
 
 export function startRealtimeSync() {
   if (typeof window === 'undefined') return;
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-  try {
-    socket = new WebSocket(wsUrl);
-
-    socket.onopen = () => {
-      console.log('[Sync] WebSocket connected');
-    };
-
-    socket.onmessage = async (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === 'data-changed') {
-          console.log('[Sync] Authority data changed:', message);
-          await handleServerChange();
-        }
-      } catch (error) {
-        console.warn('[Sync] Failed to parse WebSocket message:', error);
-      }
-    };
-
-    socket.onclose = () => {
-      console.log('[Sync] WebSocket disconnected, reconnecting...');
-      socket = null;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(startRealtimeSync, 3000);
-    };
-
-    socket.onerror = (error) => {
-      console.warn('[Sync] WebSocket error:', error);
-    };
-  } catch (error) {
-    console.warn('[Sync] WebSocket not available:', error);
+  if (pollTimer) {
+    clearInterval(pollTimer);
   }
+
+  const poll = async () => {
+    try {
+      const metadata = await syncEngine.loadKnowledgeMetadata();
+      if (!metadata.success || !metadata.data) {
+        return;
+      }
+
+      const nextKey = `${metadata.data.version}:${metadata.data.updatedAt}`;
+      if (lastMetadataKey === nextKey) {
+        return;
+      }
+
+      lastMetadataKey = nextKey;
+      await handleServerChange();
+    } catch (error) {
+      console.warn('[Sync] Knowledge metadata polling failed:', error);
+    }
+  };
+
+  void poll();
+  pollTimer = setInterval(() => {
+    void poll();
+  }, SYNC_CONFIG.KNOWLEDGE_POLL_INTERVAL);
 }
 
 async function handleServerChange() {
-  const result = await syncEngine.loadFromServer();
+  const result = await syncEngine.loadKnowledgeFromServer();
   if (!result.success || !result.data) {
-    console.warn('[Sync] Failed to reload authority data after server change');
+    console.warn('[Sync] Failed to reload knowledge authority data after server change');
     return;
   }
-
-  const serverFinance = Array.isArray(result.data.finance) ? result.data.finance as FinanceRecord[] : [];
-  const serverTasks = Array.isArray(result.data.tasks) ? result.data.tasks as Task[] : [];
-
-  financeStore.replaceAll(serverFinance);
-  taskStore.replaceAll(serverTasks);
 
   if (result.data.knowledge !== undefined) {
     await hydrateKnowledgeDataset(result.data.knowledge);
@@ -142,28 +98,16 @@ async function handleServerChange() {
 }
 
 export function stopRealtimeSync() {
-  if (socket) {
-    socket.close();
-    socket = null;
-  }
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
   }
 }
 
-export async function syncAll(): Promise<SyncResult> {
-  return syncEngine.syncNow('all');
+export async function syncKnowledgeNow(): Promise<SyncResult> {
+  return syncEngine.syncNow('knowledge');
 }
 
-export async function syncFinance(): Promise<SyncResult> {
-  return syncEngine.syncNow('finance');
-}
-
-export async function syncTasks(): Promise<SyncResult> {
-  return syncEngine.syncNow('tasks');
-}
-
-export async function loadAllFromServer(): Promise<LoadResult> {
-  return syncEngine.loadFromServer();
+export async function loadKnowledgeFromServer(): Promise<LoadResult> {
+  return syncEngine.loadKnowledgeFromServer();
 }

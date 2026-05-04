@@ -66,9 +66,9 @@ class SyncEngineClass {
   }
 
   /**
-   * 调度同步
+   * 调度知识库同步
    */
-  schedule(type: SyncDataType = 'all'): void {
+  schedule(type: SyncDataType = 'knowledge'): void {
     // 去重：移除同类型的旧请求
     this.syncQueue = this.syncQueue.filter(item => item.type !== type);
 
@@ -81,9 +81,9 @@ class SyncEngineClass {
   }
 
   /**
-   * 立即同步（跳过防抖）
+   * 立即同步知识库（跳过防抖）
    */
-  async syncNow(type: SyncDataType = 'all'): Promise<SyncResult> {
+  async syncNow(type: SyncDataType = 'knowledge'): Promise<SyncResult> {
     return this.performSync([type]);
   }
 
@@ -137,29 +137,30 @@ class SyncEngineClass {
   }
 
   private getMergedTypes(): SyncDataType[] {
-    const types = new Set(this.syncQueue.map(item => item.type));
-    if (types.has('all')) return ['all'];
-    return Array.from(types) as SyncDataType[];
+    if (this.syncQueue.length === 0) {
+      return ['knowledge'];
+    }
+
+    return ['knowledge'];
   }
 
   private async performSync(types: SyncDataType[]): Promise<SyncResult> {
     try {
-      // 动态导入 Store 实现以避免循环依赖
-      const { financeStore, taskStore } = await import('../store/impl');
       const { getKnowledgeDataset } = await import('../kb');
 
       const payload: Record<string, unknown> = {};
 
       for (const type of types) {
-        if (type === 'all' || type === 'finance') {
-          payload.finance = await financeStore.getAll();
-        }
-        if (type === 'all' || type === 'tasks') {
-          payload.tasks = await taskStore.getAll();
-        }
-        if (type === 'all' || type === 'knowledge') {
+        if (type === 'knowledge') {
           payload.knowledge = getKnowledgeDataset();
         }
+      }
+
+      if (Object.keys(payload).length === 0) {
+        return {
+          success: true,
+          timestamp: Date.now(),
+        };
       }
 
       const response = await fetch(SYNC_CONFIG.SYNC_ENDPOINT, {
@@ -188,13 +189,11 @@ class SyncEngineClass {
   }
 
   /**
-   * 从服务器加载数据
+   * 从服务器加载知识库权威数据
    */
-  async loadFromServer(): Promise<{
+  async loadKnowledgeFromServer(): Promise<{
     success: boolean;
     data?: {
-      finance: unknown[];
-      tasks: unknown[];
       knowledge?: unknown;
     };
     error?: string;
@@ -220,34 +219,65 @@ class SyncEngineClass {
       };
     }
   }
+
+  async loadKnowledgeMetadata(): Promise<{
+    success: boolean;
+    data?: {
+      updatedAt: number;
+      version: number;
+      entityCount: number;
+      documentCount: number;
+      assertionCount: number;
+      source: string;
+    };
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(SYNC_CONFIG.KNOWLEDGE_METADATA_ENDPOINT);
+
+      if (!response.ok) {
+        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      return {
+        success: true,
+        data: result.data,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return {
+        success: false,
+        error: message,
+      };
+    }
+  }
 }
 
 export const syncEngine = SyncEngineClass.getInstance();
 
 /**
- * 便捷函数：同步所有数据
- */
-export function syncAll(): Promise<SyncResult> {
-  return syncEngine.syncNow('all');
-}
-
-/**
- * 便捷函数：同步财务数据
- */
-export function syncFinance(): void {
-  syncEngine.schedule('finance');
-}
-
-/**
- * 便捷函数：同步任务数据
- */
-export function syncTasks(): void {
-  syncEngine.schedule('tasks');
-}
-
-/**
- * 便捷函数：同步知识库数据
+ * 便捷函数：调度知识库同步
  */
 export function syncKnowledge(): void {
   syncEngine.schedule('knowledge');
+}
+
+/**
+ * 便捷函数：立即同步知识库数据
+ */
+export function syncKnowledgeNow(): Promise<SyncResult> {
+  return syncEngine.syncNow('knowledge');
+}
+
+/**
+ * 便捷函数：加载知识库权威数据
+ */
+export function loadKnowledgeFromServer() {
+  return syncEngine.loadKnowledgeFromServer();
+}
+
+export function loadKnowledgeMetadata() {
+  return syncEngine.loadKnowledgeMetadata();
 }

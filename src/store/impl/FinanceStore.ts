@@ -142,13 +142,21 @@ class FinanceStoreClass extends BaseStore<FinanceRecord, CreateFinanceDTO, Updat
     return records;
   }
 
+  hydrate(records: FinanceRecord[], emit = false): void {
+    this.data = records.filter(r => this.validate(r));
+    this.saveToStorage(this.data);
+    if (emit) {
+      import('../../core/events').then(({ emitDataChange }) => {
+        emitDataChange('finance');
+      });
+    }
+  }
+
   /**
    * 批量替换所有数据（用于导入）
    */
   replaceAll(records: FinanceRecord[]): void {
-    this.data = records.filter(r => this.validate(r));
-    this.saveToStorage(this.data);
-    this.persist();
+    this.hydrate(records, true);
   }
 }
 

@@ -213,8 +213,12 @@ function SecuritySettings() {
 }
 
 function DataManager() {
-  const [importStatus, setImportStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<{ type: 'idle' | 'success' | 'error'; message: string }>({
+    type: 'idle',
+    message: '',
+  });
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [clearMode, setClearMode] = useState<'all' | 'knowledge' | 'local' | null>(null);
   const [stats, setStats] = useState({
     finance: 0,
     tasks: 0,
@@ -228,32 +232,55 @@ function DataManager() {
     dataManager.getStats().then(setStats);
   }, []);
 
-  const handleExport = async () => {
-    const data = await dataManager.exportAll();
+  const showStatus = (type: 'success' | 'error', message: string) => {
+    setStatus({ type, message });
+    setTimeout(() => {
+      setStatus({ type: 'idle', message: '' });
+    }, 3000);
+  };
+
+  const downloadJson = (filename: string, data: string) => {
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `workspace_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleExportBusiness = async () => {
+    const data = await dataManager.exportBusinessData();
+    downloadJson(`business_backup_${new Date().toISOString().split('T')[0]}.json`, data);
+  };
+
+  const handleExportKnowledge = async () => {
+    const data = await dataManager.exportKnowledgeData();
+    downloadJson(`knowledge_backup_${new Date().toISOString().split('T')[0]}.json`, data);
+  };
+
+  const handleExportLocalSettings = async () => {
+    const data = await dataManager.exportLocalSettings();
+    downloadJson(`local_settings_${new Date().toISOString().split('T')[0]}.json`, data);
+  };
+
+  const createImportHandler = (
+    importer: (content: string) => Promise<boolean>,
+    successMessage: string
+  ) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (event) => {
       const content = event.target?.result as string;
-      const success = await dataManager.importAll(content);
+      const success = await importer(content);
       if (success) {
-        setImportStatus('success');
+        showStatus('success', successMessage);
         setTimeout(() => window.location.reload(), 1200);
       } else {
-        setImportStatus('error');
-        setTimeout(() => setImportStatus('idle'), 3000);
+        showStatus('error', '导入失败：文件格式不正确或与当前数据类型不匹配');
       }
     };
     reader.readAsText(file);
@@ -262,13 +289,18 @@ function DataManager() {
 
   const handleClear = async () => {
     try {
-      await dataManager.clearAll();
+      if (clearMode === 'all') {
+        await dataManager.clearAll();
+      } else if (clearMode === 'knowledge') {
+        await dataManager.clearKnowledgeData();
+      } else if (clearMode === 'local') {
+        dataManager.clearLocalSettings();
+      }
       setShowClearConfirm(false);
       window.location.reload();
     } catch {
       setShowClearConfirm(false);
-      setImportStatus('error');
-      setTimeout(() => setImportStatus('idle'), 3000);
+      showStatus('error', '清理失败，请稍后重试');
     }
   };
 
@@ -308,15 +340,15 @@ function DataManager() {
         </div>
       </div>
 
-      {/* 操作按钮 */}
       <div className="space-y-2">
-        <button onClick={handleExport} className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors text-left group">
+        <div className="text-sm font-semibold text-text-primary">业务数据（PostgreSQL）</div>
+        <button onClick={handleExportBusiness} className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors text-left group">
           <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
             <Download className="w-5 h-5 text-primary" />
           </div>
           <div>
-            <div className="text-sm font-medium text-text-primary">导出数据</div>
-            <div className="text-xs text-text-muted">备份任务、财务、知识库和设置</div>
+            <div className="text-sm font-medium text-text-primary">导出业务数据</div>
+            <div className="text-xs text-text-muted">导出服务端任务与财务快照</div>
           </div>
         </button>
 
@@ -325,28 +357,83 @@ function DataManager() {
             <Upload className="w-5 h-5 text-success" />
           </div>
           <div>
-            <div className="text-sm font-medium text-text-primary">导入数据</div>
-            <div className="text-xs text-text-muted">从备份文件恢复全部模块数据</div>
+            <div className="text-sm font-medium text-text-primary">导入业务数据</div>
+            <div className="text-xs text-text-muted">覆盖 PostgreSQL 中的任务与财务测试数据</div>
           </div>
-          <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importBusinessData, '业务数据导入成功，页面即将刷新...')} className="hidden" />
         </label>
       </div>
 
-      {/* 导入状态 */}
+      <div className="space-y-2">
+        <div className="text-sm font-semibold text-text-primary">知识库数据（本地 + 文件同步）</div>
+        <button onClick={handleExportKnowledge} className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors text-left group">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+            <Download className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <div className="text-sm font-medium text-text-primary">导出知识库</div>
+            <div className="text-xs text-text-muted">导出实体、文档、断言和知识结构</div>
+          </div>
+        </button>
+
+        <label className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors cursor-pointer text-left group">
+          <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
+            <Upload className="w-5 h-5 text-success" />
+          </div>
+          <div>
+            <div className="text-sm font-medium text-text-primary">导入知识库</div>
+            <div className="text-xs text-text-muted">覆盖当前知识库并同步到知识文件权威源</div>
+          </div>
+          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importKnowledgeData, '知识库导入成功，页面即将刷新...')} className="hidden" />
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        <div className="text-sm font-semibold text-text-primary">本地设置（浏览器缓存）</div>
+        <button onClick={handleExportLocalSettings} className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors text-left group">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+            <Download className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <div className="text-sm font-medium text-text-primary">导出本地设置</div>
+            <div className="text-xs text-text-muted">导出个人资料、主题、通知和 PIN 缓存</div>
+          </div>
+        </button>
+
+        <label className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors cursor-pointer text-left group">
+          <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
+            <Upload className="w-5 h-5 text-success" />
+          </div>
+          <div>
+            <div className="text-sm font-medium text-text-primary">导入本地设置</div>
+            <div className="text-xs text-text-muted">仅恢复当前浏览器的本地设置项</div>
+          </div>
+          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importLocalSettings, '本地设置导入成功，页面即将刷新...')} className="hidden" />
+        </label>
+      </div>
+
       <AnimatePresence>
-        {importStatus !== 'idle' && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`flex items-center gap-2 p-3 rounded-lg text-sm ${importStatus === 'success' ? 'bg-success/10 text-success border border-success/20' : 'bg-error/10 text-error border border-error/20'}`}>
-            {importStatus === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-            {importStatus === 'success' ? '导入成功，页面即将刷新...' : '导入失败：文件格式不正确'}
+        {status.type !== 'idle' && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className={`flex items-center gap-2 p-3 rounded-lg text-sm ${status.type === 'success' ? 'bg-success/10 text-success border border-success/20' : 'bg-error/10 text-error border border-error/20'}`}>
+            {status.type === 'success' ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+            {status.message}
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* 危险操作 */}
-      <div className="pt-4 border-t border-border-primary">
-        <button onClick={() => setShowClearConfirm(true)} className="text-sm text-text-muted hover:text-error transition-colors flex items-center gap-2">
+      <div className="pt-4 border-t border-border-primary space-y-2">
+        <button onClick={() => { setClearMode('all'); setShowClearConfirm(true); }} className="text-sm text-text-muted hover:text-error transition-colors flex items-center gap-2">
           <Trash2 className="w-4 h-4" />
-          清空所有数据
+          重置业务数据并清空本地缓存
+        </button>
+        <button onClick={() => { setClearMode('knowledge'); setShowClearConfirm(true); }} className="text-sm text-text-muted hover:text-error transition-colors flex items-center gap-2">
+          <Trash2 className="w-4 h-4" />
+          清空知识库
+        </button>
+        <button onClick={() => { setClearMode('local'); setShowClearConfirm(true); }} className="text-sm text-text-muted hover:text-error transition-colors flex items-center gap-2">
+          <Trash2 className="w-4 h-4" />
+          清空本地设置
         </button>
       </div>
 
@@ -361,7 +448,11 @@ function DataManager() {
                 </div>
                 <h3 className="text-lg font-semibold text-text-primary">确认清空</h3>
               </div>
-              <p className="text-text-secondary mb-5 text-sm">此操作将删除所有数据，不可恢复。建议先导出备份。</p>
+              <p className="text-text-secondary mb-5 text-sm">
+                {clearMode === 'all' && '此操作会重置 PostgreSQL 中的任务与财务测试数据，并清空本地知识库与设置缓存。'}
+                {clearMode === 'knowledge' && '此操作会清空当前知识库，并同步覆盖知识文件权威源。'}
+                {clearMode === 'local' && '此操作会清空当前浏览器中的个人资料、主题、通知和 PIN 设置。'}
+              </p>
               <div className="flex gap-3">
                 <button onClick={() => setShowClearConfirm(false)} className="btn btn-secondary btn-md flex-1">取消</button>
                 <button onClick={handleClear} className="btn btn-danger btn-md flex-1">确认清空</button>

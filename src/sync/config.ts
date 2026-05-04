@@ -21,6 +21,12 @@ export const SYNC_CONFIG = {
 
   /** 加载数据端点 */
   LOAD_ENDPOINT: '/api/load-data',
+
+  /** 知识库 metadata 端点 */
+  KNOWLEDGE_METADATA_ENDPOINT: '/api/knowledge/metadata',
+
+  /** 知识库 metadata 轮询间隔 */
+  KNOWLEDGE_POLL_INTERVAL: 3000,
 } as const;
 
 /**
@@ -40,8 +46,6 @@ export interface SyncResult {
 export interface LoadResult {
   success: boolean;
   data?: {
-    finance: unknown[];
-    tasks: unknown[];
     knowledge?: unknown;
   };
   error?: string;
@@ -56,6 +60,6 @@ export interface SyncStatusSnapshot {
 }
 
 /**
- * 同步数据类型
+ * 当前同步层仅承担知识库权威同步。
  */
-export type SyncDataType = 'finance' | 'tasks' | 'knowledge' | 'all';
+export type SyncDataType = 'knowledge';

@@ -8,10 +8,7 @@ const webpack = require('webpack');
 //
 // data/
 // ├── config.json          # 全局配置（主题、语言等）
-// ├── finance/
-// │   └── finance.json      # 财务记录数组
-// ├── tasks/
-// │   └── tasks.json        # 任务记录数组
+// ├── knowledge/           # 知识库文件权威源
 // └── backup/
 //     └── *.json            # 备份文件（按日期）
 // ─────────────────────────────────────────────────────────────
@@ -20,7 +17,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 
 // 确保目录结构存在
 function ensureDataDirs() {
-  const dirs = ['tasks', 'finance', 'backup', 'knowledge'];
+  const dirs = ['backup', 'knowledge'];
   dirs.forEach(d => {
     const dirPath = path.join(DATA_DIR, d);
     if (!fs.existsSync(dirPath)) {
@@ -33,24 +30,6 @@ function ensureDataDirs() {
 
 function writeSyncData(data) {
   ensureDataDirs();
-
-  // 1. 任务 → JSON
-  if (Array.isArray(data.tasks)) {
-    fs.writeFileSync(
-      path.join(DATA_DIR, 'tasks', 'tasks.json'),
-      JSON.stringify(data.tasks, null, 2),
-      'utf-8'
-    );
-  }
-
-  // 2. 务 → JSON
-  if (Array.isArray(data.finance)) {
-    fs.writeFileSync(
-      path.join(DATA_DIR, 'finance', 'finance.json'),
-      JSON.stringify(data.finance, null, 2),
-      'utf-8'
-    );
-  }
 
   if (data.knowledge && typeof data.knowledge === 'object') {
     const knowledgeDir = path.join(DATA_DIR, 'knowledge');
@@ -82,9 +61,6 @@ function readSyncData() {
   ensureDataDirs();
 
   const result = {
-    tasks: [],
-    finance: [],
-    config: {},
     knowledge: {
       context: {},
       ontology: {
@@ -97,36 +73,6 @@ function readSyncData() {
       updatedAt: 0,
     },
   };
-
-  // 读取任务
-  try {
-    const tasksPath = path.join(DATA_DIR, 'tasks', 'tasks.json');
-    if (fs.existsSync(tasksPath)) {
-      result.tasks = JSON.parse(fs.readFileSync(tasksPath, 'utf-8'));
-    }
-  } catch (e) {
-    console.warn('[Data] Failed to read tasks:', e.message);
-  }
-
-  // 读取财务
-  try {
-    const financePath = path.join(DATA_DIR, 'finance', 'finance.json');
-    if (fs.existsSync(financePath)) {
-      result.finance = JSON.parse(fs.readFileSync(financePath, 'utf-8'));
-    }
-  } catch (e) {
-    console.warn('[Data] Failed to read finance:', e.message);
-  }
-
-  // 读取全局配置
-  try {
-    const configPath = path.join(DATA_DIR, 'config.json');
-    if (fs.existsSync(configPath)) {
-      result.config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-  } catch (e) {
-    console.warn('[Data] Failed to read config:', e.message);
-  }
 
   try {
     const knowledgeDir = path.join(DATA_DIR, 'knowledge');
@@ -231,9 +177,10 @@ function startFileWatching(devServer) {
 
     // 通知客户端数据已更新
     devServer.io?.emit('data-changed', {
-      type: path.basename(path.dirname(filePath)),
+      dataType: path.basename(path.dirname(filePath)),
       file: path.basename(filePath),
       timestamp: now,
+      type: 'data-changed',
     });
   });
 
@@ -251,7 +198,7 @@ module.exports = (env, argv) => {
     entry: './src/index.tsx',
     output: {
       path: path.resolve(__dirname, 'dist'),
-      filename: isDev ? 'bundle.js' : '[name].[contenthash:8].js',
+      filename: isDev ? '[name].js' : '[name].[contenthash:8].js',
       chunkFilename: isDev ? '[name].bundle.js' : '[name].[contenthash:8].bundle.js',
       clean: true,
     },
@@ -294,6 +241,21 @@ module.exports = (env, argv) => {
     devServer: {
       port: 3266,
       allowedHosts: 'all',
+      proxy: [
+        {
+          context: (pathname) => {
+            if (!pathname.startsWith('/api/')) {
+              return false;
+            }
+
+            return ![
+              '/api/debug/knowledge-files',
+            ].some((prefix) => pathname.startsWith(prefix));
+          },
+          target: 'http://127.0.0.1:8787',
+          changeOrigin: true,
+        },
+      ],
       historyApiFallback: {
         index: '/index.html',
         rewrites: [
@@ -305,31 +267,6 @@ module.exports = (env, argv) => {
       setupMiddlewares(middlewares, devServer) {
         const app = devServer.app;
 
-        // API: 同步数据到文件
-        app.post('/api/sync-data', (req, res, next) => {
-          let body = '';
-          req.on('data', chunk => { body += chunk; });
-          req.on('end', () => {
-            try {
-              const data = JSON.parse(body);
-              writeSyncData(data);
-              res.json({ success: true, timestamp: Date.now() });
-            } catch (err) {
-              res.status(500).json({ success: false, error: err.message });
-            }
-          });
-        });
-
-        // API: 从文件加载数据
-        app.get('/api/load-data', (req, res, next) => {
-          try {
-            const data = readSyncData();
-            res.json({ success: true, data, timestamp: Date.now() });
-          } catch (err) {
-            res.status(500).json({ success: false, error: err.message });
-          }
-        });
-
         app.get('/api/debug/knowledge-files', (req, res, next) => {
           try {
             const files = readKnowledgeFileDebugInfo();
@@ -338,16 +275,6 @@ module.exports = (env, argv) => {
             res.status(500).json({ success: false, error: err.message });
           }
         });
-
-        
-
-        // 启动文件监听
-        try {
-          startFileWatching(devServer);
-        } catch (err) {
-          console.warn('[Data] File watching not available:', err.message);
-          console.warn('[Data] Install chokidar: npm install chokidar --save-dev');
-        }
 
         return middlewares;
       },

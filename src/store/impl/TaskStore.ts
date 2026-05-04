@@ -122,13 +122,21 @@ class TaskStoreClass extends BaseStore<Task, CreateTaskDTO, UpdateTaskDTO> {
     return tasks;
   }
 
+  hydrate(tasks: Task[], emit = false): void {
+    this.data = tasks.filter(t => this.validate(t));
+    this.saveToStorage(this.data);
+    if (emit) {
+      import('../../core/events').then(({ emitDataChange }) => {
+        emitDataChange('tasks');
+      });
+    }
+  }
+
   /**
    * 批量替换所有数据（用于导入）
    */
   replaceAll(tasks: Task[]): void {
-    this.data = tasks.filter(t => this.validate(t));
-    this.saveToStorage(this.data);
-    this.persist();
+    this.hydrate(tasks, true);
   }
 }
 

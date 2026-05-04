@@ -1,18 +1,97 @@
 import { financeStore, taskStore } from '../store/impl';
-import { generateId } from '../store/base/Store';
 import { subscribeDataChange } from '../core/events';
-import { isValidCreateFinanceDTO, isValidCreateTaskDTO, isValidFinanceRecord, isValidTask } from '../core/validation';
+import { AppError, ErrorCode, errorHandler } from '../core/errors';
+import { isValidFinanceRecord, isValidTask } from '../core/validation';
 import { FinanceRecord, Task } from '../core/types';
-import {
-  createKnowledgeRelation,
-  deleteKnowledgeEntity,
-  getKnowledgeDataset,
-  hydrateKnowledgeDataset,
-  upsertKnowledgeEntity,
-} from '../kb';
+import { getKnowledgeDataset, hydrateKnowledgeDataset } from '../kb';
 import { syncEngine } from '../sync';
 
 export type { FinanceRecord, Task };
+
+type ApiListResponse<T> = {
+  items: T[];
+  total: number;
+  source: string;
+};
+
+type BusinessSnapshot = {
+  version: number;
+  exportedAt: string;
+  tasks: Task[];
+  finance: FinanceRecord[];
+};
+
+type ApiErrorResponse = {
+  error?: string;
+  message?: string;
+};
+
+async function parseApiError(response: Response, context: string): Promise<AppError> {
+  let payload: ApiErrorResponse | null = null;
+
+  try {
+    payload = await response.json() as ApiErrorResponse;
+  } catch {
+    payload = null;
+  }
+
+  if (response.status === 400) {
+    return AppError.fromCode(
+      ErrorCode.VALIDATION_FAILED,
+      payload?.message || context
+    );
+  }
+
+  if (response.status === 404) {
+    return AppError.fromCode(
+      ErrorCode.ENTITY_NOT_FOUND,
+      payload?.message || context
+    );
+  }
+
+  return AppError.fromCode(
+    ErrorCode.NETWORK_ERROR,
+    payload?.message || `${context}: HTTP ${response.status}`
+  );
+}
+
+async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+
+  try {
+    response = await fetch(path, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
+      ...init,
+    });
+  } catch (error) {
+    throw errorHandler.handle(error, path);
+  }
+
+  if (!response.ok) {
+    throw errorHandler.handle(await parseApiError(response, path), path);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
+
+function scheduleKnowledgeRefresh(): void {
+  void syncEngine.loadKnowledgeFromServer()
+    .then(async (result) => {
+      if (result.success && result.data?.knowledge !== undefined) {
+        await hydrateKnowledgeDataset(result.data.knowledge);
+      }
+    })
+    .catch((error) => {
+      console.warn('[DB] Failed to refresh knowledge projection snapshot:', error);
+    });
+}
 
 function isValidId(id: string): boolean {
   return typeof id === 'string' && id.length >= 10 && /^[a-z0-9-]+$/i.test(id);
@@ -47,14 +126,6 @@ export function subscribe(listener: Listener): () => void {
 let storageError: Error | null = null;
 let storageQuotaExceeded = false;
 
-const WORKSPACE_ENTITY_ID = 'entity:workspace';
-const TASK_CLASS_ID = 'class:task';
-const FINANCE_CLASS_ID = 'class:finance-record';
-const TASK_RELATION_ID = 'relation:linkedTask';
-const FINANCE_RELATION_ID = 'relation:linkedFinanceRecord';
-const TASK_KNOWLEDGE_SOURCE = 'task-module';
-const FINANCE_KNOWLEDGE_SOURCE = 'finance-module';
-
 function cloneFinanceData(): Promise<FinanceRecord[]> {
   return financeStore.getAll();
 }
@@ -63,284 +134,12 @@ function cloneTaskData(): Promise<Task[]> {
   return taskStore.getAll();
 }
 
-function buildTaskKnowledgeEntityId(taskId: string): string {
-  return `entity:task-${taskId}`;
+async function hydrateFinanceCache(records: FinanceRecord[], emit = false): Promise<void> {
+  financeStore.hydrate(records, emit);
 }
 
-function buildFinanceKnowledgeEntityId(recordId: string): string {
-  return `entity:finance-${recordId}`;
-}
-
-function normalizeKnowledgeTags(values: Array<string | undefined | null>): string[] {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => value?.trim())
-        .filter((value): value is string => Boolean(value))
-    )
-  );
-}
-
-function buildTaskKnowledgeSummary(task: Task): string {
-  const parts = [task.completed ? '已完成' : '待处理', `优先级 ${task.priority}`];
-  if (task.dueDate) {
-    parts.push(`截止 ${task.dueDate}`);
-  }
-  return parts.join('，');
-}
-
-function buildFinanceKnowledgeSummary(record: FinanceRecord): string {
-  const typeLabel = record.type === 'income' ? '收入' : '支出';
-  const parts = [`${typeLabel} ${record.amount} 元`, `分类 ${record.category}`, `日期 ${record.date}`];
-  if (record.model) {
-    parts.push(`模型 ${record.model}`);
-  }
-  return parts.join('，');
-}
-
-function hasKnowledgeWorkspace(): boolean {
-  return getKnowledgeDataset().entities.some((entity) => entity.id === WORKSPACE_ENTITY_ID);
-}
-
-async function syncTaskKnowledgeEntity(task: Task): Promise<void> {
-  const entityId = buildTaskKnowledgeEntityId(task.id);
-  await upsertKnowledgeEntity({
-    id: entityId,
-    typeId: TASK_CLASS_ID,
-    title: task.title.trim(),
-    summary: buildTaskKnowledgeSummary(task),
-    tags: normalizeKnowledgeTags([
-      'task',
-      task.priority,
-      task.completed ? 'completed' : 'pending',
-    ]),
-    attributes: {
-      taskId: task.id,
-      completed: task.completed,
-      priority: task.priority,
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt,
-      ...(task.dueDate ? { dueDate: task.dueDate } : {}),
-    },
-    source: TASK_KNOWLEDGE_SOURCE,
-    confidence: 1,
-  });
-
-  if (!hasKnowledgeWorkspace()) {
-    return;
-  }
-
-  await createKnowledgeRelation({
-    subjectId: WORKSPACE_ENTITY_ID,
-    predicateId: TASK_RELATION_ID,
-    targetId: entityId,
-    source: TASK_KNOWLEDGE_SOURCE,
-    confidence: 1,
-  });
-}
-
-async function syncFinanceKnowledgeEntity(record: FinanceRecord): Promise<void> {
-  const entityId = buildFinanceKnowledgeEntityId(record.id);
-  const typeLabel = record.type === 'income' ? '收入' : '支出';
-  await upsertKnowledgeEntity({
-    id: entityId,
-    typeId: FINANCE_CLASS_ID,
-    title: `${typeLabel} ${record.description.trim() || record.category}`,
-    summary: buildFinanceKnowledgeSummary(record),
-    tags: normalizeKnowledgeTags(['finance', record.type, record.category]),
-    attributes: {
-      financeRecordId: record.id,
-      type: record.type,
-      amount: record.amount,
-      category: record.category,
-      date: record.date,
-      createdAt: record.createdAt,
-      updatedAt: record.updatedAt,
-      ...(record.model ? { model: record.model } : {}),
-    },
-    source: FINANCE_KNOWLEDGE_SOURCE,
-    confidence: 1,
-  });
-
-  if (!hasKnowledgeWorkspace()) {
-    return;
-  }
-
-  await createKnowledgeRelation({
-    subjectId: WORKSPACE_ENTITY_ID,
-    predicateId: FINANCE_RELATION_ID,
-    targetId: entityId,
-    source: FINANCE_KNOWLEDGE_SOURCE,
-    confidence: 1,
-  });
-}
-
-async function deleteKnowledgeEntityIfPresent(id: string): Promise<void> {
-  const exists = getKnowledgeDataset().entities.some((entity) => entity.id === id);
-  if (!exists) {
-    return;
-  }
-
-  await deleteKnowledgeEntity(id);
-}
-
-async function deleteTaskKnowledgeEntity(taskId: string): Promise<void> {
-  await deleteKnowledgeEntityIfPresent(buildTaskKnowledgeEntityId(taskId));
-}
-
-async function deleteFinanceKnowledgeEntity(recordId: string): Promise<void> {
-  await deleteKnowledgeEntityIfPresent(buildFinanceKnowledgeEntityId(recordId));
-}
-
-function logKnowledgeSyncError(scope: string, error: unknown): void {
-  console.warn(
-    `[DB] ${scope} knowledge sync failed, primary data preserved:`,
-    error
-  );
-}
-
-function scheduleKnowledgeSync(scope: string, action: () => Promise<void>): void {
-  void action().catch((error) => {
-    logKnowledgeSyncError(scope, error);
-  });
-}
-
-async function runKnowledgeSyncSafely(scope: string, action: () => Promise<void>): Promise<void> {
-  try {
-    await action();
-  } catch (error) {
-    logKnowledgeSyncError(scope, error);
-  }
-}
-
-async function rebuildModuleKnowledgeMappings(
-  financeRecords: FinanceRecord[],
-  tasks: Task[]
-): Promise<void> {
-  const dataset = getKnowledgeDataset();
-  const nextTaskIds = new Set(tasks.map((task) => buildTaskKnowledgeEntityId(task.id)));
-  const nextFinanceIds = new Set(
-    financeRecords.map((record) => buildFinanceKnowledgeEntityId(record.id))
-  );
-
-  const staleTaskEntityIds = dataset.entities
-    .filter((entity) => entity.typeId === TASK_CLASS_ID && entity.source === TASK_KNOWLEDGE_SOURCE)
-    .map((entity) => entity.id)
-    .filter((id) => !nextTaskIds.has(id));
-
-  const staleFinanceEntityIds = dataset.entities
-    .filter(
-      (entity) => entity.typeId === FINANCE_CLASS_ID && entity.source === FINANCE_KNOWLEDGE_SOURCE
-    )
-    .map((entity) => entity.id)
-    .filter((id) => !nextFinanceIds.has(id));
-
-  for (const entityId of staleTaskEntityIds) {
-    await deleteKnowledgeEntityIfPresent(entityId);
-  }
-
-  for (const entityId of staleFinanceEntityIds) {
-    await deleteKnowledgeEntityIfPresent(entityId);
-  }
-
-  for (const task of tasks) {
-    await syncTaskKnowledgeEntity(task);
-  }
-
-  for (const record of financeRecords) {
-    await syncFinanceKnowledgeEntity(record);
-  }
-}
-
-function buildFinanceRecord(record: Omit<FinanceRecord, 'id'>): FinanceRecord {
-  if (!isValidCreateFinanceDTO(record)) {
-    throw new Error('Failed to create finance record');
-  }
-
-  const entity: FinanceRecord = {
-    ...record,
-    id: generateId(),
-    createdAt: record.createdAt ?? Date.now(),
-    updatedAt: record.updatedAt ?? Date.now(),
-  };
-
-  if (!isValidFinanceRecord(entity)) {
-    throw new Error('Failed to create finance record');
-  }
-
-  return entity;
-}
-
-function buildTaskRecord(record: Omit<Task, 'id'>): Task {
-  const normalizedRecord = {
-    ...record,
-    completed: record.completed ?? false,
-    priority: record.priority ?? 'medium',
-    dueDate: record.dueDate || undefined,
-  };
-
-  if (!isValidCreateTaskDTO(normalizedRecord)) {
-    throw new Error('Failed to create task');
-  }
-
-  const entity: Task = {
-    ...normalizedRecord,
-    id: generateId(),
-    createdAt: record.createdAt ?? Date.now(),
-    updatedAt: record.updatedAt ?? Date.now(),
-  };
-
-  if (!isValidTask(entity)) {
-    throw new Error('Failed to create task');
-  }
-
-  return entity;
-}
-
-async function runFinanceMutation<T>(
-  operation: (snapshot: FinanceRecord[]) => { next: FinanceRecord[]; result: T },
-  afterCommit?: (context: { previous: FinanceRecord[]; next: FinanceRecord[]; result: T }) => Promise<void> | void
-): Promise<T> {
-  const previous = await cloneFinanceData();
-  const { next, result } = operation(previous);
-
-  financeStore.replaceAll(next);
-  if (afterCommit) {
-    scheduleKnowledgeSync('Finance mutation', async () => {
-      await afterCommit({ previous, next, result });
-    });
-  }
-
-  void syncEngine.syncNow('finance').then((syncResult) => {
-    if (!syncResult.success) {
-      console.warn('[DB] Finance sync failed, local data preserved:', syncResult.error);
-    }
-  });
-
-  return result;
-}
-
-async function runTaskMutation<T>(
-  operation: (snapshot: Task[]) => { next: Task[]; result: T },
-  afterCommit?: (context: { previous: Task[]; next: Task[]; result: T }) => Promise<void> | void
-): Promise<T> {
-  const previous = await cloneTaskData();
-  const { next, result } = operation(previous);
-
-  taskStore.replaceAll(next);
-  if (afterCommit) {
-    scheduleKnowledgeSync('Task mutation', async () => {
-      await afterCommit({ previous, next, result });
-    });
-  }
-
-  void syncEngine.syncNow('tasks').then((syncResult) => {
-    if (!syncResult.success) {
-      console.warn('[DB] Task sync failed, local data preserved:', syncResult.error);
-    }
-  });
-
-  return result;
+async function hydrateTaskCache(tasks: Task[], emit = false): Promise<void> {
+  taskStore.hydrate(tasks, emit);
 }
 
 export function getStorageError(): Error | null {
@@ -364,269 +163,373 @@ export function getStorageUsage(): { used: number; available: boolean } {
 
 export const financeDB = {
   async getAll(): Promise<FinanceRecord[]> {
-    const records = await financeStore.getAll();
-    return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const response = await requestApi<ApiListResponse<FinanceRecord>>('/api/finance');
+    const records = response.items
+      .filter(isValidFinanceRecord)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    await hydrateFinanceCache(records, false);
+    return records;
   },
 
   async add(record: Omit<FinanceRecord, 'id'>): Promise<FinanceRecord> {
-    return runFinanceMutation(
-      (snapshot) => {
-        const created = buildFinanceRecord(record);
-        return {
-          next: [created, ...snapshot],
-          result: created,
-        };
-      },
-      async ({ result }) => {
-        await syncFinanceKnowledgeEntity(result);
-      }
-    );
+    const created = await requestApi<FinanceRecord>('/api/finance', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: record.type,
+        amount: Number(record.amount),
+        description: record.description,
+        category: record.category,
+        date: record.date,
+        model: record.model || undefined,
+      }),
+    });
+
+    if (!isValidFinanceRecord(created)) {
+      throw errorHandler.handle(
+        AppError.fromCode(ErrorCode.INVALID_DATA, 'Invalid finance payload from server'),
+        'finance.add'
+      );
+    }
+
+    const snapshot = await financeStore.getAll();
+    const next = [created, ...snapshot.filter((item) => item.id !== created.id)]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    await hydrateFinanceCache(next, true);
+    scheduleKnowledgeRefresh();
+    return created;
   },
 
   async update(id: string, updates: Partial<FinanceRecord>): Promise<void> {
-    await runFinanceMutation(
-      (snapshot) => {
-        const index = snapshot.findIndex((item) => item.id === id);
-        if (index === -1) {
-          throw new Error('Failed to update finance record');
-        }
+    const payload: Record<string, unknown> = {};
+    if (updates.type !== undefined) payload.type = updates.type;
+    if (updates.amount !== undefined) payload.amount = Number(updates.amount);
+    if (updates.description !== undefined) payload.description = updates.description;
+    if (updates.category !== undefined) payload.category = updates.category;
+    if (updates.date !== undefined) payload.date = updates.date;
+    if (updates.model !== undefined) payload.model = updates.model;
 
-        const updated: FinanceRecord = {
-          ...snapshot[index],
-          ...updates,
-          id,
-          updatedAt: Date.now(),
-        };
+    const updated = await requestApi<FinanceRecord>(`/api/finance/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
 
-        if (!isValidFinanceRecord(updated)) {
-          throw new Error('Failed to update finance record');
-        }
+    if (!isValidFinanceRecord(updated)) {
+      throw errorHandler.handle(
+        AppError.fromCode(ErrorCode.INVALID_DATA, 'Invalid finance payload from server'),
+        'finance.update'
+      );
+    }
 
-        const next = [...snapshot];
-        next[index] = updated;
-        return { next, result: undefined };
-      },
-      async ({ next }) => {
-        const updated = next.find((item) => item.id === id);
-        if (updated) {
-          await syncFinanceKnowledgeEntity(updated);
-        }
-      }
-    );
+    const snapshot = await financeStore.getAll();
+    const next = snapshot
+      .map((item) => (item.id === id ? updated : item))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    await hydrateFinanceCache(next, true);
+    scheduleKnowledgeRefresh();
   },
 
   async delete(id: string): Promise<void> {
-    await runFinanceMutation(
-      (snapshot) => {
-        const next = snapshot.filter((item) => item.id !== id);
-        if (next.length === snapshot.length) {
-          throw new Error('Failed to delete finance record');
-        }
+    await requestApi<void>(`/api/finance/${id}`, {
+      method: 'DELETE',
+    });
 
-        return { next, result: undefined };
-      },
-      async () => {
-        await deleteFinanceKnowledgeEntity(id);
-      }
-    );
+    const snapshot = await financeStore.getAll();
+    const next = snapshot.filter((item) => item.id !== id);
+    await hydrateFinanceCache(next, true);
+    scheduleKnowledgeRefresh();
   },
 
   async getStats() {
-    return financeStore.getStats();
+    const records = await financeStore.getAll();
+    const income = records
+      .filter(r => r.type === 'income')
+      .reduce((sum, r) => sum + r.amount, 0);
+    const expense = records
+      .filter(r => r.type === 'expense')
+      .reduce((sum, r) => sum + r.amount, 0);
+
+    return {
+      income,
+      expense,
+      profit: income - expense,
+    };
   },
 
   async getModelStats(): Promise<Record<string, { expense: number; income: number }>> {
-    return financeStore.getModelStats();
+    const records = await financeStore.getAll();
+    const stats: Record<string, { expense: number; income: number }> = {};
+
+    records.forEach((record) => {
+      const model = record.model || '其他';
+      if (!stats[model]) {
+        stats[model] = { expense: 0, income: 0 };
+      }
+
+      if (record.type === 'expense') {
+        stats[model].expense += record.amount;
+      } else {
+        stats[model].income += record.amount;
+      }
+    });
+
+    return stats;
   }
 };
 
 export const taskDB = {
   async getAll(): Promise<Task[]> {
-    const records = await taskStore.getAll();
-    return records.sort((a, b) => b.createdAt - a.createdAt);
+    const response = await requestApi<ApiListResponse<Task>>('/api/tasks');
+    const tasks = response.items
+      .filter(isValidTask)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    await hydrateTaskCache(tasks, false);
+    return tasks;
   },
 
   async add(record: Omit<Task, 'id'>): Promise<Task> {
-    return runTaskMutation(
-      (snapshot) => {
-        const created = buildTaskRecord(record);
-        return {
-          next: [created, ...snapshot],
-          result: created,
-        };
-      },
-      async ({ result }) => {
-        await syncTaskKnowledgeEntity(result);
-      }
-    );
+    const created = await requestApi<Task>('/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: record.title,
+        completed: record.completed ?? false,
+        priority: record.priority ?? 'medium',
+        dueDate: record.dueDate,
+      }),
+    });
+
+    if (!isValidTask(created)) {
+      throw errorHandler.handle(
+        AppError.fromCode(ErrorCode.INVALID_DATA, 'Invalid task payload from server'),
+        'task.add'
+      );
+    }
+
+    const snapshot = await taskStore.getAll();
+    const next = [created, ...snapshot.filter((item) => item.id !== created.id)]
+      .sort((a, b) => b.createdAt - a.createdAt);
+    await hydrateTaskCache(next, true);
+    scheduleKnowledgeRefresh();
+    return created;
   },
 
   async update(id: string, updates: Partial<Task>): Promise<void> {
-    await runTaskMutation(
-      (snapshot) => {
-        const index = snapshot.findIndex((item) => item.id === id);
-        if (index === -1) {
-          throw new Error('Failed to update task');
-        }
+    const payload: Record<string, unknown> = {};
+    if (updates.title !== undefined) payload.title = updates.title;
+    if (updates.completed !== undefined) payload.completed = updates.completed;
+    if (updates.priority !== undefined) payload.priority = updates.priority;
+    if (updates.dueDate !== undefined) payload.dueDate = updates.dueDate === '' ? null : updates.dueDate;
 
-        const updated: Task = {
-          ...snapshot[index],
-          ...updates,
-          id,
-          dueDate: updates.dueDate === '' ? undefined : (updates.dueDate ?? snapshot[index].dueDate),
-          updatedAt: Date.now(),
-        };
+    const updated = await requestApi<Task>(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
 
-        if (!isValidTask(updated)) {
-          throw new Error('Failed to update task');
-        }
+    if (!isValidTask(updated)) {
+      throw errorHandler.handle(
+        AppError.fromCode(ErrorCode.INVALID_DATA, 'Invalid task payload from server'),
+        'task.update'
+      );
+    }
 
-        const next = [...snapshot];
-        next[index] = updated;
-        return { next, result: undefined };
-      },
-      async ({ next }) => {
-        const updated = next.find((item) => item.id === id);
-        if (updated) {
-          await syncTaskKnowledgeEntity(updated);
-        }
-      }
-    );
+    const snapshot = await taskStore.getAll();
+    const next = snapshot
+      .map((item) => (item.id === id ? updated : item))
+      .sort((a, b) => b.createdAt - a.createdAt);
+    await hydrateTaskCache(next, true);
+    scheduleKnowledgeRefresh();
   },
 
   async delete(id: string): Promise<void> {
-    await runTaskMutation(
-      (snapshot) => {
-        const next = snapshot.filter((item) => item.id !== id);
-        if (next.length === snapshot.length) {
-          throw new Error('Failed to delete task');
-        }
+    await requestApi<void>(`/api/tasks/${id}`, {
+      method: 'DELETE',
+    });
 
-        return { next, result: undefined };
-      },
-      async () => {
-        await deleteTaskKnowledgeEntity(id);
-      }
-    );
+    const snapshot = await taskStore.getAll();
+    const next = snapshot.filter((item) => item.id !== id);
+    await hydrateTaskCache(next, true);
+    scheduleKnowledgeRefresh();
   },
 
   async toggle(id: string): Promise<void> {
-    await runTaskMutation(
-      (snapshot) => {
-        const index = snapshot.findIndex((item) => item.id === id);
-        if (index === -1) {
-          throw new Error('Failed to toggle task');
-        }
+    const snapshot = await taskStore.getAll();
+    const task = snapshot.find((item) => item.id === id);
+    if (!task) {
+      throw errorHandler.handle(
+        AppError.fromCode(ErrorCode.ENTITY_NOT_FOUND, id),
+        'task.toggle'
+      );
+    }
 
-        const updated: Task = {
-          ...snapshot[index],
-          completed: !snapshot[index].completed,
-          updatedAt: Date.now(),
-        };
+    const updated = await requestApi<Task>(`/api/tasks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        completed: !task.completed,
+      }),
+    });
 
-        if (!isValidTask(updated)) {
-          throw new Error('Failed to toggle task');
-        }
+    if (!isValidTask(updated)) {
+      throw errorHandler.handle(
+        AppError.fromCode(ErrorCode.INVALID_DATA, 'Invalid task payload from server'),
+        'task.toggle'
+      );
+    }
 
-        const next = [...snapshot];
-        next[index] = updated;
-        return { next, result: undefined };
-      },
-      async ({ next }) => {
-        const updated = next.find((item) => item.id === id);
-        if (updated) {
-          await syncTaskKnowledgeEntity(updated);
-        }
-      }
-    );
+    const next = snapshot
+      .map((item) => (item.id === id ? updated : item))
+      .sort((a, b) => b.createdAt - a.createdAt);
+    await hydrateTaskCache(next, true);
+    scheduleKnowledgeRefresh();
   },
 
   async getStats() {
-    return taskStore.getStats();
+    const tasks = await taskStore.getAll();
+    const total = tasks.length;
+    const completed = tasks.filter(t => t.completed).length;
+
+    return {
+      total,
+      completed,
+      pending: total - completed,
+    };
   }
 };
 
 export const dataManager = {
-  async exportAll(): Promise<string> {
-    const [finance, tasks] = await Promise.all([
-      financeStore.getAll(),
-      taskStore.getAll(),
-    ]);
-    const knowledge = getKnowledgeDataset();
+  async exportBusinessData(): Promise<string> {
+    const snapshot = await requestApi<BusinessSnapshot>('/api/maintenance/business-snapshot');
+    return JSON.stringify(snapshot, null, 2);
+  },
 
-    const data = {
-      version: 3,
-      finance,
-      tasks,
+  async exportKnowledgeData(): Promise<string> {
+    const result = await requestApi<{
+      success: boolean;
+      data?: {
+        knowledge?: unknown;
+      };
+    }>('/api/load-data');
+
+    const knowledge = result.data?.knowledge !== undefined
+      ? result.data.knowledge
+      : getKnowledgeDataset();
+
+    return JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
       knowledge,
+    }, null, 2);
+  },
+
+  async exportLocalSettings(): Promise<string> {
+    return JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
       userSettings: {
         profile: localStorage.getItem('user_profile'),
         theme: localStorage.getItem('theme'),
         notificationSettings: localStorage.getItem('notification_settings'),
         securityPin: localStorage.getItem('security_pin_hashed'),
       },
-      exportTime: new Date().toISOString(),
-    };
-
-    return JSON.stringify(data, null, 2);
+    }, null, 2);
   },
 
-  async importAll(jsonString: string): Promise<boolean> {
+  async importBusinessData(jsonString: string): Promise<boolean> {
     try {
       const data = JSON.parse(jsonString);
-      const nextFinance = Array.isArray(data.finance)
-        ? data.finance.filter((record: any): record is FinanceRecord =>
-            isValidId(record.id) &&
-            (record.type === 'income' || record.type === 'expense') &&
-            typeof record.amount === 'number'
-          )
-        : [];
-
-      const nextTasks = Array.isArray(data.tasks)
-        ? data.tasks.filter((record: any): record is Task =>
-            isValidId(record.id) &&
-            typeof record.title === 'string' &&
-            typeof record.completed === 'boolean'
-          )
-        : [];
-
-      const baseKnowledge = data.knowledge !== undefined ? data.knowledge : getKnowledgeDataset();
-      financeStore.replaceAll(nextFinance);
-      taskStore.replaceAll(nextTasks);
-      await hydrateKnowledgeDataset(baseKnowledge);
-      await runKnowledgeSyncSafely('Import', async () => {
-        await rebuildModuleKnowledgeMappings(nextFinance, nextTasks);
+      await requestApi('/api/maintenance/business-snapshot', {
+        method: 'POST',
+        body: JSON.stringify(data),
       });
-      const syncResult = await syncEngine.syncNow('all');
-      if (!syncResult.success) {
-        throw new Error(syncResult.error || 'Unknown sync error');
-      }
 
-      if (data.userSettings) {
-        if (data.userSettings.profile) {
-          localStorage.setItem('user_profile', data.userSettings.profile);
-        }
-        if (data.userSettings.theme) {
-          localStorage.setItem('theme', data.userSettings.theme);
-        }
-        if (data.userSettings.notificationSettings) {
-          localStorage.setItem('notification_settings', data.userSettings.notificationSettings);
-        }
-        if (data.userSettings.securityPin) {
-          localStorage.setItem('security_pin_hashed', data.userSettings.securityPin);
-        }
-      }
+      await Promise.all([
+        financeDB.getAll(),
+        taskDB.getAll(),
+      ]);
+      scheduleKnowledgeRefresh();
 
       return true;
     } catch (error) {
-      console.error('[DB] Import failed:', error);
+      console.error('[DB] Business import failed:', error);
       return false;
     }
   },
 
+  async importKnowledgeData(jsonString: string): Promise<boolean> {
+    try {
+      const data = JSON.parse(jsonString);
+      const knowledge = data.knowledge !== undefined ? data.knowledge : data;
+      await hydrateKnowledgeDataset(knowledge);
+      const syncResult = await syncEngine.syncNow();
+      if (!syncResult.success) {
+        throw new Error(syncResult.error || 'Unknown sync error');
+      }
+      return true;
+    } catch (error) {
+      console.error('[DB] Knowledge import failed:', error);
+      return false;
+    }
+  },
+
+  async importLocalSettings(jsonString: string): Promise<boolean> {
+    try {
+      const data = JSON.parse(jsonString);
+      const settings = data.userSettings && typeof data.userSettings === 'object'
+        ? data.userSettings as Record<string, unknown>
+        : data;
+
+      if (typeof settings.profile === 'string') {
+        localStorage.setItem('user_profile', settings.profile);
+      }
+      if (typeof settings.theme === 'string') {
+        localStorage.setItem('theme', settings.theme);
+      }
+      if (typeof settings.notificationSettings === 'string') {
+        localStorage.setItem('notification_settings', settings.notificationSettings);
+      }
+      if (typeof settings.securityPin === 'string') {
+        localStorage.setItem('security_pin_hashed', settings.securityPin);
+      }
+
+      return true;
+    } catch (error) {
+      console.error('[DB] Local settings import failed:', error);
+      return false;
+    }
+  },
+
+  async clearKnowledgeData(): Promise<void> {
+    await hydrateKnowledgeDataset({
+      ...getKnowledgeDataset(),
+      entities: [],
+      documents: [],
+      assertions: [],
+      updatedAt: Date.now(),
+    });
+
+    const syncResult = await syncEngine.syncNow();
+    if (!syncResult.success) {
+      throw new Error(syncResult.error || 'Unknown clear error');
+    }
+  },
+
+  clearLocalSettings(): void {
+    localStorage.removeItem('user_profile');
+    localStorage.removeItem('theme');
+    localStorage.removeItem('notification_settings');
+    localStorage.removeItem('security_pin_hashed');
+  },
+
   async clearAll(): Promise<void> {
-    financeStore.replaceAll([]);
-    taskStore.replaceAll([]);
+    await requestApi<{ success: boolean; resetAt: string }>('/api/maintenance/reset', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+
+    await Promise.all([
+      financeDB.getAll(),
+      taskDB.getAll(),
+    ]);
+    scheduleKnowledgeRefresh();
+
     await hydrateKnowledgeDataset({
       ...getKnowledgeDataset(),
       entities: [],
@@ -639,7 +542,7 @@ export const dataManager = {
     localStorage.removeItem('notification_settings');
     localStorage.removeItem('security_pin_hashed');
 
-    const syncResult = await syncEngine.syncNow('all');
+    const syncResult = await syncEngine.syncNow();
     if (!syncResult.success) {
       throw new Error(syncResult.error || 'Unknown clear error');
     }
@@ -678,11 +581,24 @@ export const dataManager = {
   },
 
   async triggerSync(): Promise<{ success: boolean; error?: string }> {
-    const result = await syncEngine.syncNow('all');
-    return result.success
-      ? { success: true }
-      : { success: false, error: result.error || 'Unknown sync error' };
-  }
+    try {
+      await Promise.all([
+        financeDB.getAll(),
+        taskDB.getAll(),
+      ]);
+      scheduleKnowledgeRefresh();
+      const result = await syncEngine.syncNow();
+      return result.success
+        ? { success: true }
+        : { success: false, error: result.error || 'Unknown sync error' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown sync error',
+      };
+    }
+  },
+
 };
 
 export const initDB = async () => true;
