@@ -1,10 +1,15 @@
 import { getKnowledgeDataset, hydrateKnowledgeDataset } from './store';
 import { syncEngine } from '../sync';
+import { fetchWithAuth } from '../lib/auth';
 import {
   KnowledgeAssertion,
   KnowledgeDataset,
   KnowledgeDocument,
   KnowledgeEntity,
+  KnowledgeSearchFilters,
+  KnowledgeSearchHit,
+  OntologyClass,
+  OntologyRelation,
 } from './types';
 
 interface LoadDataResponse {
@@ -33,6 +38,35 @@ type AssertionListResponse = {
   source: string;
 };
 
+type OntologyClassListResponse = {
+  items: OntologyClass[];
+  total: number;
+  source: string;
+};
+
+type OntologyRelationListResponse = {
+  items: OntologyRelation[];
+  total: number;
+  source: string;
+};
+
+interface RebuildKnowledgeProjectionsResult {
+  queuedTaskProjections: number;
+  queuedFinanceProjections: number;
+  queuedAt: string;
+}
+
+type RebuildKnowledgeProjectionsResponse = {
+  data: RebuildKnowledgeProjectionsResult;
+  source: string;
+};
+
+type KnowledgeSearchResponse = {
+  items: KnowledgeSearchHit[];
+  total: number;
+  source: string;
+};
+
 export async function loadKnowledgeDatasetFromServer(): Promise<KnowledgeDataset> {
   const payload = (await syncEngine.loadKnowledgeFromServer()) as LoadDataResponse;
   if (!payload.success) {
@@ -43,12 +77,16 @@ export async function loadKnowledgeDatasetFromServer(): Promise<KnowledgeDataset
 }
 
 async function requestKnowledgeApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
+  const headers = new Headers(init?.headers);
+  const hasBody = init?.body !== undefined && init?.body !== null;
+
+  if (hasBody && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const response = await fetchWithAuth(path, {
     ...init,
+    headers,
   });
 
   if (!response.ok) {
@@ -147,6 +185,53 @@ export interface UpsertKnowledgeAssertionInput {
   evidenceDocumentIds?: string[];
   source?: string;
   confidence?: number;
+}
+
+export interface UpsertOntologyClassInput {
+  id: string;
+  label: string;
+  description?: string;
+  parentIds?: string[];
+}
+
+export interface UpsertOntologyRelationInput {
+  id: string;
+  label: string;
+  description?: string;
+  inverseId?: string;
+  symmetric?: boolean;
+  transitive?: boolean;
+}
+
+export async function searchKnowledgeRemote(
+  query: string,
+  filters: KnowledgeSearchFilters = {}
+): Promise<KnowledgeSearchHit[]> {
+  const params = new URLSearchParams();
+  if (query.trim()) {
+    params.set('query', query.trim());
+  }
+  if (filters.typeIds && filters.typeIds.length > 0) {
+    for (const typeId of filters.typeIds) {
+      params.append('typeIds', typeId);
+    }
+  }
+  if (filters.tags && filters.tags.length > 0) {
+    for (const tag of filters.tags) {
+      params.append('tags', tag);
+    }
+  }
+  if (filters.includeDocuments !== undefined) {
+    params.set('includeDocuments', String(filters.includeDocuments));
+  }
+  if (filters.limit !== undefined) {
+    params.set('limit', String(filters.limit));
+  }
+
+  const response = await requestKnowledgeApi<KnowledgeSearchResponse>(
+    `/api/knowledge/search?${params.toString()}`
+  );
+  return response.items;
 }
 
 function markEntityUpdated(entity: KnowledgeEntity, updatedAt: number): KnowledgeEntity {
@@ -259,4 +344,94 @@ export async function createKnowledgeRelation(
 
   await refreshKnowledgeDataset();
   return assertion;
+}
+
+export async function rebuildKnowledgeProjections(): Promise<RebuildKnowledgeProjectionsResult> {
+  const response = await requestKnowledgeApi<RebuildKnowledgeProjectionsResponse>(
+    '/api/knowledge/rebuild/projections',
+    {
+      method: 'POST',
+    }
+  );
+
+  await refreshKnowledgeDataset();
+  return response.data;
+}
+
+export async function listOntologyClasses(): Promise<OntologyClass[]> {
+  const response = await requestKnowledgeApi<OntologyClassListResponse>('/api/knowledge/ontology/classes');
+  return response.items;
+}
+
+export async function listOntologyRelations(): Promise<OntologyRelation[]> {
+  const response = await requestKnowledgeApi<OntologyRelationListResponse>('/api/knowledge/ontology/relations');
+  return response.items;
+}
+
+export async function upsertOntologyClass(
+  input: UpsertOntologyClassInput,
+  options?: { existingId?: string }
+): Promise<OntologyClass> {
+  const item = options?.existingId
+    ? await requestKnowledgeApi<OntologyClass>(
+        `/api/knowledge/ontology/classes/${encodeURIComponent(options.existingId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            label: input.label,
+            description: input.description,
+            parentIds: input.parentIds,
+          }),
+        }
+      )
+    : await requestKnowledgeApi<OntologyClass>('/api/knowledge/ontology/classes', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+
+  await refreshKnowledgeDataset();
+  return item;
+}
+
+export async function deleteOntologyClass(id: string): Promise<void> {
+  await requestKnowledgeApi<void>(`/api/knowledge/ontology/classes/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
+  await refreshKnowledgeDataset();
+}
+
+export async function upsertOntologyRelation(
+  input: UpsertOntologyRelationInput,
+  options?: { existingId?: string }
+): Promise<OntologyRelation> {
+  const item = options?.existingId
+    ? await requestKnowledgeApi<OntologyRelation>(
+        `/api/knowledge/ontology/relations/${encodeURIComponent(options.existingId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            label: input.label,
+            description: input.description,
+            inverseId: input.inverseId ?? null,
+            symmetric: input.symmetric,
+            transitive: input.transitive,
+          }),
+        }
+      )
+    : await requestKnowledgeApi<OntologyRelation>('/api/knowledge/ontology/relations', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      });
+
+  await refreshKnowledgeDataset();
+  return item;
+}
+
+export async function deleteOntologyRelation(id: string): Promise<void> {
+  await requestKnowledgeApi<void>(`/api/knowledge/ontology/relations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
+  await refreshKnowledgeDataset();
 }

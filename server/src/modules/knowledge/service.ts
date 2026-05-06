@@ -1,21 +1,32 @@
 import {
   createKnowledgeRelationStructured,
+  deleteOntologyClass,
+  deleteOntologyRelation,
   deleteKnowledgeAssertionStructured,
   deleteKnowledgeDocumentStructured,
   deleteKnowledgeEntityStructured,
   deleteKnowledgeRelationStructured,
   getKnowledgeDatasetRecord,
   getKnowledgeMetadataRecord,
+  listOntologyClasses,
+  listOntologyRelations,
   listKnowledgeAssertionRecords,
   listKnowledgeDocumentRecords,
   listKnowledgeEntityRecords,
+  searchKnowledgeRecords,
+  rebuildKnowledgeProjections,
   replaceKnowledgeDataset,
+  upsertOntologyClass,
+  upsertOntologyRelation,
   upsertKnowledgeAssertionStructured,
   upsertKnowledgeDocumentStructured,
   upsertKnowledgeEntityStructured,
 } from './repository';
 import type {
   CreateKnowledgeRelationInput,
+  KnowledgeSearchQueryInput,
+  UpsertOntologyClassInput,
+  UpsertOntologyRelationInput,
   UpsertKnowledgeAssertionInput,
   UpsertKnowledgeDocumentInput,
   UpsertKnowledgeEntityInput,
@@ -31,28 +42,6 @@ export async function getKnowledgeMetadata() {
 
 export async function replaceKnowledgeAuthorityDataset(raw: unknown) {
   return replaceKnowledgeDataset(raw);
-}
-
-export async function loadKnowledgeSyncPayload() {
-  const knowledge = await getKnowledgeDatasetRecord();
-  return {
-    success: true,
-    data: {
-      knowledge,
-    },
-    timestamp: Date.now(),
-  };
-}
-
-export async function replaceKnowledgeSyncPayload(raw: unknown) {
-  const knowledge = await replaceKnowledgeDataset(raw);
-  return {
-    success: true,
-    data: {
-      knowledge,
-    },
-    timestamp: Date.now(),
-  };
 }
 
 export async function listKnowledgeEntities() {
@@ -81,6 +70,38 @@ export async function deleteKnowledgeDocumentRecord(id: string) {
 
 export async function listKnowledgeAssertions() {
   return listKnowledgeAssertionRecords();
+}
+
+export async function searchKnowledge(input: KnowledgeSearchQueryInput) {
+  return searchKnowledgeRecords(input);
+}
+
+export async function listKnowledgeOntologyClasses() {
+  return listOntologyClasses();
+}
+
+export async function upsertKnowledgeOntologyClass(input: UpsertOntologyClassInput) {
+  return upsertOntologyClass(input);
+}
+
+export async function deleteKnowledgeOntologyClass(id: string) {
+  return deleteOntologyClass(id);
+}
+
+export async function listKnowledgeOntologyRelations() {
+  return listOntologyRelations();
+}
+
+export async function upsertKnowledgeOntologyRelation(input: UpsertOntologyRelationInput) {
+  return upsertOntologyRelation(input);
+}
+
+export async function deleteKnowledgeOntologyRelation(id: string) {
+  return deleteOntologyRelation(id);
+}
+
+export async function rebuildKnowledgeProjectionRecords() {
+  return rebuildKnowledgeProjections();
 }
 
 export async function upsertKnowledgeAssertionRecord(input: UpsertKnowledgeAssertionInput) {

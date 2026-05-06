@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X, Network } from 'lucide-react';
+import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X, Network, Search } from 'lucide-react';
+import { useCurrentUser } from '../../contexts/UserContext';
 
 const menuItems = [
   { path: '/dashboard', icon: Home, label: '首页' },
+  { path: '/search', icon: Search, label: '全局搜索' },
   { path: '/knowledge', icon: Network, label: '知识库' },
   { path: '/tasks', icon: CheckSquare, label: '任务' },
   { path: '/finance', icon: Wallet, label: '费用统计' },
@@ -15,19 +17,9 @@ const menuItems = [
 export const Sidebar: React.FC = () => {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-  const [profile, setProfile] = useState({ name: '个人用户', bio: '' });
-
-  useEffect(() => {
-    const savedProfile = localStorage.getItem('user_profile');
-    if (savedProfile) {
-      try {
-        const parsed = JSON.parse(savedProfile);
-        setProfile({ name: parsed.name || '个人用户', bio: parsed.bio || '' });
-      } catch (e) {
-        console.warn('[Sidebar] Failed to parse user profile:', e);
-      }
-    }
-  }, []);
+  const { user, auth } = useCurrentUser();
+  const displayName = user?.displayName || '个人用户';
+  const displayStatus = auth?.isDefaultUser ? '默认本地用户' : (user?.bio || '在线');
 
   // 监听窗口大小，移动端自动折叠
   useEffect(() => {
@@ -135,11 +127,11 @@ export const Sidebar: React.FC = () => {
         >
           <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-bg-tertiary dark:bg-sidebar-bg/50">
             <div className="w-9 h-9 bg-primary rounded-full flex items-center justify-center">
-              <span className="text-sm font-medium text-white">{profile.name.charAt(0)}</span>
+              <span className="text-sm font-medium text-white">{displayName.charAt(0)}</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate text-sidebar-text-active">{profile.name}</p>
-              <p className="text-xs truncate" style={{ color: 'var(--sidebar-text)' }}>{profile.bio || '在线'}</p>
+              <p className="text-sm font-medium truncate text-sidebar-text-active">{displayName}</p>
+              <p className="text-xs truncate" style={{ color: 'var(--sidebar-text)' }}>{displayStatus}</p>
             </div>
           </div>
         </motion.div>

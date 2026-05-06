@@ -4,6 +4,7 @@ import { AppError, ErrorCode, errorHandler } from '../core/errors';
 import { isValidFinanceRecord, isValidTask } from '../core/validation';
 import { FinanceRecord, Task } from '../core/types';
 import { getKnowledgeDataset, hydrateKnowledgeDataset } from '../kb';
+import { fetchAuthMe, fetchWithAuth, updateAuthMe } from '../lib/auth';
 import { syncEngine } from '../sync';
 
 export type { FinanceRecord, Task };
@@ -59,12 +60,16 @@ async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
 
   try {
-    response = await fetch(path, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(init?.headers || {}),
-      },
+    const headers = new Headers(init?.headers);
+    const hasBody = init?.body !== undefined && init?.body !== null;
+
+    if (hasBody && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+
+    response = await fetchWithAuth(path, {
       ...init,
+      headers,
     });
   } catch (error) {
     throw errorHandler.handle(error, path);
@@ -152,9 +157,10 @@ export function isStorageQuotaExceeded(): boolean {
 
 export function getStorageUsage(): { used: number; available: boolean } {
   try {
-    const financeData = localStorage.getItem('finance_records') || '';
-    const tasksData = localStorage.getItem('tasks_records') || '';
-    const used = new Blob([financeData + tasksData]).size;
+    const theme = localStorage.getItem('theme') || '';
+    const notificationSettings = localStorage.getItem('notification_settings') || '';
+    const securityPin = localStorage.getItem('security_pin_hashed') || '';
+    const used = new Blob([theme + notificationSettings + securityPin]).size;
     return { used, available: true };
   } catch {
     return { used: 0, available: false };
@@ -402,14 +408,11 @@ export const dataManager = {
 
   async exportKnowledgeData(): Promise<string> {
     const result = await requestApi<{
-      success: boolean;
-      data?: {
-        knowledge?: unknown;
-      };
-    }>('/api/load-data');
+      data?: unknown;
+    }>('/api/knowledge/dataset');
 
-    const knowledge = result.data?.knowledge !== undefined
-      ? result.data.knowledge
+    const knowledge = result.data !== undefined
+      ? result.data
       : getKnowledgeDataset();
 
     return JSON.stringify({
@@ -420,11 +423,16 @@ export const dataManager = {
   },
 
   async exportLocalSettings(): Promise<string> {
+    const auth = await fetchAuthMe().catch(() => null);
     return JSON.stringify({
       version: 1,
       exportedAt: new Date().toISOString(),
       userSettings: {
-        profile: localStorage.getItem('user_profile'),
+        profile: auth ? JSON.stringify({
+          name: auth.data.user.displayName || '个人用户',
+          email: auth.data.user.email || '',
+          bio: auth.data.user.bio || '',
+        }) : null,
         theme: localStorage.getItem('theme'),
         notificationSettings: localStorage.getItem('notification_settings'),
         securityPin: localStorage.getItem('security_pin_hashed'),
@@ -477,7 +485,16 @@ export const dataManager = {
         : data;
 
       if (typeof settings.profile === 'string') {
-        localStorage.setItem('user_profile', settings.profile);
+        try {
+          const parsed = JSON.parse(settings.profile) as { name?: unknown; email?: unknown; bio?: unknown };
+          await updateAuthMe({
+            displayName: typeof parsed.name === 'string' ? parsed.name : '个人用户',
+            email: typeof parsed.email === 'string' ? parsed.email : null,
+            bio: typeof parsed.bio === 'string' ? parsed.bio : '',
+          });
+        } catch {
+          // ignore invalid legacy profile payload
+        }
       }
       if (typeof settings.theme === 'string') {
         localStorage.setItem('theme', settings.theme);
@@ -512,7 +529,6 @@ export const dataManager = {
   },
 
   clearLocalSettings(): void {
-    localStorage.removeItem('user_profile');
     localStorage.removeItem('theme');
     localStorage.removeItem('notification_settings');
     localStorage.removeItem('security_pin_hashed');
@@ -537,7 +553,6 @@ export const dataManager = {
       assertions: [],
       updatedAt: Date.now(),
     });
-    localStorage.removeItem('user_profile');
     localStorage.removeItem('theme');
     localStorage.removeItem('notification_settings');
     localStorage.removeItem('security_pin_hashed');

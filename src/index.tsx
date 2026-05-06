@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { UserProvider } from './contexts/UserContext';
 import { AgentProvider } from './agent/AgentContext';
 import { initDB } from './db';
 import { initializeData, startAutoSync, startRealtimeSync } from './lib/dataSync';
@@ -22,12 +23,14 @@ const root = ReactDOM.createRoot(
 
 root.render(
   <React.StrictMode>
-    <ThemeProvider>
-      <ErrorBoundary>
-        <AgentProvider>
-          <App />
-        </AgentProvider>
-      </ErrorBoundary>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <UserProvider>
+          <AgentProvider>
+            <App />
+          </AgentProvider>
+        </UserProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );

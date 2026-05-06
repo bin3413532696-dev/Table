@@ -1,12 +1,11 @@
 import { prisma } from '../../db/client';
+import { getCurrentUserId } from '../../shared/user-context';
 import type { CreateFinanceRecordInput, UpdateFinanceRecordInput } from './schema';
 import {
   enqueueProjectionOutboxEvent,
   KNOWLEDGE_PROJECTION_TOPIC,
   toProjectionPayload,
 } from '../projection/outbox';
-
-const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 function toFinanceProjectionPayload(record: {
   id: string;
@@ -35,7 +34,7 @@ function toFinanceProjectionPayload(record: {
 export async function listFinanceRecords() {
   return prisma.financeRecord.findMany({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId: getCurrentUserId(),
       deletedAt: null,
     },
     orderBy: {
@@ -48,7 +47,7 @@ export async function createFinanceRecord(input: CreateFinanceRecordInput) {
   return prisma.$transaction(async (tx) => {
     const record = await tx.financeRecord.create({
       data: {
-        userId: DEFAULT_USER_ID,
+        userId: getCurrentUserId(),
         type: input.type,
         amount: input.amount,
         category: input.category,
@@ -74,7 +73,7 @@ export async function findFinanceRecordById(id: string) {
   return prisma.financeRecord.findFirst({
     where: {
       id,
-      userId: DEFAULT_USER_ID,
+      userId: getCurrentUserId(),
       deletedAt: null,
     },
   });

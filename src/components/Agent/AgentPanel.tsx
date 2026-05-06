@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, X, Send, Loader2, AlertCircle, Settings, Trash2, CheckCircle, XCircle, Square } from 'lucide-react';
 import { useAgent } from '../../agent/AgentContext';
-import { agentEngine } from '../../agent/AgentEngine';
 import { AgentMessage } from '../../agent/types';
+import { registeredToolNames } from '../../agent/toolMetadata';
 
 interface AgentPanelProps {
   isOpen: boolean;
@@ -43,12 +43,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
 
   const handleConfirm = useCallback(async () => {
     if (!state.confirmationRequest) return;
-    const toolCall = {
-      id: state.confirmationRequest.id,
-      name: state.confirmationRequest.toolName,
-      arguments: state.confirmationRequest.arguments,
-    };
-    await confirmAction(() => agentEngine.executeTool(toolCall, true));
+    await confirmAction();
   }, [state.confirmationRequest, confirmAction]);
 
   const renderMessage = (message: AgentMessage) => {
@@ -191,7 +186,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
                     )}
                   </select>
                   <p className="text-xs text-text-muted">
-                    可用工具：{agentEngine.getAvailableTools().length} 个
+                    可用工具：{registeredToolNames.length} 个
                   </p>
                 </div>
               </motion.div>
@@ -245,7 +240,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
                         确认执行
                       </button>
                       <button
-                        onClick={rejectAction}
+                        onClick={() => void rejectAction()}
                         className="px-3 py-1 border border-border-primary text-xs rounded-lg hover:bg-bg-secondary"
                       >
                         取消

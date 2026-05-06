@@ -1,15 +1,13 @@
 import { prisma } from '../../db/client';
+import { getCurrentUserId } from '../../shared/user-context';
 import { toBusinessSnapshotDto } from './dto';
 import { createDefaultKnowledgeDataset } from '../knowledge/dataset';
 import { replaceKnowledgeDataset } from '../knowledge/repository';
 import {
-  DEFAULT_USER_ID as PROJECTION_DEFAULT_USER_ID,
   enqueueProjectionOutboxEvents,
   KNOWLEDGE_PROJECTION_TOPIC,
   toProjectionPayload,
 } from '../projection/outbox';
-
-const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 type ImportedTask = {
   title?: string;
@@ -128,10 +126,12 @@ function buildFinanceKnowledgeProjectionPayload(
 }
 
 export async function exportBusinessSnapshot() {
+  const userId = getCurrentUserId();
+
   const [tasks, finance] = await Promise.all([
     prisma.task.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         deletedAt: null,
       },
       orderBy: {
@@ -140,7 +140,7 @@ export async function exportBusinessSnapshot() {
     }),
     prisma.financeRecord.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         deletedAt: null,
       },
       orderBy: {
@@ -156,6 +156,7 @@ export async function exportBusinessSnapshot() {
 }
 
 export async function importBusinessSnapshot(payload: unknown) {
+  const userId = getCurrentUserId();
   const source = payload && typeof payload === 'object'
     ? payload as Record<string, unknown>
     : {};
@@ -166,19 +167,19 @@ export async function importBusinessSnapshot(payload: unknown) {
   await prisma.$transaction(async (tx) => {
     await tx.task.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.financeRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.projectionOutboxEvent.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
@@ -186,7 +187,7 @@ export async function importBusinessSnapshot(payload: unknown) {
       const createdAt = Date.now();
       await tx.task.createMany({
         data: tasks.map((task, index) => ({
-          userId: DEFAULT_USER_ID,
+          userId,
           title: task.title!.trim(),
           completed: task.completed ?? false,
           priority: task.priority ?? 'medium',
@@ -202,7 +203,7 @@ export async function importBusinessSnapshot(payload: unknown) {
       const createdAt = Date.now();
       await tx.financeRecord.createMany({
         data: finance.map((record, index) => ({
-          userId: DEFAULT_USER_ID,
+          userId,
           type: record.type!,
           amount: record.amount!,
           category: record.category!.trim(),
@@ -218,20 +219,20 @@ export async function importBusinessSnapshot(payload: unknown) {
 
     const persistedTasks = await tx.task.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         deletedAt: null,
       },
     });
     const persistedFinance = await tx.financeRecord.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         deletedAt: null,
       },
     });
 
     await enqueueProjectionOutboxEvents(tx, [
       ...persistedTasks.map((task) => ({
-        userId: PROJECTION_DEFAULT_USER_ID,
+        userId,
         topic: KNOWLEDGE_PROJECTION_TOPIC,
         aggregateType: 'task',
         aggregateId: task.id,
@@ -248,7 +249,7 @@ export async function importBusinessSnapshot(payload: unknown) {
         }),
       })),
       ...persistedFinance.map((record) => ({
-        userId: PROJECTION_DEFAULT_USER_ID,
+        userId,
         topic: KNOWLEDGE_PROJECTION_TOPIC,
         aggregateType: 'finance-record',
         aggregateId: record.id,
@@ -277,85 +278,86 @@ export async function importBusinessSnapshot(payload: unknown) {
 }
 
 export async function resetWorkspaceData() {
+  const userId = getCurrentUserId();
   const knowledgeDataset = createDefaultKnowledgeDataset();
 
   await prisma.$transaction(async (tx) => {
     await tx.task.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.financeRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.projectionOutboxEvent.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeAssertionEvidenceLink.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeDocumentEntityLink.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeRelationRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeAssertionRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeOntologyRelationRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeOntologyClassRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeDocumentRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeEntityRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.knowledgeBase.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
       },
     });
 
     await tx.task.createMany({
       data: [
         {
-          userId: DEFAULT_USER_ID,
+          userId,
           title: '梳理存储层改造边界',
           completed: false,
           priority: 'high',
@@ -363,7 +365,7 @@ export async function resetWorkspaceData() {
           notes: '明确前后端职责与迁移路径',
         },
         {
-          userId: DEFAULT_USER_ID,
+          userId,
           title: '落地 PostgreSQL 权威写路径',
           completed: true,
           priority: 'medium',
@@ -376,7 +378,7 @@ export async function resetWorkspaceData() {
     await tx.financeRecord.createMany({
       data: [
         {
-          userId: DEFAULT_USER_ID,
+          userId,
           type: 'expense',
           amount: 299.0,
           category: 'infrastructure',
@@ -386,7 +388,7 @@ export async function resetWorkspaceData() {
           metadataJson: {},
         },
         {
-          userId: DEFAULT_USER_ID,
+          userId,
           type: 'income',
           amount: 1200.0,
           category: 'project',
@@ -400,20 +402,20 @@ export async function resetWorkspaceData() {
 
     const tasks = await tx.task.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         deletedAt: null,
       },
     });
     const financeRecords = await tx.financeRecord.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         deletedAt: null,
       },
     });
 
     await enqueueProjectionOutboxEvents(tx, [
       ...tasks.map((task) => ({
-        userId: PROJECTION_DEFAULT_USER_ID,
+        userId,
         topic: KNOWLEDGE_PROJECTION_TOPIC,
         aggregateType: 'task',
         aggregateId: task.id,
@@ -430,7 +432,7 @@ export async function resetWorkspaceData() {
         }),
       })),
       ...financeRecords.map((record) => ({
-        userId: PROJECTION_DEFAULT_USER_ID,
+        userId,
         topic: KNOWLEDGE_PROJECTION_TOPIC,
         aggregateType: 'finance-record',
         aggregateId: record.id,

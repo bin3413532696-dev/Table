@@ -12,7 +12,7 @@ import { isValidTask, isValidCreateTaskDTO } from '../../core/validation';
  * 任务存储配置
  */
 const TASK_STORE_CONFIG: StoreConfig = {
-  storageKey: 'tasks_records',
+  storageKey: 'tasks_cache_disabled',
   typeName: 'Task',
   autoSync: true,
 };
@@ -25,35 +25,11 @@ class TaskStoreClass extends BaseStore<Task, CreateTaskDTO, UpdateTaskDTO> {
   protected readonly changeTopic = EventTopics.TASKS_CHANGED;
 
   protected loadFromStorage(): Task[] {
-    try {
-      const config = this.config;
-      if (!config) return [];
-      
-      const data = localStorage.getItem(config.storageKey);
-      if (!data) return [];
-
-      const parsed = JSON.parse(data);
-      if (!Array.isArray(parsed)) return [];
-
-      return parsed.filter(isValidTask);
-    } catch {
-      console.warn(`[TaskStore] Failed to load from storage`);
-      return [];
-    }
+    return [];
   }
 
   protected saveToStorage(data: Task[]): void {
-    try {
-      localStorage.setItem(this.config.storageKey, JSON.stringify(data));
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-        console.error(`[${this.config.typeName}] Storage quota exceeded`);
-        import('../../core/events').then(({ eventEmitter, EventTopics }) => {
-          eventEmitter.emit(EventTopics.STORAGE_QUOTA_EXCEEDED);
-        });
-      }
-      throw error;
-    }
+    void data;
   }
 
   protected validate(entity: unknown): entity is Task {
@@ -124,7 +100,6 @@ class TaskStoreClass extends BaseStore<Task, CreateTaskDTO, UpdateTaskDTO> {
 
   hydrate(tasks: Task[], emit = false): void {
     this.data = tasks.filter(t => this.validate(t));
-    this.saveToStorage(this.data);
     if (emit) {
       import('../../core/events').then(({ emitDataChange }) => {
         emitDataChange('tasks');

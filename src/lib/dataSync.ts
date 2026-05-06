@@ -1,5 +1,5 @@
 import { syncEngine, SyncStatus, SyncResult, LoadResult } from '../sync';
-import { hydrateKnowledgeDataset, restoreKnowledgeDatasetFromCache } from '../kb';
+import { hydrateKnowledgeDataset } from '../kb';
 import { SYNC_CONFIG } from '../sync/config';
 
 export type { SyncStatus, SyncResult, LoadResult };
@@ -15,8 +15,6 @@ export function subscribeSyncStatus(listener: () => void): () => void {
 export async function initializeData(): Promise<boolean> {
   console.log('[Sync] Initializing authority data...');
 
-  restoreKnowledgeDatasetFromCache();
-
   try {
     const { financeDB, taskDB } = await import('../db');
     await Promise.all([
@@ -29,7 +27,7 @@ export async function initializeData(): Promise<boolean> {
 
   const result = await syncEngine.loadKnowledgeFromServer();
   if (!result.success || !result.data) {
-    console.warn('[Sync] Failed to load knowledge authority data, keeping local cache:', result.error);
+    console.warn('[Sync] Failed to load knowledge authority data:', result.error);
     return false;
   }
 

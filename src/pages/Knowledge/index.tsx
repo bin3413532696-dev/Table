@@ -22,8 +22,11 @@ import {
   X,
 } from 'lucide-react';
 import { Button, Card, EmptyState } from '../../components/ui';
+import { fetchWithAuth } from '../../lib/auth';
 import {
   createKnowledgeRelation,
+  deleteOntologyClass,
+  deleteOntologyRelation,
   deleteKnowledgeAssertion,
   deleteKnowledgeDocument,
   deleteKnowledgeEntity,
@@ -39,8 +42,13 @@ import {
   KnowledgeEntity,
   KnowledgeOverview,
   KnowledgeSearchHit,
-  searchKnowledge,
+  OntologyClass,
+  OntologyRelation,
+  rebuildKnowledgeProjections,
+  searchKnowledgeRemote,
   subscribeKnowledge,
+  upsertOntologyClass,
+  upsertOntologyRelation,
   upsertKnowledgeAssertion,
   upsertKnowledgeDocument,
   upsertKnowledgeEntity,
@@ -117,6 +125,22 @@ interface GuidedDocumentFormState {
   entityIds: string[];
 }
 
+interface OntologyClassFormState {
+  id: string;
+  label: string;
+  description: string;
+  parentIds: string;
+}
+
+interface OntologyRelationFormState {
+  id: string;
+  label: string;
+  description: string;
+  inverseId: string;
+  symmetric: boolean;
+  transitive: boolean;
+}
+
 interface DetailMetaItem {
   label: string;
   value: string;
@@ -140,14 +164,6 @@ interface ServerKnowledgeSnapshotSummary {
   assertionCount: number;
   classCount: number;
   relationCount: number;
-}
-
-interface KnowledgeDebugFileInfo {
-  filename: string;
-  exists: boolean;
-  size: number;
-  mtimeMs: number;
-  itemCount: number | null;
 }
 
 function getCreateIntentLabel(intent: KnowledgeCreateIntent | null): string {
@@ -285,6 +301,30 @@ function createGuidedDocumentFormState(defaultEntityIds: string[] = []): GuidedD
     source: '',
     entityIds: defaultEntityIds,
   };
+}
+
+function createOntologyClassFormState(item: OntologyClass | null): OntologyClassFormState {
+  return {
+    id: item?.id || '',
+    label: item?.label || '',
+    description: item?.description || '',
+    parentIds: item?.parentIds.join(', ') || '',
+  };
+}
+
+function createOntologyRelationFormState(item: OntologyRelation | null): OntologyRelationFormState {
+  return {
+    id: item?.id || '',
+    label: item?.label || '',
+    description: item?.description || '',
+    inverseId: item?.inverseId || '',
+    symmetric: Boolean(item?.symmetric),
+    transitive: Boolean(item?.transitive),
+  };
+}
+
+function isOntologyIdLike(value: string): boolean {
+  return /^[a-z0-9]+:[a-z0-9-]+$/i.test(value.trim());
 }
 
 function parseConfidence(value: string): number | undefined {
@@ -836,9 +876,6 @@ function DebugDrawer({
   serverKnowledgeSnapshot,
   serverSnapshotError,
   loadingServerSnapshot,
-  debugFiles,
-  debugFilesError,
-  loadingDebugFiles,
   onClose,
 }: {
   open: boolean;
@@ -855,9 +892,6 @@ function DebugDrawer({
   serverKnowledgeSnapshot: ServerKnowledgeSnapshotSummary | null;
   serverSnapshotError: string;
   loadingServerSnapshot: boolean;
-  debugFiles: KnowledgeDebugFileInfo[];
-  debugFilesError: string;
-  loadingDebugFiles: boolean;
   onClose: () => void;
 }) {
   if (!open) {
@@ -1010,7 +1044,7 @@ function DebugDrawer({
 
         <CollapsibleSection
           title="服务端知识快照"
-          description="读取 /api/load-data 的 knowledge 摘要，用于粗略对比当前内存态与服务端载入态。"
+          description="读取 /api/knowledge/dataset 的知识摘要，用于粗略对比当前内存态与服务端权威数据。"
         >
           {loadingServerSnapshot ? (
             <div className="text-sm text-text-muted">正在读取服务端知识快照...</div>
@@ -1036,41 +1070,6 @@ function DebugDrawer({
             </div>
           ) : (
             <div className="text-sm text-text-muted">暂无服务端知识快照。</div>
-          )}
-        </CollapsibleSection>
-
-        <CollapsibleSection
-          title="Authority 文件状态"
-          description="读取 data/knowledge/*.jsonld 的文件级调试摘要。"
-        >
-          {loadingDebugFiles ? (
-            <div className="text-sm text-text-muted">正在读取 authority 文件状态...</div>
-          ) : debugFilesError ? (
-            <div className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
-              {debugFilesError}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {debugFiles.map((file) => (
-                <div
-                  key={file.filename}
-                  className="rounded-xl border border-border-primary bg-bg-card px-4 py-3"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-text-primary">{file.filename}</div>
-                      <div className="text-xs text-text-secondary mt-1">
-                        {file.exists ? `条目数：${file.itemCount === -1 ? '解析失败' : file.itemCount}` : '文件不存在'}
-                      </div>
-                    </div>
-                    <div className="text-right text-xs text-text-muted shrink-0">
-                      <div>{file.size} bytes</div>
-                      <div className="mt-1">{file.mtimeMs ? formatTimestamp(file.mtimeMs) : '未记录'}</div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
           )}
         </CollapsibleSection>
       </div>
@@ -1159,6 +1158,361 @@ function ModalShell({
         </motion.div>
       </div>
     </motion.div>
+  );
+}
+
+function OntologyManagerModal({
+  open,
+  activeTab,
+  classForm,
+  relationForm,
+  editingClass,
+  editingRelation,
+  error,
+  saving,
+  classes,
+  relations,
+  onClose,
+  onTabChange,
+  onClassFormChange,
+  onRelationFormChange,
+  onCreateClass,
+  onEditClass,
+  onDeleteClass,
+  onFilterByClass,
+  onSubmitClass,
+  onCreateRelation,
+  onEditRelation,
+  onDeleteRelation,
+  onFilterByRelation,
+  onSubmitRelation,
+}: {
+  open: boolean;
+  activeTab: 'classes' | 'relations';
+  classForm: OntologyClassFormState;
+  relationForm: OntologyRelationFormState;
+  editingClass: OntologyClass | null;
+  editingRelation: OntologyRelation | null;
+  error: string;
+  saving: boolean;
+  classes: OntologyClass[];
+  relations: OntologyRelation[];
+  onClose: () => void;
+  onTabChange: (tab: 'classes' | 'relations') => void;
+  onClassFormChange: (patch: Partial<OntologyClassFormState>) => void;
+  onRelationFormChange: (patch: Partial<OntologyRelationFormState>) => void;
+  onCreateClass: () => void;
+  onEditClass: (item: OntologyClass) => void;
+  onDeleteClass: (item: OntologyClass) => void;
+  onFilterByClass: (item: OntologyClass) => void;
+  onSubmitClass: (event: React.FormEvent<HTMLFormElement>) => void;
+  onCreateRelation: () => void;
+  onEditRelation: (item: OntologyRelation) => void;
+  onDeleteRelation: (item: OntologyRelation) => void;
+  onFilterByRelation: (item: OntologyRelation) => void;
+  onSubmitRelation: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  if (!open) {
+    return null;
+  }
+
+  const currentInverseOptions = relations.filter((item) => item.id !== relationForm.id);
+  const parentOptions = classes.filter((item) => item.id !== classForm.id);
+
+  return (
+    <ModalShell
+      title="Ontology 管理"
+      description="维护知识库中的类与关系定义。当前为轻量管理模式，优先覆盖查看、补充、修正与删除。"
+      onClose={onClose}
+    >
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onTabChange('classes')}
+            className={`rounded-xl border px-4 py-2 text-sm transition-colors ${
+              activeTab === 'classes'
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border-primary bg-bg-secondary text-text-secondary hover:border-primary/30 hover:bg-primary/5'
+            }`}
+          >
+            类定义
+          </button>
+          <button
+            type="button"
+            onClick={() => onTabChange('relations')}
+            className={`rounded-xl border px-4 py-2 text-sm transition-colors ${
+              activeTab === 'relations'
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border-primary bg-bg-secondary text-text-secondary hover:border-primary/30 hover:bg-primary/5'
+            }`}
+          >
+            关系定义
+          </button>
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {activeTab === 'classes' ? (
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-text-primary">当前类定义</div>
+                  <div className="text-xs text-text-muted mt-1">共 {classes.length} 个类，可用于实体类型筛选与建模。</div>
+                </div>
+                <Button variant="secondary" icon={<Plus className="w-4 h-4" />} onClick={onCreateClass}>
+                  新增类
+                </Button>
+              </div>
+
+              <div className="space-y-2 max-h-[440px] overflow-y-auto pr-1">
+                {classes.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-border-primary bg-bg-secondary px-4 py-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-text-primary">{item.label}</div>
+                        <div className="text-xs text-text-muted font-mono mt-1 break-all">{item.id}</div>
+                        <div className="text-xs text-text-secondary mt-2 leading-5">
+                          {item.description || '暂无描述。'}
+                        </div>
+                        <div className="text-[11px] text-text-muted mt-2">
+                          父类：{item.parentIds.length > 0 ? item.parentIds.join(', ') : '无'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button variant="secondary" onClick={() => onFilterByClass(item)}>
+                          筛选
+                        </Button>
+                        <Button variant="ghost" onClick={() => onEditClass(item)}>
+                          编辑
+                        </Button>
+                        <Button variant="danger" onClick={() => onDeleteClass(item)}>
+                          删除
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <form onSubmit={onSubmitClass} className="rounded-2xl border border-border-primary bg-bg-secondary p-5 space-y-4">
+              <div>
+                <div className="text-base font-semibold text-text-primary">
+                  {editingClass ? '编辑类定义' : '新增类定义'}
+                </div>
+                <div className="text-xs text-text-muted mt-1">
+                  类 ID 建议保持稳定；编辑时不允许修改现有 ID。
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">类 ID</label>
+                <input
+                  value={classForm.id}
+                  onChange={(event) => onClassFormChange({ id: event.target.value })}
+                  className="input"
+                  placeholder="class:project"
+                  disabled={Boolean(editingClass)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">名称</label>
+                <input
+                  value={classForm.label}
+                  onChange={(event) => onClassFormChange({ label: event.target.value })}
+                  className="input"
+                  placeholder="项目"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">描述</label>
+                <textarea
+                  value={classForm.description}
+                  onChange={(event) => onClassFormChange({ description: event.target.value })}
+                  className="input min-h-[100px]"
+                  placeholder="说明这个类用于描述什么对象。"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">父类 ID</label>
+                <textarea
+                  value={classForm.parentIds}
+                  onChange={(event) => onClassFormChange({ parentIds: event.target.value })}
+                  className="input min-h-[88px]"
+                  placeholder="多个 ID 用逗号或换行分隔"
+                />
+                {parentOptions.length > 0 && (
+                  <div className="text-xs text-text-muted mt-2">
+                    可选父类：{parentOptions.map((item) => item.id).join(', ')}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <Button variant="secondary" onClick={onCreateClass}>
+                  重置
+                </Button>
+                <Button type="submit" loading={saving} icon={<Shapes className="w-4 h-4" />}>
+                  {editingClass ? '保存类定义' : '创建类定义'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-text-primary">当前关系定义</div>
+                  <div className="text-xs text-text-muted mt-1">共 {relations.length} 个关系，可用于结构边与事实记录谓词。</div>
+                </div>
+                <Button variant="secondary" icon={<Plus className="w-4 h-4" />} onClick={onCreateRelation}>
+                  新增关系
+                </Button>
+              </div>
+
+              <div className="space-y-2 max-h-[440px] overflow-y-auto pr-1">
+                {relations.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-border-primary bg-bg-secondary px-4 py-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-text-primary">{item.label}</div>
+                        <div className="text-xs text-text-muted font-mono mt-1 break-all">{item.id}</div>
+                        <div className="text-xs text-text-secondary mt-2 leading-5">
+                          {item.description || '暂无描述。'}
+                        </div>
+                        <div className="flex flex-wrap gap-2 mt-2 text-[11px] text-text-muted">
+                          <span>inverse：{item.inverseId || '无'}</span>
+                          <span>symmetric：{item.symmetric ? '是' : '否'}</span>
+                          <span>transitive：{item.transitive ? '是' : '否'}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button variant="secondary" onClick={() => onFilterByRelation(item)}>
+                          筛选
+                        </Button>
+                        <Button variant="ghost" onClick={() => onEditRelation(item)}>
+                          编辑
+                        </Button>
+                        <Button variant="danger" onClick={() => onDeleteRelation(item)}>
+                          删除
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <form onSubmit={onSubmitRelation} className="rounded-2xl border border-border-primary bg-bg-secondary p-5 space-y-4">
+              <div>
+                <div className="text-base font-semibold text-text-primary">
+                  {editingRelation ? '编辑关系定义' : '新增关系定义'}
+                </div>
+                <div className="text-xs text-text-muted mt-1">
+                  关系 ID 建议保持稳定；inverse 关系可留空。
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">关系 ID</label>
+                <input
+                  value={relationForm.id}
+                  onChange={(event) => onRelationFormChange({ id: event.target.value })}
+                  className="input"
+                  placeholder="rel:depends-on"
+                  disabled={Boolean(editingRelation)}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">名称</label>
+                <input
+                  value={relationForm.label}
+                  onChange={(event) => onRelationFormChange({ label: event.target.value })}
+                  className="input"
+                  placeholder="依赖于"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">描述</label>
+                <textarea
+                  value={relationForm.description}
+                  onChange={(event) => onRelationFormChange({ description: event.target.value })}
+                  className="input min-h-[100px]"
+                  placeholder="说明这个关系用于表达什么含义。"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">Inverse 关系</label>
+                <select
+                  value={relationForm.inverseId}
+                  onChange={(event) => onRelationFormChange({ inverseId: event.target.value })}
+                  className="input"
+                >
+                  <option value="">无</option>
+                  {currentInverseOptions.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label} ({item.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="rounded-xl border border-border-primary bg-bg-card px-4 py-3 flex items-center justify-between gap-3">
+                  <span className="text-sm text-text-primary">对称关系</span>
+                  <input
+                    type="checkbox"
+                    checked={relationForm.symmetric}
+                    onChange={(event) => onRelationFormChange({ symmetric: event.target.checked })}
+                  />
+                </label>
+                <label className="rounded-xl border border-border-primary bg-bg-card px-4 py-3 flex items-center justify-between gap-3">
+                  <span className="text-sm text-text-primary">传递关系</span>
+                  <input
+                    type="checkbox"
+                    checked={relationForm.transitive}
+                    onChange={(event) => onRelationFormChange({ transitive: event.target.checked })}
+                  />
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2">
+                <Button variant="secondary" onClick={onCreateRelation}>
+                  重置
+                </Button>
+                <Button type="submit" loading={saving} icon={<Link2 className="w-4 h-4" />}>
+                  {editingRelation ? '保存关系定义' : '创建关系定义'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+      </div>
+    </ModalShell>
   );
 }
 
@@ -2286,10 +2640,25 @@ export default function Knowledge() {
   const [selectedTypeId, setSelectedTypeId] = useState('all');
   const [includeDocuments, setIncludeDocuments] = useState(true);
   const [selectedHit, setSelectedHit] = useState<SelectedHit | null>(null);
+  const [searchResults, setSearchResults] = useState<KnowledgeSearchHit[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [rebuildingProjections, setRebuildingProjections] = useState(false);
+  const [isOntologyManagerOpen, setOntologyManagerOpen] = useState(false);
+  const [ontologyTab, setOntologyTab] = useState<'classes' | 'relations'>('classes');
+  const [editingOntologyClass, setEditingOntologyClass] = useState<OntologyClass | null>(null);
+  const [editingOntologyRelation, setEditingOntologyRelation] = useState<OntologyRelation | null>(null);
+  const [ontologyClassForm, setOntologyClassForm] = useState<OntologyClassFormState>(
+    createOntologyClassFormState(null)
+  );
+  const [ontologyRelationForm, setOntologyRelationForm] = useState<OntologyRelationFormState>(
+    createOntologyRelationFormState(null)
+  );
+  const [ontologyError, setOntologyError] = useState('');
+  const [savingOntology, setSavingOntology] = useState(false);
 
   const [isEntityModalOpen, setEntityModalOpen] = useState(false);
   const [entityModalIntent, setEntityModalIntent] = useState<KnowledgeCreateIntent | null>(null);
@@ -2324,9 +2693,6 @@ export default function Knowledge() {
   const [serverKnowledgeSnapshot, setServerKnowledgeSnapshot] = useState<ServerKnowledgeSnapshotSummary | null>(null);
   const [serverSnapshotError, setServerSnapshotError] = useState('');
   const [loadingServerSnapshot, setLoadingServerSnapshot] = useState(false);
-  const [debugFiles, setDebugFiles] = useState<KnowledgeDebugFileInfo[]>([]);
-  const [debugFilesError, setDebugFilesError] = useState('');
-  const [loadingDebugFiles, setLoadingDebugFiles] = useState(false);
 
   const [isAssertionModalOpen, setAssertionModalOpen] = useState(false);
   const [editingAssertion, setEditingAssertion] = useState<KnowledgeAssertion | null>(null);
@@ -2428,15 +2794,40 @@ export default function Knowledge() {
     [dataset]
   );
 
-  const searchResults = useMemo(
-    () =>
-      searchKnowledge(searchQuery, {
-        typeIds: selectedTypeId === 'all' ? undefined : [selectedTypeId],
-        includeDocuments,
-        limit: 24,
-      }),
-    [searchQuery, selectedTypeId, includeDocuments, refreshToken]
-  );
+  useEffect(() => {
+    let disposed = false;
+
+    const runSearch = async () => {
+      setSearchLoading(true);
+      try {
+        const items = await searchKnowledgeRemote(searchQuery, {
+          typeIds: selectedTypeId === 'all' ? undefined : [selectedTypeId],
+          includeDocuments,
+          limit: 24,
+        });
+        if (!disposed) {
+          setSearchResults(items);
+        }
+      } catch (error) {
+        if (!disposed) {
+          setSearchResults([]);
+          setFeedback({
+            type: 'error',
+            message: error instanceof Error ? error.message : '知识搜索失败。',
+          });
+        }
+      } finally {
+        if (!disposed) {
+          setSearchLoading(false);
+        }
+      }
+    };
+
+    void runSearch();
+    return () => {
+      disposed = true;
+    };
+  }, [searchQuery, selectedTypeId, includeDocuments, refreshToken]);
 
   useEffect(() => {
     if (searchResults.length === 0) {
@@ -2518,7 +2909,7 @@ export default function Knowledge() {
       try {
         setLoadingServerSnapshot(true);
         setServerSnapshotError('');
-        const response = await fetch(`/api/load-data?ts=${Date.now()}`, {
+        const response = await fetchWithAuth(`/api/knowledge/dataset?ts=${Date.now()}`, {
           cache: 'no-store',
           headers: {
             'Cache-Control': 'no-cache',
@@ -2530,12 +2921,10 @@ export default function Knowledge() {
         }
 
         const payload = (await response.json()) as {
-          data?: {
-            knowledge?: KnowledgeDataset;
-          };
+          data?: KnowledgeDataset;
         };
 
-        const knowledge = payload.data?.knowledge;
+        const knowledge = payload.data;
         if (!knowledge || typeof knowledge !== 'object') {
           throw new Error('服务端未返回 knowledge 字段');
         }
@@ -2564,43 +2953,7 @@ export default function Knowledge() {
       }
     };
 
-    const loadDebugFiles = async () => {
-      try {
-        setLoadingDebugFiles(true);
-        setDebugFilesError('');
-        const response = await fetch(`/api/debug/knowledge-files?ts=${Date.now()}`, {
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-          },
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const payload = (await response.json()) as {
-          files?: KnowledgeDebugFileInfo[];
-          error?: string;
-        };
-
-        if (!disposed) {
-          setDebugFiles(Array.isArray(payload.files) ? payload.files : []);
-        }
-      } catch (error) {
-        if (!disposed) {
-          setDebugFilesError(error instanceof Error ? error.message : 'authority 文件状态读取失败');
-          setDebugFiles([]);
-        }
-      } finally {
-        if (!disposed) {
-          setLoadingDebugFiles(false);
-        }
-      }
-    };
-
     void loadServerKnowledgeSnapshot();
-    void loadDebugFiles();
     return () => {
       disposed = true;
     };
@@ -3016,6 +3369,228 @@ export default function Knowledge() {
     }
   };
 
+  const openOntologyManager = (tab: 'classes' | 'relations' = 'classes') => {
+    setOntologyTab(tab);
+    setOntologyError('');
+    setFeedback(null);
+    setEditingOntologyClass(null);
+    setEditingOntologyRelation(null);
+    setOntologyClassForm(createOntologyClassFormState(null));
+    setOntologyRelationForm(createOntologyRelationFormState(null));
+    setOntologyManagerOpen(true);
+  };
+
+  const openOntologyClassEditor = (item?: OntologyClass) => {
+    setOntologyTab('classes');
+    setOntologyError('');
+    setEditingOntologyRelation(null);
+    setOntologyRelationForm(createOntologyRelationFormState(null));
+    setEditingOntologyClass(item || null);
+    setOntologyClassForm(createOntologyClassFormState(item || null));
+    setOntologyManagerOpen(true);
+  };
+
+  const openOntologyRelationEditor = (item?: OntologyRelation) => {
+    setOntologyTab('relations');
+    setOntologyError('');
+    setEditingOntologyClass(null);
+    setOntologyClassForm(createOntologyClassFormState(null));
+    setEditingOntologyRelation(item || null);
+    setOntologyRelationForm(createOntologyRelationFormState(item || null));
+    setOntologyManagerOpen(true);
+  };
+
+  const handleRebuildProjections = async () => {
+    setFeedback(null);
+
+    try {
+      setRebuildingProjections(true);
+      const result = await rebuildKnowledgeProjections();
+      setFeedback({
+        type: 'success',
+        message: `知识投影重建任务已入队：任务 ${result.queuedTaskProjections} 条，财务 ${result.queuedFinanceProjections} 条。`,
+      });
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: error instanceof Error ? error.message : '重建知识投影失败。',
+      });
+    } finally {
+      setRebuildingProjections(false);
+    }
+  };
+
+  const handleOntologyClassSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setOntologyError('');
+    setFeedback(null);
+
+    try {
+      const classId = ontologyClassForm.id.trim();
+      const classLabel = ontologyClassForm.label.trim();
+      const parentIds = parseListInput(ontologyClassForm.parentIds);
+
+      if (!classId) {
+        throw new Error('类 ID 不能为空。');
+      }
+
+      if (!isOntologyIdLike(classId)) {
+        throw new Error('类 ID 格式应类似 class:project，使用前缀加短横线标识。');
+      }
+
+      if (!classLabel) {
+        throw new Error('类名称不能为空。');
+      }
+
+      if (
+        !editingOntologyClass &&
+        dataset.ontology.classes.some((item) => item.id.toLowerCase() === classId.toLowerCase())
+      ) {
+        throw new Error('类 ID 已存在，请使用新的 ID。');
+      }
+
+      if (parentIds.includes(classId)) {
+        throw new Error('父类列表不能包含当前类自身。');
+      }
+
+      setSavingOntology(true);
+      const saved = await upsertOntologyClass(
+        {
+          id: classId,
+          label: classLabel,
+          description: ontologyClassForm.description.trim() || undefined,
+          parentIds,
+        },
+        editingOntologyClass ? { existingId: editingOntologyClass.id } : undefined
+      );
+
+      setEditingOntologyClass(saved);
+      setOntologyClassForm(createOntologyClassFormState(saved));
+      setFeedback({
+        type: 'success',
+        message: editingOntologyClass ? 'Ontology 类定义已更新。' : 'Ontology 类定义已创建。',
+      });
+    } catch (error) {
+      setOntologyError(error instanceof Error ? error.message : '保存类定义失败。');
+    } finally {
+      setSavingOntology(false);
+    }
+  };
+
+  const handleOntologyRelationSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setOntologyError('');
+    setFeedback(null);
+
+    try {
+      const relationId = ontologyRelationForm.id.trim();
+      const relationLabel = ontologyRelationForm.label.trim();
+      const inverseId = ontologyRelationForm.inverseId.trim();
+
+      if (!relationId) {
+        throw new Error('关系 ID 不能为空。');
+      }
+
+      if (!isOntologyIdLike(relationId)) {
+        throw new Error('关系 ID 格式应类似 rel:depends-on，使用前缀加短横线标识。');
+      }
+
+      if (!relationLabel) {
+        throw new Error('关系名称不能为空。');
+      }
+
+      if (
+        !editingOntologyRelation &&
+        dataset.ontology.relations.some((item) => item.id.toLowerCase() === relationId.toLowerCase())
+      ) {
+        throw new Error('关系 ID 已存在，请使用新的 ID。');
+      }
+
+      if (inverseId && inverseId === relationId) {
+        throw new Error('Inverse 关系不能指向自身。');
+      }
+
+      setSavingOntology(true);
+      const saved = await upsertOntologyRelation(
+        {
+          id: relationId,
+          label: relationLabel,
+          description: ontologyRelationForm.description.trim() || undefined,
+          inverseId: inverseId || undefined,
+          symmetric: ontologyRelationForm.symmetric,
+          transitive: ontologyRelationForm.transitive,
+        },
+        editingOntologyRelation ? { existingId: editingOntologyRelation.id } : undefined
+      );
+
+      setEditingOntologyRelation(saved);
+      setOntologyRelationForm(createOntologyRelationFormState(saved));
+      setFeedback({
+        type: 'success',
+        message: editingOntologyRelation ? 'Ontology 关系定义已更新。' : 'Ontology 关系定义已创建。',
+      });
+    } catch (error) {
+      setOntologyError(error instanceof Error ? error.message : '保存关系定义失败。');
+    } finally {
+      setSavingOntology(false);
+    }
+  };
+
+  const openDeleteOntologyClassDialog = (item: OntologyClass) => {
+    setDeleteDialog({
+      title: '删除 Ontology 类定义',
+      description: `将删除类定义“${item.label}”。如果仍被实体类型、子类或其他结构引用，后端会拒绝删除。此操作无法撤销。`,
+      confirmLabel: '删除类定义',
+      onConfirm: async () => {
+        await runDeleteAction(async () => {
+          await deleteOntologyClass(item.id);
+          if (editingOntologyClass?.id === item.id) {
+            setEditingOntologyClass(null);
+            setOntologyClassForm(createOntologyClassFormState(null));
+          }
+        }, 'Ontology 类定义已删除。');
+      },
+    });
+  };
+
+  const openDeleteOntologyRelationDialog = (item: OntologyRelation) => {
+    setDeleteDialog({
+      title: '删除 Ontology 关系定义',
+      description: `将删除关系定义“${item.label}”。如果仍被事实记录、结构边或 inverse 关系引用，后端会拒绝删除。此操作无法撤销。`,
+      confirmLabel: '删除关系定义',
+      onConfirm: async () => {
+        await runDeleteAction(async () => {
+          await deleteOntologyRelation(item.id);
+          if (editingOntologyRelation?.id === item.id) {
+            setEditingOntologyRelation(null);
+            setOntologyRelationForm(createOntologyRelationFormState(null));
+          }
+        }, 'Ontology 关系定义已删除。');
+      },
+    });
+  };
+
+  const handleFilterByOntologyClass = (item: OntologyClass) => {
+    setSelectedTypeId(item.id);
+    setIncludeDocuments(false);
+    setSearchQuery('');
+    setOntologyManagerOpen(false);
+    setFeedback({
+      type: 'success',
+      message: `已按类定义“${item.label}”筛选知识条目。`,
+    });
+  };
+
+  const handleFilterByOntologyRelation = (item: OntologyRelation) => {
+    setSearchQuery(item.label);
+    setIncludeDocuments(false);
+    setOntologyManagerOpen(false);
+    setFeedback({
+      type: 'success',
+      message: `已按关系定义“${item.label}”填充搜索词，可继续查看相关事实记录与结构边。`,
+    });
+  };
+
   return (
     <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-screen bg-bg-secondary">
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="page-header">
@@ -3100,6 +3675,21 @@ export default function Knowledge() {
               )}
               {viewMode === 'advanced' && (
                 <>
+                  <Button
+                    variant="ghost"
+                    icon={<Shapes className="w-4 h-4" />}
+                    onClick={() => openOntologyManager('classes')}
+                  >
+                    Ontology
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    icon={<Database className="w-4 h-4" />}
+                    onClick={() => void handleRebuildProjections()}
+                    loading={rebuildingProjections}
+                  >
+                    重建投影
+                  </Button>
                   <Button
                     variant="ghost"
                     icon={<Sparkles className="w-4 h-4" />}
@@ -3317,11 +3907,17 @@ export default function Knowledge() {
             <div className="px-5 py-4 border-b border-border-primary flex items-center justify-between">
               <div>
                 <div className="text-base font-semibold text-text-primary">搜索结果</div>
-                <div className="text-xs text-text-muted mt-1">共 {searchResults.length} 项，默认优先用于查找与阅读</div>
+                <div className="text-xs text-text-muted mt-1">
+                  {searchLoading ? '正在从服务端检索知识内容...' : `共 ${searchResults.length} 项，默认优先用于查找与阅读`}
+                </div>
               </div>
             </div>
 
-            {searchResults.length === 0 ? (
+            {searchLoading ? (
+              <div className="px-5 py-8 text-sm text-text-muted text-center">
+                正在检索知识内容...
+              </div>
+            ) : searchResults.length === 0 ? (
               <EmptyState
                 icon={Database}
                 title="暂无命中结果"
@@ -3531,6 +4127,40 @@ export default function Knowledge() {
       </div>
 
       <AnimatePresence>
+        <OntologyManagerModal
+          open={isOntologyManagerOpen}
+          activeTab={ontologyTab}
+          classForm={ontologyClassForm}
+          relationForm={ontologyRelationForm}
+          editingClass={editingOntologyClass}
+          editingRelation={editingOntologyRelation}
+          error={ontologyError}
+          saving={savingOntology}
+          classes={dataset.ontology.classes}
+          relations={dataset.ontology.relations}
+          onClose={() => {
+            if (!savingOntology) {
+              setOntologyManagerOpen(false);
+              setOntologyError('');
+            }
+          }}
+          onTabChange={setOntologyTab}
+          onClassFormChange={(patch) => setOntologyClassForm((prev) => ({ ...prev, ...patch }))}
+          onRelationFormChange={(patch) => setOntologyRelationForm((prev) => ({ ...prev, ...patch }))}
+          onCreateClass={() => openOntologyClassEditor()}
+          onEditClass={openOntologyClassEditor}
+          onDeleteClass={openDeleteOntologyClassDialog}
+          onFilterByClass={handleFilterByOntologyClass}
+          onSubmitClass={handleOntologyClassSubmit}
+          onCreateRelation={() => openOntologyRelationEditor()}
+          onEditRelation={openOntologyRelationEditor}
+          onDeleteRelation={openDeleteOntologyRelationDialog}
+          onFilterByRelation={handleFilterByOntologyRelation}
+          onSubmitRelation={handleOntologyRelationSubmit}
+        />
+      </AnimatePresence>
+
+      <AnimatePresence>
         <KnowledgeCreateGuideModal
           open={isCreateGuideOpen}
           canCreateStructureLink={Boolean(selectedEntity) && dataset.entities.length >= 2}
@@ -3699,9 +4329,6 @@ export default function Knowledge() {
           serverKnowledgeSnapshot={serverKnowledgeSnapshot}
           serverSnapshotError={serverSnapshotError}
           loadingServerSnapshot={loadingServerSnapshot}
-          debugFiles={debugFiles}
-          debugFilesError={debugFilesError}
-          loadingDebugFiles={loadingDebugFiles}
           onClose={() => setDebugDrawerOpen(false)}
         />
       </AnimatePresence>

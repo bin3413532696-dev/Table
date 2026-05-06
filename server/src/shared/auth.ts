@@ -1,0 +1,377 @@
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { prisma } from '../db/client';
+import { ensureKnowledgeBase } from '../modules/knowledge/repository';
+import {
+  enqueueProjectionOutboxEvents,
+  KNOWLEDGE_PROJECTION_TOPIC,
+  toProjectionPayload,
+} from '../modules/projection/outbox';
+import { createProviderForCurrentUser, listProvidersForCurrentUser } from '../modules/providers/service';
+import {
+  DEV_SESSION_COOKIE,
+  type ServerUserContext,
+  getDefaultUserId,
+  resolveRequestUserContext,
+  runWithUserContext,
+  USER_ID_HEADER,
+} from './user-context';
+import { loadServerConfig } from './config';
+
+const userIdSchema = z.string().uuid();
+const baselineReadyUsers = new Set<string>();
+const baselineInFlight = new Map<string, Promise<void>>();
+
+export class AuthError extends Error {
+  constructor(
+    message: string,
+    readonly statusCode: number,
+    readonly code: 'UNAUTHORIZED' | 'FORBIDDEN'
+  ) {
+    super(message);
+    this.name = 'AuthError';
+  }
+}
+
+function ensureValidUserContext(context: ServerUserContext) {
+  if (context.source === 'missing') {
+    const config = loadServerConfig();
+    if (!config.ALLOW_DEFAULT_USER_FALLBACK) {
+      throw new AuthError(`Missing ${USER_ID_HEADER} header`, 401, 'UNAUTHORIZED');
+    }
+    return;
+  }
+
+  const parsed = userIdSchema.safeParse(context.userId);
+  if (!parsed.success) {
+    if (context.source === 'session') {
+      throw new AuthError(`Invalid ${DEV_SESSION_COOKIE} cookie`, 401, 'UNAUTHORIZED');
+    }
+    throw new AuthError(`Invalid ${USER_ID_HEADER} header`, 401, 'UNAUTHORIZED');
+  }
+}
+
+function toTaskProjectionPayload(task: {
+  id: string;
+  title: string;
+  completed: boolean;
+  priority: string;
+  dueDate: Date | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: task.id,
+    title: task.title,
+    completed: task.completed,
+    priority: task.priority,
+    dueDate: task.dueDate ? task.dueDate.toISOString().slice(0, 10) : undefined,
+    notes: task.notes ?? undefined,
+    createdAt: task.createdAt.getTime(),
+    updatedAt: task.updatedAt.getTime(),
+  };
+}
+
+function toFinanceProjectionPayload(record: {
+  id: string;
+  type: string;
+  amount: { toString(): string };
+  description: string;
+  category: string;
+  recordDate: Date;
+  model: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: record.id,
+    type: record.type,
+    amount: Number(record.amount),
+    description: record.description,
+    category: record.category,
+    date: record.recordDate.toISOString().slice(0, 10),
+    model: record.model ?? undefined,
+    createdAt: record.createdAt.getTime(),
+    updatedAt: record.updatedAt.getTime(),
+  };
+}
+
+async function ensureUserRecordExists(context: ServerUserContext) {
+  const existing = await prisma.user.findUnique({
+    where: {
+      id: context.userId,
+    },
+  });
+
+  if (existing) {
+    if (existing.status !== 'active') {
+      throw new AuthError('User is not active', 403, 'FORBIDDEN');
+    }
+    return existing;
+  }
+
+  if (context.userId !== getDefaultUserId()) {
+    throw new AuthError('User not found. Please create the user first.', 401, 'UNAUTHORIZED');
+  }
+
+  const fallbackName = context.userId === getDefaultUserId()
+    ? 'Default Local User'
+    : `User ${context.userId.slice(0, 8)}`;
+
+  return prisma.user.create({
+    data: {
+      id: context.userId,
+      displayName: fallbackName,
+      status: 'active',
+    },
+  });
+}
+
+async function ensureUserBaseline(context: ServerUserContext) {
+  const existingSettings = await prisma.userSetting.findUnique({
+    where: {
+      userId: context.userId,
+    },
+  });
+
+  if (!existingSettings) {
+    await prisma.userSetting.create({
+      data: {
+        userId: context.userId,
+        theme: 'light',
+        profile_json: {},
+        notification_json: {},
+        agentPreferencesJson: {},
+      },
+    });
+  }
+
+  const existingKnowledgeBase = await prisma.knowledgeBase.findUnique({
+    where: {
+      userId: context.userId,
+    },
+  });
+
+  if (!existingKnowledgeBase) {
+    await ensureKnowledgeBase();
+  }
+
+  const existingProviders = await listProvidersForCurrentUser();
+  const shouldBootstrapWorkspace =
+    !existingSettings &&
+    !existingKnowledgeBase &&
+    existingProviders.length === 0;
+
+  if (shouldBootstrapWorkspace) {
+    const config = loadServerConfig();
+    if (config.DEFAULT_PROVIDER_BASE_URL.trim()) {
+      await createProviderForCurrentUser({
+        name: config.DEFAULT_PROVIDER_NAME,
+        apiFormat: config.DEFAULT_PROVIDER_FORMAT,
+        baseUrl: config.DEFAULT_PROVIDER_BASE_URL,
+        apiKey: config.DEFAULT_PROVIDER_API_KEY,
+        model: config.DEFAULT_PROVIDER_MODEL,
+        headers: {},
+        isActive: true,
+      });
+    }
+  }
+
+  if (shouldBootstrapWorkspace) {
+    const [taskCount, financeCount] = await Promise.all([
+      prisma.task.count({
+        where: {
+          userId: context.userId,
+          deletedAt: null,
+        },
+      }),
+      prisma.financeRecord.count({
+        where: {
+          userId: context.userId,
+          deletedAt: null,
+        },
+      }),
+    ]);
+
+    if (taskCount !== 0 || financeCount !== 0) {
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.task.createMany({
+        data: [
+          {
+            userId: context.userId,
+            title: '梳理存储层改造边界',
+            completed: false,
+            priority: 'high',
+            dueDate: new Date('2026-05-10'),
+            notes: '明确前后端职责与迁移路径',
+          },
+          {
+            userId: context.userId,
+            title: '落地 PostgreSQL 权威写路径',
+            completed: true,
+            priority: 'medium',
+            dueDate: new Date('2026-05-03'),
+            notes: '第一阶段基础能力',
+          },
+        ],
+      });
+
+      await tx.financeRecord.createMany({
+        data: [
+          {
+            userId: context.userId,
+            type: 'expense',
+            amount: 299.0,
+            category: 'infrastructure',
+            description: 'PostgreSQL 环境准备',
+            recordDate: new Date('2026-05-04'),
+            model: 'backend',
+            metadataJson: {},
+          },
+          {
+            userId: context.userId,
+            type: 'income',
+            amount: 1200.0,
+            category: 'project',
+            description: '阶段性项目结算',
+            recordDate: new Date('2026-05-01'),
+            model: 'delivery',
+            metadataJson: {},
+          },
+        ],
+      });
+
+      const [seededTasks, seededFinance] = await Promise.all([
+        tx.task.findMany({
+          where: {
+            userId: context.userId,
+            deletedAt: null,
+          },
+        }),
+        tx.financeRecord.findMany({
+          where: {
+            userId: context.userId,
+            deletedAt: null,
+          },
+        }),
+      ]);
+
+      await enqueueProjectionOutboxEvents(tx, [
+        ...seededTasks.map((task) => ({
+          userId: context.userId,
+          topic: KNOWLEDGE_PROJECTION_TOPIC,
+          aggregateType: 'task',
+          aggregateId: task.id,
+          operation: 'upsert',
+          payload: toProjectionPayload(toTaskProjectionPayload(task)),
+        })),
+        ...seededFinance.map((record) => ({
+          userId: context.userId,
+          topic: KNOWLEDGE_PROJECTION_TOPIC,
+          aggregateType: 'finance-record',
+          aggregateId: record.id,
+          operation: 'upsert',
+          payload: toProjectionPayload(toFinanceProjectionPayload(record)),
+        })),
+      ]);
+    });
+  }
+}
+
+async function ensureUserBaselineOnce(context: ServerUserContext) {
+  if (baselineReadyUsers.has(context.userId)) {
+    return;
+  }
+
+  const existing = baselineInFlight.get(context.userId);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const pending = ensureUserBaseline(context)
+    .then(() => {
+      baselineReadyUsers.add(context.userId);
+    })
+    .finally(() => {
+      baselineInFlight.delete(context.userId);
+    });
+
+  baselineInFlight.set(context.userId, pending);
+  await pending;
+}
+
+export async function provisionUser(input: {
+  id?: string;
+  displayName: string;
+  email?: string | null;
+  bio?: string;
+}) {
+  const nextUser = await prisma.user.create({
+    data: {
+      id: input.id,
+      displayName: input.displayName,
+      email: input.email ?? null,
+      status: 'active',
+    },
+  });
+
+  await runWithUserContext(
+    {
+      userId: nextUser.id,
+      source: nextUser.id === getDefaultUserId() ? 'default' : 'header',
+    },
+    async () => {
+      await prisma.userSetting.upsert({
+        where: {
+          userId: nextUser.id,
+        },
+        update: {
+          profile_json: {
+            bio: input.bio ?? '',
+          },
+        },
+        create: {
+          userId: nextUser.id,
+          theme: 'light',
+          profile_json: {
+            bio: input.bio ?? '',
+          },
+          notification_json: {},
+          agentPreferencesJson: {},
+        },
+      });
+
+      await ensureKnowledgeBase();
+      await ensureUserBaselineOnce({
+        userId: nextUser.id,
+        source: nextUser.id === getDefaultUserId() ? 'default' : 'header',
+      });
+    }
+  );
+
+  return nextUser;
+}
+
+export async function authenticateRequest(
+  request: FastifyRequest,
+  _reply: FastifyReply,
+  options?: { ensureBaseline?: boolean }
+) {
+  const userContext = resolveRequestUserContext(request);
+  ensureValidUserContext(userContext);
+  await ensureUserRecordExists(userContext);
+
+  if (options?.ensureBaseline !== false) {
+    await ensureUserBaselineOnce(userContext);
+  }
+}
+
+export function runAuthenticatedRequest<T>(request: FastifyRequest, callback: () => T) {
+  const userContext = resolveRequestUserContext(request);
+  return runWithUserContext(userContext, callback);
+}

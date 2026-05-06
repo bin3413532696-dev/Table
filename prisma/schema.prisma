@@ -14,6 +14,9 @@ model User {
   status                     String                       @default("active")
   createdAt                  DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                  DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  agentRuns                  AgentRun[]
+  agentMessages              AgentMessage[]
+  agentRunSnapshots          AgentRunStateSnapshot[]
   providers                  ApiProvider[]
   finances                   FinanceRecord[]
   knowledgeBase              KnowledgeBase?
@@ -28,8 +31,89 @@ model User {
   projectionOutboxEvents     ProjectionOutboxEvent[]
   tasks                      Task[]
   settings                   UserSetting?
+  toolExecutions             ToolExecution[]
 
   @@map("users")
+}
+
+model AgentRun {
+  id                   String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String                  @map("user_id") @db.Uuid
+  sessionId            String?                 @map("session_id") @db.Uuid
+  status               String
+  inputText            String                  @map("input_text")
+  model                String
+  requiresConfirmation Boolean                 @default(false) @map("requires_confirmation")
+  errorMessage         String?                 @map("error_message")
+  startedAt            DateTime                @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt           DateTime?               @map("finished_at") @db.Timestamptz(6)
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version              Int                     @default(1)
+  user                 User                    @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages             AgentMessage[]
+  toolExecutions       ToolExecution[]
+  stateSnapshots       AgentRunStateSnapshot[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("agent_runs")
+}
+
+model AgentMessage {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  runId        String   @map("run_id") @db.Uuid
+  role         String
+  content      String
+  sequence     Int
+  metadataJson Json     @default("{}") @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user         User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  run          AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([runId, sequence])
+  @@index([runId, sequence])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("agent_messages")
+}
+
+model ToolExecution {
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                  String    @map("user_id") @db.Uuid
+  runId                   String    @map("run_id") @db.Uuid
+  toolName                String    @map("tool_name")
+  argumentsJson           Json      @default("{}") @map("arguments_json")
+  status                  String
+  requiresConfirmation    Boolean   @default(false) @map("requires_confirmation")
+  confirmationRequestedAt DateTime? @map("confirmation_requested_at") @db.Timestamptz(6)
+  confirmedAt             DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  resultJson              Json?     @map("result_json")
+  errorMessage            String?   @map("error_message")
+  sequence                Int
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user                    User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  run                     AgentRun  @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([runId, sequence])
+  @@index([status])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("tool_executions")
+}
+
+model AgentRunStateSnapshot {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  runId        String   @map("run_id") @db.Uuid
+  snapshotJson Json     @map("snapshot_json")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user         User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  run          AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([runId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("agent_run_state_snapshots")
 }
 
 model UserSetting {

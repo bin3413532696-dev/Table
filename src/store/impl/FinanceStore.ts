@@ -2,7 +2,7 @@
  * 财务存储实现
  */
 
-import { BaseStore, generateId } from '../base/Store';
+import { BaseStore } from '../base/Store';
 import { StoreConfig } from '../base/types';
 import { FinanceRecord, CreateFinanceDTO, UpdateFinanceDTO, FinanceStats, ModelStats } from '../../core/types';
 import { EventTopics } from '../../core/events';
@@ -12,7 +12,7 @@ import { isValidFinanceRecord, isValidCreateFinanceDTO } from '../../core/valida
  * 财务存储配置
  */
 const FINANCE_STORE_CONFIG: StoreConfig = {
-  storageKey: 'finance_records',
+  storageKey: 'finance_cache_disabled',
   typeName: 'FinanceRecord',
   autoSync: true,
 };
@@ -25,37 +25,11 @@ class FinanceStoreClass extends BaseStore<FinanceRecord, CreateFinanceDTO, Updat
   protected readonly changeTopic = EventTopics.FINANCE_CHANGED;
 
   protected loadFromStorage(): FinanceRecord[] {
-    try {
-      const config = this.config;
-      if (!config) return [];
-      
-      const data = localStorage.getItem(config.storageKey);
-      if (!data) return [];
-
-      const parsed = JSON.parse(data);
-      if (!Array.isArray(parsed)) return [];
-
-      // 过滤并验证有效记录
-      return parsed.filter(isValidFinanceRecord);
-    } catch {
-      console.warn(`[FinanceStore] Failed to load from storage`);
-      return [];
-    }
+    return [];
   }
 
   protected saveToStorage(data: FinanceRecord[]): void {
-    try {
-      localStorage.setItem(this.config.storageKey, JSON.stringify(data));
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-        console.error(`[${this.config.typeName}] Storage quota exceeded`);
-        // 触发存储配额事件
-        import('../../core/events').then(({ eventEmitter, EventTopics }) => {
-          eventEmitter.emit(EventTopics.STORAGE_QUOTA_EXCEEDED);
-        });
-      }
-      throw error;
-    }
+    void data;
   }
 
   protected validate(entity: unknown): entity is FinanceRecord {
@@ -144,7 +118,6 @@ class FinanceStoreClass extends BaseStore<FinanceRecord, CreateFinanceDTO, Updat
 
   hydrate(records: FinanceRecord[], emit = false): void {
     this.data = records.filter(r => this.validate(r));
-    this.saveToStorage(this.data);
     if (emit) {
       import('../../core/events').then(({ emitDataChange }) => {
         emitDataChange('finance');

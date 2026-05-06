@@ -1,56 +1,49 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { sendInfrastructureError } from '../../shared/http';
+import { kickProjectionRuntime } from '../projection/runtime';
 import {
   createKnowledgeRelationSchema,
   knowledgeDatasetBodySchema,
   knowledgeIdParamSchema,
   knowledgeRelationParamSchema,
-  knowledgeSyncPayloadSchema,
+  knowledgeSearchQuerySchema,
+  updateOntologyClassSchema,
+  updateOntologyRelationSchema,
   updateKnowledgeDocumentSchema,
   updateKnowledgeEntitySchema,
   updateKnowledgeAssertionSchema,
+  upsertOntologyClassSchema,
+  upsertOntologyRelationSchema,
   upsertKnowledgeAssertionSchema,
   upsertKnowledgeDocumentSchema,
   upsertKnowledgeEntitySchema,
 } from './schema';
 import {
   createKnowledgeRelationRecord,
+  deleteKnowledgeOntologyClass,
+  deleteKnowledgeOntologyRelation,
   deleteKnowledgeAssertionRecord,
   deleteKnowledgeDocumentRecord,
   deleteKnowledgeEntityRecord,
   deleteKnowledgeRelationRecord,
   getKnowledgeDataset,
   getKnowledgeMetadata,
+  listKnowledgeOntologyClasses,
+  listKnowledgeOntologyRelations,
   listKnowledgeAssertions,
   listKnowledgeDocuments,
   listKnowledgeEntities,
-  loadKnowledgeSyncPayload,
+  rebuildKnowledgeProjectionRecords,
+  searchKnowledge,
+  upsertKnowledgeOntologyClass,
+  upsertKnowledgeOntologyRelation,
   upsertKnowledgeAssertionRecord,
   upsertKnowledgeDocumentRecord,
   upsertKnowledgeEntityRecord,
   replaceKnowledgeAuthorityDataset,
-  replaceKnowledgeSyncPayload,
 } from './service';
 
 export async function knowledgeRoutes(app: FastifyInstance) {
-  app.get('/load-data', async (_request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      return await loadKnowledgeSyncPayload();
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.post('/sync-data', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const payload = knowledgeSyncPayloadSchema.parse(request.body);
-      const result = await replaceKnowledgeSyncPayload(payload.knowledge);
-      return reply.code(200).send(result);
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
   app.get('/knowledge/dataset', async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
       const dataset = await getKnowledgeDataset();
@@ -213,6 +206,20 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     }
   });
 
+  app.get('/knowledge/search', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const query = knowledgeSearchQuerySchema.parse(request.query);
+      const items = await searchKnowledge(query);
+      return {
+        items,
+        total: items.length,
+        source: 'postgres',
+      };
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
   app.post('/knowledge/assertions', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const payload = upsertKnowledgeAssertionSchema.parse(request.body);
@@ -257,6 +264,129 @@ export async function knowledgeRoutes(app: FastifyInstance) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Knowledge assertion not found' });
       }
       return reply.code(204).send();
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.get('/knowledge/ontology/classes', async (_request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const items = await listKnowledgeOntologyClasses();
+      return { items, total: items.length, source: 'postgres' };
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.post('/knowledge/ontology/classes', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const payload = upsertOntologyClassSchema.parse(request.body);
+      const item = await upsertKnowledgeOntologyClass(payload);
+      return reply.code(201).send(item);
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.patch('/knowledge/ontology/classes/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = knowledgeIdParamSchema.parse(request.params);
+      const payload = updateOntologyClassSchema.parse(request.body);
+      const classes = await listKnowledgeOntologyClasses();
+      const existing = classes.find((item) => item.id === id);
+      if (!existing) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ontology class not found' });
+      }
+
+      const item = await upsertKnowledgeOntologyClass({
+        id,
+        label: payload.label ?? existing.label,
+        description: payload.description ?? existing.description,
+        parentIds: payload.parentIds ?? existing.parentIds,
+      });
+      return item;
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.delete('/knowledge/ontology/classes/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = knowledgeIdParamSchema.parse(request.params);
+      const deleted = await deleteKnowledgeOntologyClass(id);
+      if (!deleted) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ontology class not found' });
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.get('/knowledge/ontology/relations', async (_request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const items = await listKnowledgeOntologyRelations();
+      return { items, total: items.length, source: 'postgres' };
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.post('/knowledge/ontology/relations', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const payload = upsertOntologyRelationSchema.parse(request.body);
+      const item = await upsertKnowledgeOntologyRelation(payload);
+      return reply.code(201).send(item);
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.patch('/knowledge/ontology/relations/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = knowledgeIdParamSchema.parse(request.params);
+      const payload = updateOntologyRelationSchema.parse(request.body);
+      const relations = await listKnowledgeOntologyRelations();
+      const existing = relations.find((item) => item.id === id);
+      if (!existing) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ontology relation not found' });
+      }
+
+      const item = await upsertKnowledgeOntologyRelation({
+        id,
+        label: payload.label ?? existing.label,
+        description: payload.description ?? existing.description,
+        inverseId: payload.inverseId === null ? undefined : (payload.inverseId ?? existing.inverseId),
+        symmetric: payload.symmetric ?? existing.symmetric,
+        transitive: payload.transitive ?? existing.transitive,
+      });
+      return item;
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.delete('/knowledge/ontology/relations/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = knowledgeIdParamSchema.parse(request.params);
+      const deleted = await deleteKnowledgeOntologyRelation(id);
+      if (!deleted) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ontology relation not found' });
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.post('/knowledge/rebuild/projections', async (_request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const result = await rebuildKnowledgeProjectionRecords();
+      kickProjectionRuntime();
+      return reply.code(202).send({
+        data: result,
+        source: 'postgres',
+      });
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }

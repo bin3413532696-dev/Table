@@ -1,10 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon, Shield, HardDrive, Plus, Edit2, Trash2 as TrashIcon, Globe, ChevronDown, ChevronUp, Power } from 'lucide-react';
-import { dataManager, hashPin } from '../../db';
+import { dataManager, financeDB, hashPin, taskDB } from '../../db';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useCurrentUser } from '../../contexts/UserContext';
 import { Button, Toggle } from '../../components/ui';
-import { ApiProvider, ensureBootstrappedApiConfig, getApiConfigs, saveApiConfigs } from '../../lib/apiConfig';
+import {
+  activateApiConfig,
+  ApiProvider,
+  deleteApiConfig,
+  ensureBootstrappedApiConfig,
+  getApiConfigs,
+  refreshApiConfigs,
+  saveApiConfigs,
+} from '../../lib/apiConfig';
+import {
+  clearAuthSession,
+  createAuthUser,
+  DEFAULT_USER_ID,
+  fetchAuthUsers,
+  setCurrentUserId,
+  switchAuthSession,
+  updateAuthMe,
+} from '../../lib/auth';
+import { loadKnowledgeFromServer } from '../../lib/dataSync';
+import { hydrateKnowledgeDataset } from '../../kb';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User, desc: '管理您的个人信息' },
@@ -28,7 +48,12 @@ function isValidEmail(email: string): boolean {
   return emailRegex.test(email);
 }
 
+function isValidUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function ProfileSettings() {
+  const { user, auth, reload } = useCurrentUser();
   const [profile, setProfile] = useState({
     name: '个人用户',
     email: '',
@@ -36,21 +61,188 @@ function ProfileSettings() {
   });
   const [saved, setSaved] = useState(false);
   const [emailError, setEmailError] = useState('');
+  const [devUserId, setDevUserId] = useState(DEFAULT_USER_ID);
+  const [switchingUser, setSwitchingUser] = useState(false);
+  const [userSwitchError, setUserSwitchError] = useState('');
+  const [userSwitchSaved, setUserSwitchSaved] = useState(false);
+  const [availableUsers, setAvailableUsers] = useState<Array<{
+    id: string;
+    displayName: string;
+    email: string | null;
+    bio: string;
+    isCurrentUser: boolean;
+  }>>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [createUserError, setCreateUserError] = useState('');
+  const [createUserSaved, setCreateUserSaved] = useState(false);
+  const [newUser, setNewUser] = useState({
+    displayName: '',
+    email: '',
+    bio: '',
+  });
 
   useEffect(() => {
-    const saved = localStorage.getItem('user_profile');
-    if (saved) setProfile(JSON.parse(saved));
-  }, []);
+    if (!user) {
+      return;
+    }
 
-  const handleSave = () => {
+    setProfile({
+      name: user.displayName || '个人用户',
+      email: user.email || '',
+      bio: user.bio || '',
+    });
+  }, [user]);
+
+  useEffect(() => {
+    setDevUserId(user?.id || DEFAULT_USER_ID);
+  }, [user?.id]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const loadUsers = async () => {
+      setLoadingUsers(true);
+      try {
+        const result = await fetchAuthUsers();
+        if (!disposed) {
+          setAvailableUsers(result.data.items);
+        }
+      } catch (error) {
+        console.warn('[Settings] Failed to load auth users:', error);
+      } finally {
+        if (!disposed) {
+          setLoadingUsers(false);
+        }
+      }
+    };
+
+    void loadUsers();
+    return () => {
+      disposed = true;
+    };
+  }, [user?.id]);
+
+  const reloadUsers = async () => {
+    const result = await fetchAuthUsers();
+    setAvailableUsers(result.data.items);
+  };
+
+  const handleSave = async () => {
     if (profile.email && !isValidEmail(profile.email)) {
       setEmailError('请输入有效的邮箱地址');
       return;
     }
+
     setEmailError('');
-    localStorage.setItem('user_profile', JSON.stringify(profile));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    try {
+      await updateAuthMe({
+        displayName: profile.name.trim(),
+        email: profile.email.trim() || null,
+        bio: profile.bio.trim(),
+      });
+
+      await reload();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (error) {
+      setEmailError(error instanceof Error ? error.message : '保存个人资料失败');
+    }
+  };
+
+  const refreshUserScopedData = async () => {
+    await Promise.all([
+      financeDB.getAll(),
+      taskDB.getAll(),
+    ]);
+
+    const knowledgeResult = await loadKnowledgeFromServer();
+    if (knowledgeResult.success && knowledgeResult.data?.knowledge !== undefined) {
+      await hydrateKnowledgeDataset(knowledgeResult.data.knowledge);
+    }
+  };
+
+  const handleSwitchUser = async (nextUserId: string) => {
+    const normalized = nextUserId.trim();
+    if (!isValidUuid(normalized)) {
+      setUserSwitchError('请输入合法的 UUID');
+      return;
+    }
+
+    setSwitchingUser(true);
+    setUserSwitchError('');
+
+    try {
+      await switchAuthSession(normalized);
+      setCurrentUserId(normalized);
+      await reload();
+      await refreshUserScopedData();
+      await reloadUsers();
+      setUserSwitchSaved(true);
+      setTimeout(() => setUserSwitchSaved(false), 2000);
+    } catch (error) {
+      setCurrentUserId(user?.id || DEFAULT_USER_ID);
+      setUserSwitchError(error instanceof Error ? error.message : '切换用户失败，请先创建该用户');
+    } finally {
+      setSwitchingUser(false);
+    }
+  };
+
+  const handleResetDefaultUser = async () => {
+    setSwitchingUser(true);
+    setUserSwitchError('');
+
+    try {
+      await clearAuthSession();
+      setDevUserId(DEFAULT_USER_ID);
+      setCurrentUserId(DEFAULT_USER_ID);
+      await reload();
+      await refreshUserScopedData();
+      await reloadUsers();
+      setUserSwitchSaved(true);
+      setTimeout(() => setUserSwitchSaved(false), 2000);
+    } catch (error) {
+      setUserSwitchError(error instanceof Error ? error.message : '恢复默认用户失败');
+    } finally {
+      setSwitchingUser(false);
+    }
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUser.displayName.trim()) {
+      setCreateUserError('请输入用户名称');
+      return;
+    }
+
+    if (newUser.email && !isValidEmail(newUser.email)) {
+      setCreateUserError('请输入有效的邮箱地址');
+      return;
+    }
+
+    setCreatingUser(true);
+    setCreateUserError('');
+
+    try {
+      const result = await createAuthUser({
+        displayName: newUser.displayName.trim(),
+        email: newUser.email.trim() || null,
+        bio: newUser.bio.trim(),
+      });
+
+      await reloadUsers();
+      setDevUserId(result.data.user.id);
+      setNewUser({
+        displayName: '',
+        email: '',
+        bio: '',
+      });
+      setCreateUserSaved(true);
+      setTimeout(() => setCreateUserSaved(false), 2000);
+    } catch (error) {
+      setCreateUserError(error instanceof Error ? error.message : '创建用户失败');
+    } finally {
+      setCreatingUser(false);
+    }
   };
 
   return (
@@ -62,7 +254,119 @@ function ProfileSettings() {
         </div>
         <div>
           <h3 className="font-semibold text-text-primary text-lg">{profile.name}</h3>
-          <p className="text-sm text-text-muted">个人工作站用户</p>
+          <p className="text-sm text-text-muted">{auth?.isDefaultUser ? '默认本地用户' : '认证用户'}</p>
+        </div>
+      </div>
+
+      <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 space-y-4">
+        <div>
+          <h4 className="font-medium text-text-primary">开发期用户切换</h4>
+          <p className="text-sm mt-1 text-text-secondary">用于验证多用户隔离链路。现在需要先创建用户，再切换到已有用户。</p>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium mb-2 text-text-secondary">用户 ID</label>
+            <input
+              type="text"
+              value={devUserId}
+              onChange={(e) => {
+                setDevUserId(e.target.value);
+                setUserSwitchError('');
+              }}
+              placeholder={DEFAULT_USER_ID}
+              className={`input ${userSwitchError ? 'border-error focus:ring-error/20 focus:border-error' : ''}`}
+            />
+            <p className="text-xs text-text-muted mt-1">当前用户来源：{auth?.source === 'header' ? '自定义用户' : '默认用户'}</p>
+            {userSwitchError && <p className="text-error text-xs mt-1">{userSwitchError}</p>}
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2 text-text-secondary">已有用户</label>
+            <select
+              value={devUserId}
+              onChange={(e) => {
+                setDevUserId(e.target.value);
+                setUserSwitchError('');
+              }}
+              className="input"
+              disabled={loadingUsers || switchingUser}
+            >
+              <option value={DEFAULT_USER_ID}>默认本地用户</option>
+              {availableUsers.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.displayName} {item.isCurrentUser ? '(当前)' : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-text-muted mt-1">
+              {loadingUsers ? '正在读取用户列表...' : `当前可选 ${availableUsers.length} 个活动用户`}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button variant="primary" onClick={() => void handleSwitchUser(devUserId)} disabled={switchingUser}>
+              {switchingUser ? '切换中...' : userSwitchSaved ? '已切换' : '切换用户'}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void handleResetDefaultUser()}
+              disabled={switchingUser}
+            >
+              恢复默认用户
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4 rounded-xl bg-bg-secondary border border-border-primary space-y-4">
+        <div>
+          <h4 className="font-medium text-text-primary">创建开发期用户</h4>
+          <p className="text-sm mt-1 text-text-secondary">显式创建用户及其基线数据，避免再通过任意 UUID 隐式建号。</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-2 text-text-secondary">用户名称</label>
+            <input
+              type="text"
+              value={newUser.displayName}
+              onChange={(e) => {
+                setNewUser({ ...newUser, displayName: e.target.value });
+                setCreateUserError('');
+              }}
+              className="input"
+              placeholder="例如：项目成员 A"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2 text-text-secondary">邮箱</label>
+            <input
+              type="email"
+              value={newUser.email}
+              onChange={(e) => {
+                setNewUser({ ...newUser, email: e.target.value });
+                setCreateUserError('');
+              }}
+              className="input"
+              placeholder="可选"
+            />
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-2 text-text-secondary">简介</label>
+          <textarea
+            value={newUser.bio}
+            onChange={(e) => {
+              setNewUser({ ...newUser, bio: e.target.value.slice(0, 200) });
+              setCreateUserError('');
+            }}
+            rows={3}
+            className="input resize-none"
+            placeholder="可选"
+          />
+        </div>
+        {createUserError && <p className="text-error text-xs">{createUserError}</p>}
+        <div className="flex flex-wrap gap-3">
+          <Button variant="primary" onClick={() => void handleCreateUser()} disabled={creatingUser}>
+            {creatingUser ? '创建中...' : createUserSaved ? '已创建' : '创建用户'}
+          </Button>
         </div>
       </div>
 
@@ -103,7 +407,7 @@ function ProfileSettings() {
         </div>
       </div>
 
-      <Button variant="primary" onClick={handleSave} icon={saved ? <Check className="w-4 h-4" /> : undefined}>
+      <Button variant="primary" onClick={() => void handleSave()} icon={saved ? <Check className="w-4 h-4" /> : undefined}>
         {saved ? '已保存' : '保存设置'}
       </Button>
     </div>
@@ -148,8 +452,8 @@ function SecuritySettings() {
         <div className="flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
           <div>
-            <h4 className="font-medium text-text-primary">本地数据安全</h4>
-            <p className="text-sm mt-1 text-text-secondary">所有数据存储在浏览器本地，清除浏览器数据将导致数据丢失。建议定期导出备份。</p>
+            <h4 className="font-medium text-text-primary">本地设置安全</h4>
+            <p className="text-sm mt-1 text-text-secondary">业务数据与知识库以服务端为准，当前浏览器仍会保存主题、PIN 等本地设置。清除浏览器数据会丢失这些设置，建议按需导出备份。</p>
           </div>
         </div>
       </div>
@@ -365,7 +669,7 @@ function DataManager() {
       </div>
 
       <div className="space-y-2">
-        <div className="text-sm font-semibold text-text-primary">知识库数据（本地 + 文件同步）</div>
+        <div className="text-sm font-semibold text-text-primary">知识库数据（服务端权威）</div>
         <button onClick={handleExportKnowledge} className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors text-left group">
           <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
             <Download className="w-5 h-5 text-primary" />
@@ -382,7 +686,7 @@ function DataManager() {
           </div>
           <div>
             <div className="text-sm font-medium text-text-primary">导入知识库</div>
-            <div className="text-xs text-text-muted">覆盖当前知识库并同步到知识文件权威源</div>
+            <div className="text-xs text-text-muted">覆盖当前知识库并同步到服务端知识库</div>
           </div>
           <input type="file" accept=".json" onChange={createImportHandler(dataManager.importKnowledgeData, '知识库导入成功，页面即将刷新...')} className="hidden" />
         </label>
@@ -449,8 +753,8 @@ function DataManager() {
                 <h3 className="text-lg font-semibold text-text-primary">确认清空</h3>
               </div>
               <p className="text-text-secondary mb-5 text-sm">
-                {clearMode === 'all' && '此操作会重置 PostgreSQL 中的任务与财务测试数据，并清空本地知识库与设置缓存。'}
-                {clearMode === 'knowledge' && '此操作会清空当前知识库，并同步覆盖知识文件权威源。'}
+                {clearMode === 'all' && '此操作会重置 PostgreSQL 中的任务与财务测试数据，清空服务端知识库，并清空当前浏览器的设置缓存。'}
+                {clearMode === 'knowledge' && '此操作会清空当前知识库，并同步覆盖服务端知识数据。'}
                 {clearMode === 'local' && '此操作会清空当前浏览器中的个人资料、主题、通知和 PIN 设置。'}
               </p>
               <div className="flex gap-3">
@@ -471,8 +775,10 @@ function ApiConfigSettings() {
   const [showForm, setShowForm] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [loadingProviders, setLoadingProviders] = useState(false);
   const [fetchedModels, setFetchedModels] = useState<{ name: string; label: string }[]>([]);
   const [fetchModelsError, setFetchModelsError] = useState('');
+  const [providerError, setProviderError] = useState('');
   const [formData, setFormData] = useState<{
     name: string;
     apiFormat: 'anthropic' | 'openai' | 'gemini' | 'custom';
@@ -488,6 +794,7 @@ function ApiConfigSettings() {
     model: '',
     headers: '',
   });
+  const [editingApiKeyPreview, setEditingApiKeyPreview] = useState('');
 
   const apiFormats = [
     { value: 'openai', label: 'OpenAI Chat Completions' },
@@ -518,7 +825,7 @@ function ApiConfigSettings() {
     
     try {
       const { baseUrl, apiKey, apiFormat } = formData;
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const headers: Record<string, string> = {};
       if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
       const endpoints = ['/models', '/v1/models', '/api/models'];
@@ -567,12 +874,37 @@ function ApiConfigSettings() {
   };
 
   useEffect(() => {
-    ensureBootstrappedApiConfig();
-    setProviders(getApiConfigs());
+    let disposed = false;
+
+    const loadProviders = async () => {
+      setLoadingProviders(true);
+      setProviderError('');
+      try {
+        await ensureBootstrappedApiConfig();
+        if (!disposed) {
+          setProviders(getApiConfigs());
+        }
+      } catch (error) {
+        if (!disposed) {
+          setProviderError(error instanceof Error ? error.message : '加载 Provider 失败');
+        }
+      } finally {
+        if (!disposed) {
+          setLoadingProviders(false);
+        }
+      }
+    };
+
+    void loadProviders();
+
+    return () => {
+      disposed = true;
+    };
   }, []);
 
   const handleAdd = () => {
     setEditingProvider(null);
+    setEditingApiKeyPreview('');
     setFormData({
       name: '',
       apiFormat: 'openai',
@@ -588,11 +920,12 @@ function ApiConfigSettings() {
 
   const handleEdit = (provider: ApiProvider) => {
     setEditingProvider(provider);
+    setEditingApiKeyPreview(provider.apiKeyPreview || (provider.hasApiKey ? '已配置 API Key' : ''));
     setFormData({
       name: provider.name,
       apiFormat: provider.apiFormat,
       baseUrl: provider.baseUrl,
-      apiKey: provider.apiKey,
+      apiKey: '',
       model: provider.model || '',
       headers: provider.headers ? JSON.stringify(provider.headers, null, 2) : '',
     });
@@ -610,22 +943,27 @@ function ApiConfigSettings() {
     }));
   };
 
-  const handleActivate = (id: string) => {
-    const newProviders = providers.map(p => ({
-      ...p,
-      isActive: p.id === id,
-    }));
-    setProviders(newProviders);
-    saveApiConfigs(newProviders);
+  const handleActivate = async (id: string) => {
+    setProviderError('');
+    try {
+      const nextProviders = await activateApiConfig(id);
+      setProviders(nextProviders);
+    } catch (error) {
+      setProviderError(error instanceof Error ? error.message : '激活 Provider 失败');
+    }
   };
 
-  const handleDelete = (id: string) => {
-    const newProviders = providers.filter(p => p.id !== id);
-    setProviders(newProviders);
-    saveApiConfigs(newProviders);
+  const handleDelete = async (id: string) => {
+    setProviderError('');
+    try {
+      const nextProviders = await deleteApiConfig(id);
+      setProviders(nextProviders);
+    } catch (error) {
+      setProviderError(error instanceof Error ? error.message : '删除 Provider 失败');
+    }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.name || !formData.baseUrl) {
       alert('请填写名称和基础URL');
       return;
@@ -648,21 +986,26 @@ function ApiConfigSettings() {
       apiFormat: formData.apiFormat,
       baseUrl: formData.baseUrl,
       apiKey: formData.apiKey,
+      hasApiKey: editingProvider?.hasApiKey,
+      apiKeyPreview: editingProvider?.apiKeyPreview,
       model: formData.model,
       headers,
     };
 
-    let newProviders: ApiProvider[];
-    if (editingProvider) {
-      newProviders = providers.map(p => p.id === editingProvider.id ? newProvider : p);
-    } else {
-      newProviders = [...providers, newProvider];
-    }
+    try {
+      const newProviders: ApiProvider[] = editingProvider
+        ? providers.map((p) => (p.id === editingProvider.id ? newProvider : p))
+        : [...providers, newProvider];
 
-    setProviders(newProviders);
-    saveApiConfigs(newProviders);
-    setShowForm(false);
-    setEditingProvider(null);
+      await saveApiConfigs(newProviders);
+      const latestProviders = await refreshApiConfigs();
+      setProviders(latestProviders);
+      setProviderError('');
+      setShowForm(false);
+      setEditingProvider(null);
+    } catch (error) {
+      setProviderError(error instanceof Error ? error.message : '保存 Provider 失败');
+    }
   };
 
   const activeProvider = providers.find(p => p.isActive);
@@ -678,6 +1021,12 @@ function ApiConfigSettings() {
           </div>
         </div>
       </div>
+
+      {providerError && (
+        <div className="p-4 rounded-xl bg-error/10 border border-error/20 text-sm text-error">
+          {providerError}
+        </div>
+      )}
 
       {activeProvider && (
         <div className="p-4 rounded-xl bg-success/10 border border-success/20">
@@ -762,18 +1111,21 @@ function ApiConfigSettings() {
                     type={showApiKey ? 'text' : 'password'}
                     value={formData.apiKey}
                     onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
-                    placeholder="输入 API Key"
+                    placeholder={editingProvider?.hasApiKey ? '留空则保留当前密钥，输入则覆盖' : '输入 API Key'}
                     className="input pr-10"
                   />
                   <button onClick={() => setShowApiKey(!showApiKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary">
                     {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                {editingProvider?.hasApiKey && !formData.apiKey && (
+                  <p className="text-xs text-text-muted mt-1">当前已配置密钥：{editingApiKeyPreview || '已隐藏'}</p>
+                )}
               </div>
 
               {formData.baseUrl && formData.apiKey && (
                 <div>
-                  <Button variant="secondary" onClick={fetchModels} disabled={fetchingModels} className="w-full">
+                  <Button variant="secondary" onClick={() => void fetchModels()} disabled={fetchingModels} className="w-full">
                     {fetchingModels ? '获取中...' : '获取模型列表'}
                   </Button>
                   {fetchModelsError && <p className="text-error text-sm mt-2">{fetchModelsError}</p>}
@@ -815,7 +1167,7 @@ function ApiConfigSettings() {
 
               <div className="flex gap-3">
                 <Button variant="secondary" onClick={() => setShowForm(false)}>取消</Button>
-                <Button variant="primary" onClick={handleSave}>保存</Button>
+                <Button variant="primary" onClick={() => void handleSave()}>保存</Button>
               </div>
             </div>
           </motion.div>
@@ -823,7 +1175,11 @@ function ApiConfigSettings() {
       </AnimatePresence>
 
       <div className="space-y-3">
-        {providers.length === 0 ? (
+        {loadingProviders ? (
+          <div className="text-center py-12 text-text-muted">
+            <p>正在加载 Provider 配置...</p>
+          </div>
+        ) : providers.length === 0 ? (
           <div className="text-center py-12 text-text-muted">
             <Globe className="w-12 h-12 mx-auto mb-3 opacity-30" />
             <p>暂无 Provider 配置</p>
@@ -850,7 +1206,7 @@ function ApiConfigSettings() {
                 <div className="flex items-center gap-2">
                   {!provider.isActive && (
                     <button
-                      onClick={() => handleActivate(provider.id)}
+                      onClick={() => void handleActivate(provider.id)}
                       className="p-2 text-text-secondary hover:text-success hover:bg-success/5 rounded-lg transition-colors"
                       title="激活"
                     >
@@ -864,7 +1220,7 @@ function ApiConfigSettings() {
                     <Edit2 className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => handleDelete(provider.id)}
+                    onClick={() => void handleDelete(provider.id)}
                     className="p-2 text-text-secondary hover:text-error hover:bg-error/5 rounded-lg transition-colors"
                   >
                     <TrashIcon className="w-4 h-4" />

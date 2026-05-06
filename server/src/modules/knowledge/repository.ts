@@ -1,14 +1,21 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/client';
+import { getCurrentUserId } from '../../shared/user-context';
 import { createDefaultKnowledgeDataset, normalizeKnowledgeDataset } from './dataset';
+import {
+  enqueueProjectionOutboxEvents,
+  KNOWLEDGE_PROJECTION_TOPIC,
+  toProjectionPayload,
+} from '../projection/outbox';
 import type {
   CreateKnowledgeRelationInput,
+  KnowledgeSearchQueryInput,
+  UpsertOntologyClassInput,
+  UpsertOntologyRelationInput,
   UpsertKnowledgeAssertionInput,
   UpsertKnowledgeDocumentInput,
   UpsertKnowledgeEntityInput,
 } from './schema';
-
-const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 export type KnowledgeRelationEdgeRecord = {
   predicateId: string;
@@ -69,6 +76,16 @@ export type KnowledgeDatasetRecordShape = {
   updatedAt: number;
 };
 
+export type KnowledgeSearchRecord = {
+  kind: 'entity' | 'document';
+  id: string;
+  title: string;
+  summary: string;
+  score: number;
+  typeId?: string;
+  tags: string[];
+};
+
 type SeedKnowledgeDataset = ReturnType<typeof createDefaultKnowledgeDataset>;
 
 function asJsonValue(value: unknown): Prisma.InputJsonValue {
@@ -106,6 +123,25 @@ function clone<T>(value: T): T {
 
 function normalizeStringArray(values?: string[]) {
   return Array.from(new Set((values ?? []).map((item) => item.trim()).filter(Boolean)));
+}
+
+function escapeLikePattern(input: string) {
+  return input.replace(/[\\%_]/g, '\\$&');
+}
+
+function buildKnowledgeEntitySearchVectorSql() {
+  return Prisma.sql`
+    setweight(to_tsvector('simple', coalesce(e.title, '')), 'A') ||
+    setweight(to_tsvector('simple', coalesce(e.summary, '')), 'B')
+  `;
+}
+
+function buildKnowledgeDocumentSearchVectorSql() {
+  return Prisma.sql`
+    setweight(to_tsvector('simple', coalesce(d.title, '')), 'A') ||
+    setweight(to_tsvector('simple', coalesce(d.summary, '')), 'B') ||
+    setweight(to_tsvector('simple', coalesce(d.content, '')), 'C')
+  `;
 }
 
 function slugify(input: string): string {
@@ -147,6 +183,12 @@ function toOntologyRelationRecord(value: unknown) {
   const record = toRecord(value);
   const id = typeof record.id === 'string' ? record.id : '';
   const label = typeof record.label === 'string' ? record.label : id;
+  const inverseId =
+    typeof record.inverseId === 'string'
+      ? record.inverseId
+      : typeof record.inverseOf === 'string'
+        ? record.inverseOf
+        : undefined;
 
   return {
     id,
@@ -154,25 +196,104 @@ function toOntologyRelationRecord(value: unknown) {
     description: typeof record.description === 'string' ? record.description : '',
     symmetric: record.symmetric === true,
     transitive: record.transitive === true,
-    ...(typeof record.inverseOf === 'string' ? { inverseOf: record.inverseOf } : {}),
+    ...(inverseId ? { inverseOf: inverseId } : {}),
+  };
+}
+
+function toOntologyClassShape(record: {
+  id: string;
+  label: string;
+  description: string;
+  parentIdsJson: unknown;
+}) {
+  return {
+    id: record.id,
+    label: record.label,
+    description: record.description,
+    parentIds: toStringArray(record.parentIdsJson),
+  };
+}
+
+function toOntologyRelationShape(record: {
+  id: string;
+  label: string;
+  description: string;
+  inverseOf: string | null;
+  symmetric: boolean;
+  transitive: boolean;
+}) {
+  return {
+    id: record.id,
+    label: record.label,
+    description: record.description,
+    inverseId: record.inverseOf ?? undefined,
+    symmetric: record.symmetric,
+    transitive: record.transitive,
+  };
+}
+
+function toTaskProjectionPayload(task: {
+  id: string;
+  title: string;
+  completed: boolean;
+  priority: string;
+  dueDate: Date | null;
+  notes: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: task.id,
+    title: task.title,
+    completed: task.completed,
+    priority: task.priority,
+    dueDate: task.dueDate ? task.dueDate.toISOString().slice(0, 10) : undefined,
+    notes: task.notes ?? undefined,
+    createdAt: task.createdAt.getTime(),
+    updatedAt: task.updatedAt.getTime(),
+  };
+}
+
+function toFinanceProjectionPayload(record: {
+  id: string;
+  type: string;
+  amount: { toString(): string };
+  description: string;
+  category: string;
+  recordDate: Date;
+  model: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: record.id,
+    type: record.type,
+    amount: Number(record.amount),
+    description: record.description,
+    category: record.category,
+    date: record.recordDate.toISOString().slice(0, 10),
+    model: record.model ?? undefined,
+    createdAt: record.createdAt.getTime(),
+    updatedAt: record.updatedAt.getTime(),
   };
 }
 
 async function touchKnowledgeMetadata(timestamp: Date, tx?: Prisma.TransactionClient) {
   const db = tx ?? prisma;
+  const userId = getCurrentUserId();
   const payload = {
     context: clone(createDefaultKnowledgeDataset(timestamp.getTime()).context),
     updatedAt: timestamp.getTime(),
   };
 
   const existing = await db.knowledgeBase.findUnique({
-    where: { userId: DEFAULT_USER_ID },
+    where: { userId },
   });
 
   if (!existing) {
     await db.knowledgeBase.create({
       data: {
-        userId: DEFAULT_USER_ID,
+        userId,
         datasetJson: asJsonValue(payload),
       },
     });
@@ -182,7 +303,7 @@ async function touchKnowledgeMetadata(timestamp: Date, tx?: Prisma.TransactionCl
   const normalized = normalizeKnowledgeDataset(existing.datasetJson);
 
   await db.knowledgeBase.update({
-    where: { userId: DEFAULT_USER_ID },
+    where: { userId },
     data: {
       datasetJson: asJsonValue({
         context: normalized.context,
@@ -198,12 +319,13 @@ async function touchKnowledgeMetadata(timestamp: Date, tx?: Prisma.TransactionCl
 export async function findKnowledgeBase() {
   return prisma.knowledgeBase.findUnique({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId: getCurrentUserId(),
     },
   });
 }
 
 async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: KnowledgeDatasetRecordShape) {
+  const userId = getCurrentUserId();
   const ontologyClassRows = dataset.ontology.classes
     .map((item) => toOntologyClassRecord(item))
     .filter((item) => item.id);
@@ -212,7 +334,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
     await tx.knowledgeOntologyClassRecord.createMany({
       data: ontologyClassRows.map((item) => ({
         id: item.id,
-        userId: DEFAULT_USER_ID,
+        userId,
         label: item.label,
         description: item.description,
         parentIdsJson: asJsonValue(item.parentIds),
@@ -230,7 +352,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
     await tx.knowledgeOntologyRelationRecord.createMany({
       data: ontologyRelationRows.map((item) => ({
         id: item.id,
-        userId: DEFAULT_USER_ID,
+        userId,
         label: item.label,
         description: item.description,
         symmetric: item.symmetric,
@@ -245,7 +367,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
   await tx.knowledgeEntityRecord.createMany({
     data: dataset.entities.map((entity) => ({
       id: entity.id,
-      userId: DEFAULT_USER_ID,
+      userId,
       typeId: entity.typeId,
       title: entity.title,
       summary: entity.summary,
@@ -261,7 +383,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
 
   const relationRows = dataset.entities.flatMap((entity) =>
     entity.relations.map((relation: KnowledgeRelationEdgeRecord) => ({
-      userId: DEFAULT_USER_ID,
+      userId,
       subjectId: entity.id,
       predicateId: relation.predicateId,
       targetId: relation.targetId,
@@ -281,7 +403,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
   await tx.knowledgeDocumentRecord.createMany({
     data: dataset.documents.map((document) => ({
       id: document.id,
-      userId: DEFAULT_USER_ID,
+      userId,
       title: document.title,
       summary: document.summary,
       content: document.content,
@@ -294,7 +416,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
 
   const documentLinks = dataset.documents.flatMap((document) =>
     document.entityIds.map((entityId) => ({
-      userId: DEFAULT_USER_ID,
+      userId,
       documentId: document.id,
       entityId,
     }))
@@ -309,7 +431,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
   await tx.knowledgeAssertionRecord.createMany({
     data: dataset.assertions.map((assertion) => ({
       id: assertion.id,
-      userId: DEFAULT_USER_ID,
+      userId,
       subjectId: assertion.subjectId,
       predicateId: assertion.predicateId,
       objectId: assertion.objectId ?? null,
@@ -326,7 +448,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
 
   const evidenceRows = dataset.assertions.flatMap((assertion) =>
     assertion.evidenceDocumentIds.map((documentId) => ({
-      userId: DEFAULT_USER_ID,
+      userId,
       assertionId: assertion.id,
       documentId,
     }))
@@ -340,6 +462,7 @@ async function seedStructuredKnowledge(tx: Prisma.TransactionClient, dataset: Kn
 }
 
 export async function ensureKnowledgeBase() {
+  const userId = getCurrentUserId();
   const existing = await findKnowledgeBase();
   if (existing) {
     return existing;
@@ -350,7 +473,7 @@ export async function ensureKnowledgeBase() {
   return prisma.$transaction(async (tx) => {
     const base = await tx.knowledgeBase.create({
       data: {
-        userId: DEFAULT_USER_ID,
+        userId,
         datasetJson: asJsonValue({
           context: dataset.context,
           updatedAt: dataset.updatedAt,
@@ -364,38 +487,39 @@ export async function ensureKnowledgeBase() {
 }
 
 export async function getKnowledgeDatasetRecord(): Promise<KnowledgeDatasetRecordShape> {
+  const userId = getCurrentUserId();
   const base = await ensureKnowledgeBase();
   const meta = normalizeKnowledgeDataset(base.datasetJson);
 
   const [ontologyClasses, ontologyRelations, entities, relations, documents, documentLinks, assertions, evidenceLinks] = await Promise.all([
     prisma.knowledgeOntologyClassRecord.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       orderBy: { updatedAt: 'desc' },
     }),
     prisma.knowledgeOntologyRelationRecord.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       orderBy: { updatedAt: 'desc' },
     }),
     prisma.knowledgeEntityRecord.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       orderBy: { updatedAt: 'desc' },
     }),
     prisma.knowledgeRelationRecord.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     }),
     prisma.knowledgeDocumentRecord.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       orderBy: { updatedAt: 'desc' },
     }),
     prisma.knowledgeDocumentEntityLink.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     }),
     prisma.knowledgeAssertionRecord.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
       orderBy: { updatedAt: 'desc' },
     }),
     prisma.knowledgeAssertionEvidenceLink.findMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     }),
   ]);
 
@@ -444,9 +568,9 @@ export async function getKnowledgeDatasetRecord(): Promise<KnowledgeDatasetRecor
         id: item.id,
         label: item.label,
         description: item.description,
+        inverseId: item.inverseOf ?? undefined,
         symmetric: item.symmetric,
         transitive: item.transitive,
-        ...(item.inverseOf ? { inverseOf: item.inverseOf } : {}),
       })),
     },
     entities: entities.map((entity): KnowledgeEntityRecordShape => ({
@@ -511,41 +635,42 @@ export async function getKnowledgeMetadataRecord() {
 }
 
 export async function replaceKnowledgeDataset(raw: unknown): Promise<KnowledgeDatasetRecordShape> {
+  const userId = getCurrentUserId();
   const dataset = normalizeKnowledgeDataset(raw) as KnowledgeDatasetRecordShape;
 
   await prisma.$transaction(async (tx) => {
     await tx.knowledgeAssertionEvidenceLink.deleteMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
     await tx.knowledgeDocumentEntityLink.deleteMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
     await tx.knowledgeRelationRecord.deleteMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
     await tx.knowledgeAssertionRecord.deleteMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
     await tx.knowledgeOntologyRelationRecord.deleteMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
     await tx.knowledgeOntologyClassRecord.deleteMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
     await tx.knowledgeDocumentRecord.deleteMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
     await tx.knowledgeEntityRecord.deleteMany({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
 
     const existing = await tx.knowledgeBase.findUnique({
-      where: { userId: DEFAULT_USER_ID },
+      where: { userId },
     });
 
     if (existing) {
       await tx.knowledgeBase.update({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         data: {
           datasetJson: asJsonValue({
             context: dataset.context,
@@ -559,7 +684,7 @@ export async function replaceKnowledgeDataset(raw: unknown): Promise<KnowledgeDa
     } else {
       await tx.knowledgeBase.create({
         data: {
-          userId: DEFAULT_USER_ID,
+          userId,
           datasetJson: asJsonValue({
             context: dataset.context,
             updatedAt: dataset.updatedAt,
@@ -589,16 +714,442 @@ export async function listKnowledgeAssertionRecords() {
   return dataset.assertions;
 }
 
+export async function searchKnowledgeRecords(input: KnowledgeSearchQueryInput) {
+  const userId = getCurrentUserId();
+  const normalizedQuery = input.query.trim();
+  const normalizedTypeIds = Array.isArray(input.typeIds)
+    ? input.typeIds.map((item) => item.trim()).filter(Boolean)
+    : typeof input.typeIds === 'string' && input.typeIds.trim()
+      ? [input.typeIds.trim()]
+      : [];
+  const normalizedTags = Array.isArray(input.tags)
+    ? input.tags.map((item) => item.trim()).filter(Boolean)
+    : typeof input.tags === 'string' && input.tags.trim()
+      ? [input.tags.trim()]
+      : [];
+  const limit = input.limit ?? 20;
+  const escapedQuery = normalizedQuery ? `%${escapeLikePattern(normalizedQuery)}%` : '';
+  const hasQuery = normalizedQuery.length > 0;
+  const entitySearchVector = buildKnowledgeEntitySearchVectorSql();
+  const documentSearchVector = buildKnowledgeDocumentSearchVectorSql();
+  const entityTagFilter =
+    normalizedTags.length > 0
+      ? Prisma.sql`
+          and exists (
+            select 1
+            from jsonb_array_elements_text(
+              case
+                when jsonb_typeof(e.tags_json) = 'array' then e.tags_json
+                else '[]'::jsonb
+              end
+            ) as tag(value)
+            where tag.value in (${Prisma.join(normalizedTags)})
+          )
+        `
+      : Prisma.empty;
+  const documentTagFilter =
+    normalizedTags.length > 0
+      ? Prisma.sql`
+          and exists (
+            select 1
+            from jsonb_array_elements_text(
+              case
+                when jsonb_typeof(d.tags_json) = 'array' then d.tags_json
+                else '[]'::jsonb
+              end
+            ) as tag(value)
+            where tag.value in (${Prisma.join(normalizedTags)})
+          )
+        `
+      : Prisma.empty;
+  const entityTypeFilter =
+    normalizedTypeIds.length > 0
+      ? Prisma.sql`and e.type_id in (${Prisma.join(normalizedTypeIds)})`
+      : Prisma.empty;
+  const entitySearchFilter = hasQuery
+    ? Prisma.sql`
+        and (
+          ${entitySearchVector} @@ websearch_to_tsquery('simple', ${normalizedQuery})
+          or e.title ilike ${escapedQuery} escape '\'
+          or e.summary ilike ${escapedQuery} escape '\'
+        )
+      `
+    : Prisma.empty;
+  const documentSearchFilter = hasQuery
+    ? Prisma.sql`
+        and (
+          ${documentSearchVector} @@ websearch_to_tsquery('simple', ${normalizedQuery})
+          or d.title ilike ${escapedQuery} escape '\'
+          or d.summary ilike ${escapedQuery} escape '\'
+          or d.content ilike ${escapedQuery} escape '\'
+        )
+      `
+    : Prisma.empty;
+
+  type SearchRow = {
+    kind: 'entity' | 'document';
+    id: string;
+    title: string;
+    summary: string;
+    score: number;
+    typeId: string | null;
+    tagsJson: unknown;
+    updatedAt: Date;
+  };
+
+  const [entityRows, documentRows] = await Promise.all([
+    prisma.$queryRaw<SearchRow[]>(Prisma.sql`
+      select
+        'entity'::text as kind,
+        e.id,
+        e.title,
+        e.summary,
+        ${
+          hasQuery
+            ? Prisma.sql`
+                greatest(
+                  ts_rank_cd(${entitySearchVector}, websearch_to_tsquery('simple', ${normalizedQuery})),
+                  case
+                    when e.title ilike ${escapedQuery} escape '\' then 0.8
+                    when e.summary ilike ${escapedQuery} escape '\' then 0.4
+                    else 0
+                  end
+                )
+              `
+            : Prisma.sql`0::double precision`
+        } as score,
+        e.type_id as "typeId",
+        e.tags_json as "tagsJson",
+        e.updated_at as "updatedAt"
+      from knowledge_entities e
+      where e.user_id = cast(${userId} as uuid)
+      ${entityTypeFilter}
+      ${entityTagFilter}
+      ${entitySearchFilter}
+      order by score desc, e.updated_at desc
+      limit ${limit}
+    `),
+    input.includeDocuments === false
+      ? Promise.resolve([] as SearchRow[])
+      : prisma.$queryRaw<SearchRow[]>(Prisma.sql`
+          select
+            'document'::text as kind,
+            d.id,
+            d.title,
+            d.summary,
+            ${
+              hasQuery
+                ? Prisma.sql`
+                    greatest(
+                      ts_rank_cd(${documentSearchVector}, websearch_to_tsquery('simple', ${normalizedQuery})),
+                      case
+                        when d.title ilike ${escapedQuery} escape '\' then 0.9
+                        when d.summary ilike ${escapedQuery} escape '\' then 0.45
+                        when d.content ilike ${escapedQuery} escape '\' then 0.2
+                        else 0
+                      end
+                    )
+                  `
+                : Prisma.sql`0::double precision`
+            } as score,
+            null::text as "typeId",
+            d.tags_json as "tagsJson",
+            d.updated_at as "updatedAt"
+          from knowledge_documents d
+          where d.user_id = cast(${userId} as uuid)
+          ${documentTagFilter}
+          ${documentSearchFilter}
+          order by score desc, d.updated_at desc
+          limit ${limit}
+        `),
+  ]);
+
+  return [...entityRows, ...documentRows]
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return right.updatedAt.getTime() - left.updatedAt.getTime();
+    })
+    .slice(0, limit)
+    .map((item): KnowledgeSearchRecord => ({
+      kind: item.kind,
+      id: item.id,
+      title: item.title,
+      summary: item.summary,
+      score: Number(item.score ?? 0),
+      ...(item.typeId ? { typeId: item.typeId } : {}),
+      tags: toStringArray(item.tagsJson),
+    }));
+}
+
+export async function listOntologyClasses() {
+  const userId = getCurrentUserId();
+  const items = await prisma.knowledgeOntologyClassRecord.findMany({
+    where: { userId },
+    orderBy: { updatedAt: 'desc' },
+  });
+  return items.map(toOntologyClassShape);
+}
+
+export async function listOntologyRelations() {
+  const userId = getCurrentUserId();
+  const items = await prisma.knowledgeOntologyRelationRecord.findMany({
+    where: { userId },
+    orderBy: { updatedAt: 'desc' },
+  });
+  return items.map(toOntologyRelationShape);
+}
+
+export async function upsertOntologyClass(input: UpsertOntologyClassInput) {
+  const userId = getCurrentUserId();
+  const parentIds = Array.from(new Set((input.parentIds ?? []).map((item) => item.trim()).filter(Boolean)));
+  if (parentIds.includes(input.id)) {
+    throw new Error('Ontology class cannot reference itself as a parent.');
+  }
+
+  const existingParents = parentIds.length === 0
+    ? []
+    : await prisma.knowledgeOntologyClassRecord.findMany({
+        where: {
+          userId,
+          id: { in: parentIds },
+        },
+        select: { id: true },
+      });
+
+  if (existingParents.length !== parentIds.length) {
+    throw new Error('One or more ontology class parents do not exist.');
+  }
+
+  const now = new Date();
+  const saved = await prisma.knowledgeOntologyClassRecord.upsert({
+    where: { id: input.id },
+    create: {
+      id: input.id,
+      userId,
+      label: input.label,
+      description: input.description ?? '',
+      parentIdsJson: asJsonValue(parentIds),
+      createdAt: now,
+      updatedAt: now,
+    },
+    update: {
+      label: input.label,
+      description: input.description ?? '',
+      parentIdsJson: asJsonValue(parentIds),
+      updatedAt: now,
+    },
+  });
+
+  await touchKnowledgeMetadata(now);
+  return toOntologyClassShape(saved);
+}
+
+export async function deleteOntologyClass(id: string) {
+  const userId = getCurrentUserId();
+  const existing = await prisma.knowledgeOntologyClassRecord.findFirst({
+    where: {
+      userId,
+      id,
+    },
+  });
+
+  if (!existing) {
+    return false;
+  }
+
+  const [typedEntities, childClasses] = await Promise.all([
+    prisma.knowledgeEntityRecord.count({
+      where: {
+        userId,
+        typeId: id,
+      },
+    }),
+    prisma.knowledgeOntologyClassRecord.findMany({
+      where: {
+        userId,
+      },
+      select: {
+        id: true,
+        parentIdsJson: true,
+      },
+    }),
+  ]);
+
+  if (typedEntities > 0) {
+    throw new Error('Ontology class is still referenced by knowledge entities.');
+  }
+
+  if (childClasses.some((item) => toStringArray(item.parentIdsJson).includes(id))) {
+    throw new Error('Ontology class is still referenced by child classes.');
+  }
+
+  const now = new Date();
+  await prisma.knowledgeOntologyClassRecord.delete({
+    where: { id },
+  });
+  await touchKnowledgeMetadata(now);
+  return true;
+}
+
+export async function upsertOntologyRelation(input: UpsertOntologyRelationInput) {
+  const userId = getCurrentUserId();
+  const inverseId = input.inverseId?.trim() || undefined;
+  if (inverseId === input.id) {
+    throw new Error('Ontology relation inverseId cannot reference itself.');
+  }
+
+  if (inverseId) {
+    const inverseExists = await prisma.knowledgeOntologyRelationRecord.findFirst({
+      where: {
+        userId,
+        id: inverseId,
+      },
+      select: { id: true },
+    });
+
+    if (!inverseExists) {
+      throw new Error('Ontology relation inverseId does not exist.');
+    }
+  }
+
+  const now = new Date();
+  const saved = await prisma.knowledgeOntologyRelationRecord.upsert({
+    where: { id: input.id },
+    create: {
+      id: input.id,
+      userId,
+      label: input.label,
+      description: input.description ?? '',
+      inverseOf: inverseId ?? null,
+      symmetric: input.symmetric === true,
+      transitive: input.transitive === true,
+      createdAt: now,
+      updatedAt: now,
+    },
+    update: {
+      label: input.label,
+      description: input.description ?? '',
+      inverseOf: inverseId ?? null,
+      symmetric: input.symmetric === true,
+      transitive: input.transitive === true,
+      updatedAt: now,
+    },
+  });
+
+  await touchKnowledgeMetadata(now);
+  return toOntologyRelationShape(saved);
+}
+
+export async function deleteOntologyRelation(id: string) {
+  const userId = getCurrentUserId();
+  const existing = await prisma.knowledgeOntologyRelationRecord.findFirst({
+    where: {
+      userId,
+      id,
+    },
+  });
+
+  if (!existing) {
+    return false;
+  }
+
+  const [assertionCount, relationCount, inverseUsageCount] = await Promise.all([
+    prisma.knowledgeAssertionRecord.count({
+      where: {
+        userId,
+        predicateId: id,
+      },
+    }),
+    prisma.knowledgeRelationRecord.count({
+      where: {
+        userId,
+        predicateId: id,
+      },
+    }),
+    prisma.knowledgeOntologyRelationRecord.count({
+      where: {
+        userId,
+        inverseOf: id,
+      },
+    }),
+  ]);
+
+  if (assertionCount > 0 || relationCount > 0) {
+    throw new Error('Ontology relation is still referenced by knowledge assertions or edges.');
+  }
+
+  if (inverseUsageCount > 0) {
+    throw new Error('Ontology relation is still referenced as inverseId by other ontology relations.');
+  }
+
+  const now = new Date();
+  await prisma.knowledgeOntologyRelationRecord.delete({
+    where: { id },
+  });
+  await touchKnowledgeMetadata(now);
+  return true;
+}
+
+export async function rebuildKnowledgeProjections() {
+  const userId = getCurrentUserId();
+
+  const [tasks, financeRecords] = await Promise.all([
+    prisma.task.findMany({
+      where: {
+        userId,
+        deletedAt: null,
+      },
+    }),
+    prisma.financeRecord.findMany({
+      where: {
+        userId,
+        deletedAt: null,
+      },
+    }),
+  ]);
+
+  await prisma.$transaction(async (tx) => {
+    await enqueueProjectionOutboxEvents(tx, [
+      ...tasks.map((task) => ({
+        userId,
+        topic: KNOWLEDGE_PROJECTION_TOPIC,
+        aggregateType: 'task',
+        aggregateId: task.id,
+        operation: 'upsert',
+        payload: toProjectionPayload(toTaskProjectionPayload(task)),
+      })),
+      ...financeRecords.map((record) => ({
+        userId,
+        topic: KNOWLEDGE_PROJECTION_TOPIC,
+        aggregateType: 'finance-record',
+        aggregateId: record.id,
+        operation: 'upsert',
+        payload: toProjectionPayload(toFinanceProjectionPayload(record)),
+      })),
+    ]);
+  });
+
+  return {
+    queuedTaskProjections: tasks.length,
+    queuedFinanceProjections: financeRecords.length,
+    queuedAt: new Date().toISOString(),
+  };
+}
+
 export async function upsertKnowledgeEntityStructured(
   input: UpsertKnowledgeEntityInput
 ): Promise<KnowledgeEntityRecordShape> {
+  const userId = getCurrentUserId();
   await ensureKnowledgeBase();
   const now = new Date();
   const nowTs = now.getTime();
   const ids = new Set(
     (
       await prisma.knowledgeEntityRecord.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         select: { id: true },
       })
     ).map((item) => item.id)
@@ -607,7 +1158,7 @@ export async function upsertKnowledgeEntityStructured(
   const existing = input.id
     ? await prisma.knowledgeEntityRecord.findFirst({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           id: input.id,
         },
       })
@@ -619,7 +1170,7 @@ export async function upsertKnowledgeEntityStructured(
     where: { id },
     create: {
       id,
-      userId: DEFAULT_USER_ID,
+      userId,
       typeId: input.typeId,
       title: input.title.trim(),
       summary: input.summary?.trim() || '',
@@ -648,7 +1199,7 @@ export async function upsertKnowledgeEntityStructured(
 
   const relations = await prisma.knowledgeRelationRecord.findMany({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       subjectId: entity.id,
     },
   });
@@ -675,9 +1226,10 @@ export async function upsertKnowledgeEntityStructured(
 }
 
 export async function deleteKnowledgeEntityStructured(id: string): Promise<boolean> {
+  const userId = getCurrentUserId();
   const existing = await prisma.knowledgeEntityRecord.findFirst({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       id,
     },
   });
@@ -691,7 +1243,7 @@ export async function deleteKnowledgeEntityStructured(id: string): Promise<boole
   await prisma.$transaction(async (tx) => {
     const relatedAssertions = await tx.knowledgeAssertionRecord.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         OR: [{ subjectId: id }, { objectId: id }],
       },
       select: { id: true },
@@ -700,7 +1252,7 @@ export async function deleteKnowledgeEntityStructured(id: string): Promise<boole
     if (relatedAssertions.length > 0) {
       await tx.knowledgeAssertionEvidenceLink.deleteMany({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           assertionId: {
             in: relatedAssertions.map((item) => item.id),
           },
@@ -710,21 +1262,21 @@ export async function deleteKnowledgeEntityStructured(id: string): Promise<boole
 
     await tx.knowledgeAssertionRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         OR: [{ subjectId: id }, { objectId: id }],
       },
     });
 
     await tx.knowledgeRelationRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         OR: [{ subjectId: id }, { targetId: id }],
       },
     });
 
     await tx.knowledgeDocumentEntityLink.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         entityId: id,
       },
     });
@@ -742,12 +1294,13 @@ export async function deleteKnowledgeEntityStructured(id: string): Promise<boole
 export async function upsertKnowledgeDocumentStructured(
   input: UpsertKnowledgeDocumentInput
 ): Promise<KnowledgeDocumentRecordShape> {
+  const userId = getCurrentUserId();
   await ensureKnowledgeBase();
   const now = new Date();
   const ids = new Set(
     (
       await prisma.knowledgeDocumentRecord.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         select: { id: true },
       })
     ).map((item) => item.id)
@@ -755,7 +1308,7 @@ export async function upsertKnowledgeDocumentStructured(
   const existing = input.id
     ? await prisma.knowledgeDocumentRecord.findFirst({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           id: input.id,
         },
       })
@@ -763,7 +1316,7 @@ export async function upsertKnowledgeDocumentStructured(
   const validEntityIds = new Set(
     (
       await prisma.knowledgeEntityRecord.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         select: { id: true },
       })
     ).map((item) => item.id)
@@ -776,7 +1329,7 @@ export async function upsertKnowledgeDocumentStructured(
       where: { id },
       create: {
         id,
-        userId: DEFAULT_USER_ID,
+        userId,
         title: input.title.trim(),
         summary: input.summary?.trim() || '',
         content: input.content?.trim() || '',
@@ -797,7 +1350,7 @@ export async function upsertKnowledgeDocumentStructured(
 
     await tx.knowledgeDocumentEntityLink.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         documentId: id,
       },
     });
@@ -805,7 +1358,7 @@ export async function upsertKnowledgeDocumentStructured(
     if (entityIds.length > 0) {
       await tx.knowledgeDocumentEntityLink.createMany({
         data: entityIds.map((entityId) => ({
-          userId: DEFAULT_USER_ID,
+          userId,
           documentId: id,
           entityId,
         })),
@@ -830,9 +1383,10 @@ export async function upsertKnowledgeDocumentStructured(
 }
 
 export async function deleteKnowledgeDocumentStructured(id: string): Promise<boolean> {
+  const userId = getCurrentUserId();
   const existing = await prisma.knowledgeDocumentRecord.findFirst({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       id,
     },
   });
@@ -846,7 +1400,7 @@ export async function deleteKnowledgeDocumentStructured(id: string): Promise<boo
   await prisma.$transaction(async (tx) => {
     const relatedAssertions = await tx.knowledgeAssertionRecord.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         objectId: id,
       },
       select: { id: true },
@@ -855,7 +1409,7 @@ export async function deleteKnowledgeDocumentStructured(id: string): Promise<boo
     if (relatedAssertions.length > 0) {
       await tx.knowledgeAssertionEvidenceLink.deleteMany({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           assertionId: {
             in: relatedAssertions.map((item) => item.id),
           },
@@ -865,21 +1419,21 @@ export async function deleteKnowledgeDocumentStructured(id: string): Promise<boo
 
     await tx.knowledgeAssertionRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         objectId: id,
       },
     });
 
     await tx.knowledgeAssertionEvidenceLink.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         documentId: id,
       },
     });
 
     await tx.knowledgeDocumentEntityLink.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         documentId: id,
       },
     });
@@ -897,12 +1451,13 @@ export async function deleteKnowledgeDocumentStructured(id: string): Promise<boo
 export async function upsertKnowledgeAssertionStructured(
   input: UpsertKnowledgeAssertionInput
 ): Promise<KnowledgeAssertionRecordShape> {
+  const userId = getCurrentUserId();
   await ensureKnowledgeBase();
   const now = new Date();
   const ids = new Set(
     (
       await prisma.knowledgeAssertionRecord.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         select: { id: true },
       })
     ).map((item) => item.id)
@@ -910,7 +1465,7 @@ export async function upsertKnowledgeAssertionStructured(
   const existing = input.id
     ? await prisma.knowledgeAssertionRecord.findFirst({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           id: input.id,
         },
       })
@@ -918,7 +1473,7 @@ export async function upsertKnowledgeAssertionStructured(
   const validSubjectIds = new Set(
     (
       await prisma.knowledgeEntityRecord.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         select: { id: true },
       })
     ).map((item) => item.id)
@@ -926,13 +1481,13 @@ export async function upsertKnowledgeAssertionStructured(
   const validObjectIds = new Set([
     ...(
       await prisma.knowledgeEntityRecord.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         select: { id: true },
       })
     ).map((item) => item.id),
     ...(
       await prisma.knowledgeDocumentRecord.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         select: { id: true },
       })
     ).map((item) => item.id),
@@ -940,7 +1495,7 @@ export async function upsertKnowledgeAssertionStructured(
   const validEvidenceIds = new Set(
     (
       await prisma.knowledgeDocumentRecord.findMany({
-        where: { userId: DEFAULT_USER_ID },
+        where: { userId },
         select: { id: true },
       })
     ).map((item) => item.id)
@@ -982,7 +1537,7 @@ export async function upsertKnowledgeAssertionStructured(
       where: { id },
       create: {
         id,
-        userId: DEFAULT_USER_ID,
+        userId,
         subjectId: input.subjectId,
         predicateId: input.predicateId,
         objectId: input.objectId ?? null,
@@ -1011,7 +1566,7 @@ export async function upsertKnowledgeAssertionStructured(
 
     await tx.knowledgeAssertionEvidenceLink.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         assertionId: id,
       },
     });
@@ -1019,7 +1574,7 @@ export async function upsertKnowledgeAssertionStructured(
     if (evidenceDocumentIds.length > 0) {
       await tx.knowledgeAssertionEvidenceLink.createMany({
         data: evidenceDocumentIds.map((documentId) => ({
-          userId: DEFAULT_USER_ID,
+          userId,
           assertionId: id,
           documentId,
         })),
@@ -1045,9 +1600,10 @@ export async function upsertKnowledgeAssertionStructured(
 }
 
 export async function deleteKnowledgeAssertionStructured(id: string): Promise<boolean> {
+  const userId = getCurrentUserId();
   const existing = await prisma.knowledgeAssertionRecord.findFirst({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       id,
     },
   });
@@ -1061,7 +1617,7 @@ export async function deleteKnowledgeAssertionStructured(id: string): Promise<bo
   await prisma.$transaction(async (tx) => {
     await tx.knowledgeAssertionEvidenceLink.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         assertionId: id,
       },
     });
@@ -1079,17 +1635,18 @@ export async function deleteKnowledgeAssertionStructured(id: string): Promise<bo
 export async function createKnowledgeRelationStructured(
   input: CreateKnowledgeRelationInput
 ): Promise<KnowledgeAssertionRecordShape> {
+  const userId = getCurrentUserId();
   await ensureKnowledgeBase();
   const now = new Date();
   const subject = await prisma.knowledgeEntityRecord.findFirst({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       id: input.subjectId,
     },
   });
   const target = await prisma.knowledgeEntityRecord.findFirst({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       id: input.targetId,
     },
   });
@@ -1104,7 +1661,7 @@ export async function createKnowledgeRelationStructured(
 
   const existingAssertion = await prisma.knowledgeAssertionRecord.findFirst({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       subjectId: input.subjectId,
       predicateId: input.predicateId,
       objectId: input.targetId,
@@ -1119,7 +1676,7 @@ export async function createKnowledgeRelationStructured(
       new Set(
         (
           await prisma.knowledgeAssertionRecord.findMany({
-            where: { userId: DEFAULT_USER_ID },
+            where: { userId },
             select: { id: true },
           })
         ).map((item) => item.id)
@@ -1130,14 +1687,14 @@ export async function createKnowledgeRelationStructured(
     await tx.knowledgeRelationRecord.upsert({
       where: {
         userId_subjectId_predicateId_targetId: {
-          userId: DEFAULT_USER_ID,
+          userId,
           subjectId: input.subjectId,
           predicateId: input.predicateId,
           targetId: input.targetId,
         },
       },
       create: {
-        userId: DEFAULT_USER_ID,
+        userId,
         subjectId: input.subjectId,
         predicateId: input.predicateId,
         targetId: input.targetId,
@@ -1157,7 +1714,7 @@ export async function createKnowledgeRelationStructured(
       where: { id: assertionId },
       create: {
         id: assertionId,
-        userId: DEFAULT_USER_ID,
+        userId,
         subjectId: input.subjectId,
         predicateId: input.predicateId,
         objectId: input.targetId,
@@ -1182,7 +1739,7 @@ export async function createKnowledgeRelationStructured(
   });
   const evidence = await prisma.knowledgeAssertionEvidenceLink.findMany({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       assertionId,
     },
   });
@@ -1206,9 +1763,10 @@ export async function deleteKnowledgeRelationStructured(
   predicateId: string,
   targetId: string
 ): Promise<boolean> {
+  const userId = getCurrentUserId();
   const existing = await prisma.knowledgeRelationRecord.findFirst({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId,
       subjectId,
       predicateId,
       targetId,
@@ -1224,7 +1782,7 @@ export async function deleteKnowledgeRelationStructured(
   await prisma.$transaction(async (tx) => {
     const relatedAssertions = await tx.knowledgeAssertionRecord.findMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         subjectId,
         predicateId,
         objectId: targetId,
@@ -1235,7 +1793,7 @@ export async function deleteKnowledgeRelationStructured(
     if (relatedAssertions.length > 0) {
       await tx.knowledgeAssertionEvidenceLink.deleteMany({
         where: {
-          userId: DEFAULT_USER_ID,
+          userId,
           assertionId: {
             in: relatedAssertions.map((item) => item.id),
           },
@@ -1245,7 +1803,7 @@ export async function deleteKnowledgeRelationStructured(
 
     await tx.knowledgeAssertionRecord.deleteMany({
       where: {
-        userId: DEFAULT_USER_ID,
+        userId,
         subjectId,
         predicateId,
         objectId: targetId,
@@ -1255,7 +1813,7 @@ export async function deleteKnowledgeRelationStructured(
     await tx.knowledgeRelationRecord.delete({
       where: {
         userId_subjectId_predicateId_targetId: {
-          userId: DEFAULT_USER_ID,
+          userId,
           subjectId,
           predicateId,
           targetId,

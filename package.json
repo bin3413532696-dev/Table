@@ -7,12 +7,12 @@
     "server:dev": "node server/dev-server.js",
     "server:typecheck": "tsc -p tsconfig.server.json --noEmit",
     "server:seed": "node server/scripts/seed.js",
-    "knowledge:smoke": "node scripts/knowledge-structured-smoke.mjs",
+    "knowledge:smoke": "node scripts/smoke/knowledge-structured-smoke.mjs",
     "build": "webpack --mode production",
     "typecheck": "tsc --noEmit",
-    "agent:e2e": "node scripts/agent-e2e-cdp.mjs",
-    "knowledge:e2e": "node scripts/knowledge-e2e-cdp.mjs",
-    "agent:modules:e2e": "node scripts/agent-modules-e2e-cdp.mjs"
+    "agent:e2e": "node scripts/e2e/agent-e2e-cdp.mjs",
+    "knowledge:e2e": "node scripts/e2e/knowledge-e2e-cdp.mjs",
+    "agent:modules:e2e": "node scripts/e2e/agent-modules-e2e-cdp.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.7.0",

@@ -1,12 +1,11 @@
 import { prisma } from '../../db/client';
+import { getCurrentUserId } from '../../shared/user-context';
 import type { CreateTaskInput, UpdateTaskInput } from './schema';
 import {
   enqueueProjectionOutboxEvent,
   KNOWLEDGE_PROJECTION_TOPIC,
   toProjectionPayload,
 } from '../projection/outbox';
-
-const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
 
 function toTaskProjectionPayload(task: {
   id: string;
@@ -33,7 +32,7 @@ function toTaskProjectionPayload(task: {
 export async function listTasks() {
   return prisma.task.findMany({
     where: {
-      userId: DEFAULT_USER_ID,
+      userId: getCurrentUserId(),
       deletedAt: null,
     },
     orderBy: {
@@ -46,7 +45,7 @@ export async function createTask(input: CreateTaskInput) {
   return prisma.$transaction(async (tx) => {
     const task = await tx.task.create({
       data: {
-        userId: DEFAULT_USER_ID,
+        userId: getCurrentUserId(),
         title: input.title,
         completed: input.completed ?? false,
         priority: input.priority,
@@ -71,7 +70,7 @@ export async function findTaskById(id: string) {
   return prisma.task.findFirst({
     where: {
       id,
-      userId: DEFAULT_USER_ID,
+      userId: getCurrentUserId(),
       deletedAt: null,
     },
   });

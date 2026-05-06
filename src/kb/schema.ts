@@ -1,7 +1,5 @@
 import { KnowledgeDataset, JsonLdContext, OntologyClass, OntologyRelation } from './types';
 
-export const KNOWLEDGE_STORAGE_KEY = 'knowledge_dataset_cache';
-
 export const KNOWLEDGE_CONTEXT: JsonLdContext = {
   '@vocab': 'https://workspace.local/ontology#',
   type: '@type',

@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { prisma } from '../../db/client';
+import { getCurrentUserId } from '../../shared/user-context';
 
-export const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
 export const KNOWLEDGE_PROJECTION_TOPIC = 'knowledge.projection';
 export const PROJECTION_STATUS_PENDING = 'pending';
 export const PROJECTION_STATUS_PROCESSING = 'processing';
@@ -30,7 +30,7 @@ export async function enqueueProjectionOutboxEvent(
 ) {
   return db.projectionOutboxEvent.create({
     data: {
-      userId: input.userId ?? DEFAULT_USER_ID,
+      userId: input.userId ?? getCurrentUserId(),
       topic: input.topic,
       aggregateType: input.aggregateType,
       aggregateId: input.aggregateId,
@@ -51,7 +51,7 @@ export async function enqueueProjectionOutboxEvents(
 
   await db.projectionOutboxEvent.createMany({
     data: inputs.map((input) => ({
-      userId: input.userId ?? DEFAULT_USER_ID,
+      userId: input.userId ?? getCurrentUserId(),
       topic: input.topic,
       aggregateType: input.aggregateType,
       aggregateId: input.aggregateId,

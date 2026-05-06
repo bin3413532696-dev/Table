@@ -6,7 +6,7 @@ import {
   KnowledgeSearchFilters,
   KnowledgeSearchHit,
 } from './types';
-import { DEFAULT_KNOWLEDGE_DATASET, KNOWLEDGE_STORAGE_KEY } from './schema';
+import { DEFAULT_KNOWLEDGE_DATASET } from './schema';
 import { cloneKnowledgeDataset, normalizeKnowledgeDataset } from './serializer';
 import { buildKnowledgeOverview, createDocumentFuse, createEntityFuse, getRelatedKnowledgeEntities, searchKnowledgeDataset } from './query';
 
@@ -26,14 +26,6 @@ async function cacheDataset(nextDataset: KnowledgeDataset): Promise<void> {
   void nextDataset;
 }
 
-function persistSnapshot(nextDataset: KnowledgeDataset): void {
-  try {
-    localStorage.setItem(KNOWLEDGE_STORAGE_KEY, JSON.stringify(nextDataset));
-  } catch (error) {
-    console.warn('[KB] Failed to persist snapshot:', error);
-  }
-}
-
 function notify(): void {
   listeners.forEach((listener) => listener());
 }
@@ -42,25 +34,9 @@ export async function hydrateKnowledgeDataset(raw: unknown): Promise<KnowledgeDa
   const nextDataset = normalizeKnowledgeDataset(raw);
   dataset = cloneKnowledgeDataset(nextDataset);
   rebuildIndexes(dataset);
-  persistSnapshot(dataset);
   await cacheDataset(dataset);
   notify();
   return getKnowledgeDataset();
-}
-
-export function restoreKnowledgeDatasetFromCache(): KnowledgeDataset {
-  try {
-    const cached = localStorage.getItem(KNOWLEDGE_STORAGE_KEY);
-    if (!cached) {
-      return getKnowledgeDataset();
-    }
-
-    dataset = normalizeKnowledgeDataset(JSON.parse(cached));
-    rebuildIndexes(dataset);
-    return getKnowledgeDataset();
-  } catch {
-    return getKnowledgeDataset();
-  }
 }
 
 export function getKnowledgeDataset(): KnowledgeDataset {

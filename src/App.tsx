@@ -7,6 +7,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const GlobalSearch = lazy(() => import('./pages/Search'));
 const Knowledge = lazy(() => import('./pages/Knowledge'));
 const Tasks = lazy(() => import('./pages/Tasks'));
 const Tools = lazy(() => import('./pages/Tools'));
@@ -18,7 +19,14 @@ function App() {
   const [checkingPin, setCheckingPin] = useState(true);
 
   useEffect(() => {
-    const savedPin = localStorage.getItem('security_pin_hashed');
+    let savedPin: string | null = null;
+
+    try {
+      savedPin = window.localStorage.getItem('security_pin_hashed');
+    } catch (error) {
+      console.warn('[App] Failed to read security pin from localStorage:', error);
+    }
+
     if (!savedPin) {
       setIsAuthenticated(true);
     }
@@ -49,11 +57,13 @@ function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
+              <Route path="search" element={<GlobalSearch />} />
               <Route path="knowledge" element={<Knowledge />} />
               <Route path="tasks" element={<Tasks />} />
               <Route path="tools" element={<Tools />} />
               <Route path="finance" element={<Finance />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>
         </Suspense>

@@ -49,9 +49,19 @@ export interface AgentMessage {
   status: MessageStatus;
 }
 
+export interface AgentToolExecution {
+  id: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  status: string;
+  result?: Record<string, unknown>;
+  errorMessage?: string;
+}
+
 /** 确认请求 */
 export interface ConfirmationRequest {
   id: string;
+  runId: string;
   toolName: string;
   arguments: Record<string, unknown>;
   description: string;

@@ -6,6 +6,7 @@
 import { SYNC_CONFIG, SyncStatus, SyncResult, SyncDataType, SyncStatusSnapshot } from './config';
 import { eventEmitter, EventTopics } from '../core/events';
 import { AppError, ErrorCode } from '../core/errors';
+import { fetchWithAuth } from '../lib/auth';
 
 /**
  * 同步队列项
@@ -163,10 +164,12 @@ class SyncEngineClass {
         };
       }
 
-      const response = await fetch(SYNC_CONFIG.SYNC_ENDPOINT, {
-        method: 'POST',
+      const response = await fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_DATASET_WRITE_ENDPOINT, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          dataset: payload.knowledge,
+        }),
       });
 
       if (!response.ok) {
@@ -177,7 +180,7 @@ class SyncEngineClass {
 
       return {
         success: true,
-        timestamp: result.timestamp || Date.now(),
+        timestamp: result?.data?.updatedAt || Date.now(),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -199,7 +202,7 @@ class SyncEngineClass {
     error?: string;
   }> {
     try {
-      const response = await fetch(SYNC_CONFIG.LOAD_ENDPOINT);
+      const response = await fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_DATASET_READ_ENDPOINT);
 
       if (!response.ok) {
         throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${response.status}`);
@@ -209,7 +212,9 @@ class SyncEngineClass {
 
       return {
         success: true,
-        data: result.data,
+        data: {
+          knowledge: result.data,
+        },
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -233,7 +238,7 @@ class SyncEngineClass {
     error?: string;
   }> {
     try {
-      const response = await fetch(SYNC_CONFIG.KNOWLEDGE_METADATA_ENDPOINT);
+      const response = await fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_METADATA_ENDPOINT);
 
       if (!response.ok) {
         throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${response.status}`);
