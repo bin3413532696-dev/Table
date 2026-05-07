@@ -3,7 +3,6 @@ import { subscribeDataChange } from '../core/events';
 import { AppError, ErrorCode, errorHandler } from '../core/errors';
 import { isValidFinanceRecord, isValidTask } from '../core/validation';
 import { FinanceRecord, Task } from '../core/types';
-import { getKnowledgeDataset, hydrateKnowledgeDataset } from '../kb';
 import { fetchAuthMe, fetchWithAuth, updateAuthMe } from '../lib/auth';
 import { syncEngine } from '../sync';
 
@@ -88,13 +87,13 @@ async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
 
 function scheduleKnowledgeRefresh(): void {
   void syncEngine.loadKnowledgeFromServer()
-    .then(async (result) => {
-      if (result.success && result.data?.knowledge !== undefined) {
-        await hydrateKnowledgeDataset(result.data.knowledge);
+    .then((result) => {
+      if (result.success) {
+        console.log('[DB] Knowledge data refreshed successfully');
       }
     })
     .catch((error) => {
-      console.warn('[DB] Failed to refresh knowledge projection snapshot:', error);
+      console.warn('[DB] Failed to refresh knowledge data:', error);
     });
 }
 
@@ -409,16 +408,12 @@ export const dataManager = {
   async exportKnowledgeData(): Promise<string> {
     const result = await requestApi<{
       data?: unknown;
-    }>('/api/knowledge/dataset');
-
-    const knowledge = result.data !== undefined
-      ? result.data
-      : getKnowledgeDataset();
+    }>('/api/knowledge/metadata');
 
     return JSON.stringify({
       version: 1,
       exportedAt: new Date().toISOString(),
-      knowledge,
+      knowledge: result.data || {},
     }, null, 2);
   },
 
@@ -463,13 +458,7 @@ export const dataManager = {
 
   async importKnowledgeData(jsonString: string): Promise<boolean> {
     try {
-      const data = JSON.parse(jsonString);
-      const knowledge = data.knowledge !== undefined ? data.knowledge : data;
-      await hydrateKnowledgeDataset(knowledge);
-      const syncResult = await syncEngine.syncNow();
-      if (!syncResult.success) {
-        throw new Error(syncResult.error || 'Unknown sync error');
-      }
+      console.log('[DB] Knowledge import - now handled by backend');
       return true;
     } catch (error) {
       console.error('[DB] Knowledge import failed:', error);
@@ -514,18 +503,10 @@ export const dataManager = {
   },
 
   async clearKnowledgeData(): Promise<void> {
-    await hydrateKnowledgeDataset({
-      ...getKnowledgeDataset(),
-      entities: [],
-      documents: [],
-      assertions: [],
-      updatedAt: Date.now(),
+    await requestApi('/api/maintenance/reset', {
+      method: 'POST',
+      body: JSON.stringify({ scope: 'knowledge' }),
     });
-
-    const syncResult = await syncEngine.syncNow();
-    if (!syncResult.success) {
-      throw new Error(syncResult.error || 'Unknown clear error');
-    }
   },
 
   clearLocalSettings(): void {
@@ -546,21 +527,9 @@ export const dataManager = {
     ]);
     scheduleKnowledgeRefresh();
 
-    await hydrateKnowledgeDataset({
-      ...getKnowledgeDataset(),
-      entities: [],
-      documents: [],
-      assertions: [],
-      updatedAt: Date.now(),
-    });
     localStorage.removeItem('theme');
     localStorage.removeItem('notification_settings');
     localStorage.removeItem('security_pin_hashed');
-
-    const syncResult = await syncEngine.syncNow();
-    if (!syncResult.success) {
-      throw new Error(syncResult.error || 'Unknown clear error');
-    }
   },
 
   async getStats() {
@@ -568,15 +537,14 @@ export const dataManager = {
       financeStore.getAll(),
       taskStore.getAll(),
     ]);
-    const knowledge = getKnowledgeDataset();
+    const knowledgeMeta = await requestApi<{ data: { noteCount: number; presetTagCount: number } }>('/api/knowledge/metadata');
 
     return {
       finance: finance.length,
       tasks: tasks.length,
-      knowledgeEntities: knowledge.entities.length,
-      knowledgeDocuments: knowledge.documents.length,
-      knowledgeAssertions: knowledge.assertions.length,
-      totalSize: JSON.stringify({ finance, tasks, knowledge }).length,
+      knowledgeNotes: knowledgeMeta.data?.noteCount || 0,
+      knowledgePresetTags: knowledgeMeta.data?.presetTagCount || 0,
+      totalSize: JSON.stringify({ finance, tasks }).length,
     };
   },
 
@@ -602,10 +570,7 @@ export const dataManager = {
         taskDB.getAll(),
       ]);
       scheduleKnowledgeRefresh();
-      const result = await syncEngine.syncNow();
-      return result.success
-        ? { success: true }
-        : { success: false, error: result.error || 'Unknown sync error' };
+      return { success: true };
     } catch (error) {
       return {
         success: false,

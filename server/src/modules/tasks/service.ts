@@ -1,7 +1,6 @@
 import type { CreateTaskInput, UpdateTaskInput } from './schema';
 import { createTask, findTaskById, listTasks, softDeleteTask, updateTask } from './repository';
 import { toTaskDto } from './dto';
-import { kickProjectionRuntime } from '../projection/runtime';
 
 export async function getTaskList() {
   const tasks = await listTasks();
@@ -10,7 +9,6 @@ export async function getTaskList() {
 
 export async function createTaskRecord(input: CreateTaskInput) {
   const task = await createTask(input);
-  kickProjectionRuntime();
   return toTaskDto(task);
 }
 
@@ -25,7 +23,6 @@ export async function updateTaskRecord(id: string, input: UpdateTaskInput) {
     return null;
   }
   const task = await updateTask(id, input);
-  kickProjectionRuntime();
   return toTaskDto(task);
 }
 
@@ -35,6 +32,5 @@ export async function deleteTaskRecord(id: string) {
     return null;
   }
   const task = await softDeleteTask(id);
-  kickProjectionRuntime();
   return toTaskDto(task);
 }

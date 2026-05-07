@@ -1,16 +1,6 @@
 import { createFinanceRecord } from '../finance/repository';
 import { toFinanceRecordDto } from '../finance/dto';
-import {
-  createKnowledgeRelationStructured,
-  deleteKnowledgeAssertionStructured,
-  deleteKnowledgeDocumentStructured,
-  deleteKnowledgeEntityStructured,
-  deleteKnowledgeRelationStructured,
-  searchKnowledgeRecords,
-  upsertKnowledgeAssertionStructured,
-  upsertKnowledgeDocumentStructured,
-  upsertKnowledgeEntityStructured,
-} from '../knowledge/repository';
+import { searchNotes } from '../knowledge/repository';
 import { createTask, findTaskById, softDeleteTask, updateTask } from '../tasks/repository';
 import { listFinanceRecords } from '../finance/repository';
 import { listTasks } from '../tasks/repository';
@@ -85,7 +75,7 @@ const TOOL_FORMAT = `当需要使用工具时，请按以下 JSON 格式输出�
 const SYSTEM_PROMPT = `你是这个个人工作站应用的后端智能助手执行器。你可以帮助用户：
 - 查询和汇总任务
 - 查询和汇总财务记录
-- 搜索知识库
+- 搜索知识库笔记
 - 创建任务
 - 新增财务记录
 - 做跨模块摘要
@@ -95,19 +85,11 @@ const SYSTEM_PROMPT = `你是这个个人工作站应用的后端智能助手执
 - get_task_stats: 获取任务汇总统计，无参数
 - query_finance: 查询财务记录，参数可用 type('income'|'expense'|'all')、category(string)、startDate(string)、endDate(string)、limit(number)
 - get_finance_stats: 获取财务汇总统计，无参数
-- search_knowledge: 搜索知识库，参数可用 query(string)、typeIds(string[])、tags(string[])、includeDocuments(boolean)、limit(number)
+- search_knowledge: 搜索知识库笔记，参数可用 query(string)、tags(string[])、limit(number)
 - create_task: 创建任务，参数可用 title(string, 必填)、priority(string)、dueDate(string)
 - add_finance_record: 新增财务记录，参数可用 type(string, 必填)、amount(number, 必填)、description(string, 必填)、category(string, 必填)、date(string, 必填)、model(string)
 - update_task: 更新任务，参数可用 id(string, 必填)、title(string)、completed(boolean)、priority(string)、dueDate(string)
 - delete_task: 删除任务，参数可用 id(string, 必填)
-- upsert_knowledge_entity: 新增或更新知识实体，参数可用 id(string)、typeId(string, 必填)、title(string, 必填)、summary(string)、aliases(string[])、tags(string[])、attributes(object)、source(string)、confidence(number)
-- upsert_knowledge_document: 新增或更新知识文档，参数可用 id(string)、title(string, 必填)、summary(string)、content(string)、tags(string[])、entityIds(string[])、source(string)
-- upsert_knowledge_assertion: 新增或更新知识断言，参数可用 id(string)、subjectId(string, 必填)、predicateId(string, 必填)、objectId(string)、value(string|number|boolean|null)、evidenceDocumentIds(string[])、source(string)、confidence(number)
-- create_knowledge_relation: 创建知识关系，参数可用 subjectId(string, 必填)、predicateId(string, 必填)、targetId(string, 必填)、source(string)、confidence(number)
-- delete_knowledge_entity: 删除知识实体，参数可用 id(string, 必填)
-- delete_knowledge_document: 删除知识文档，参数可用 id(string, 必填)
-- delete_knowledge_assertion: 删除知识断言，参数可用 id(string, 必填)
-- delete_knowledge_relation: 删除知识关系，参数可用 subjectId(string, 必填)、predicateId(string, 必填)、targetId(string, 必填)
 
 ${TOOL_FORMAT}
 
@@ -399,16 +381,13 @@ async function getFinanceStatsTool() {
 }
 
 async function searchKnowledgeTool(args: Record<string, unknown>) {
-  return searchKnowledgeRecords({
+  return searchNotes({
     query: typeof args.query === 'string' ? args.query : '',
-    typeIds: Array.isArray(args.typeIds)
-      ? args.typeIds.filter((item): item is string => typeof item === 'string')
-      : undefined,
     tags: Array.isArray(args.tags)
       ? args.tags.filter((item): item is string => typeof item === 'string')
       : undefined,
-    includeDocuments: args.includeDocuments !== false,
     limit: typeof args.limit === 'number' ? args.limit : 8,
+    offset: 0,
   });
 }
 
@@ -495,194 +474,6 @@ async function deleteTaskTool(args: Record<string, unknown>) {
   };
 }
 
-function toStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  return value.filter((item): item is string => typeof item === 'string');
-}
-
-function toRecordObject(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-
-  return value as Record<string, unknown>;
-}
-
-function toKnowledgeScalar(value: unknown): string | number | boolean | null | undefined {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value;
-  }
-
-  return undefined;
-}
-
-async function upsertKnowledgeEntityTool(args: Record<string, unknown>) {
-  if (typeof args.typeId !== 'string' || !args.typeId.trim() || typeof args.title !== 'string' || !args.title.trim()) {
-    throw new Error('upsert_knowledge_entity 缺少必填参数 typeId 或 title');
-  }
-
-  return upsertKnowledgeEntityStructured({
-    id: typeof args.id === 'string' ? args.id : undefined,
-    typeId: args.typeId,
-    title: args.title,
-    summary: typeof args.summary === 'string' ? args.summary : undefined,
-    aliases: toStringArray(args.aliases),
-    tags: toStringArray(args.tags),
-    attributes: toRecordObject(args.attributes) as Record<
-      string,
-      string | number | boolean | null | Array<string | number | boolean | null> | Record<string, string | number | boolean | null>
-    > | undefined,
-    source: typeof args.source === 'string' ? args.source : undefined,
-    confidence: typeof args.confidence === 'number' ? args.confidence : undefined,
-  });
-}
-
-async function upsertKnowledgeDocumentTool(args: Record<string, unknown>) {
-  if (typeof args.title !== 'string' || !args.title.trim()) {
-    throw new Error('upsert_knowledge_document 缺少必填参数 title');
-  }
-
-  return upsertKnowledgeDocumentStructured({
-    id: typeof args.id === 'string' ? args.id : undefined,
-    title: args.title,
-    summary: typeof args.summary === 'string' ? args.summary : undefined,
-    content: typeof args.content === 'string' ? args.content : undefined,
-    tags: toStringArray(args.tags),
-    entityIds: toStringArray(args.entityIds),
-    source: typeof args.source === 'string' ? args.source : undefined,
-  });
-}
-
-async function upsertKnowledgeAssertionTool(args: Record<string, unknown>) {
-  if (
-    typeof args.subjectId !== 'string' ||
-    !args.subjectId.trim() ||
-    typeof args.predicateId !== 'string' ||
-    !args.predicateId.trim()
-  ) {
-    throw new Error('upsert_knowledge_assertion 缺少必填参数 subjectId 或 predicateId');
-  }
-
-  return upsertKnowledgeAssertionStructured({
-    id: typeof args.id === 'string' ? args.id : undefined,
-    subjectId: args.subjectId,
-    predicateId: args.predicateId,
-    objectId: typeof args.objectId === 'string' ? args.objectId : undefined,
-    value: toKnowledgeScalar(args.value),
-    evidenceDocumentIds: toStringArray(args.evidenceDocumentIds),
-    source: typeof args.source === 'string' ? args.source : undefined,
-    confidence: typeof args.confidence === 'number' ? args.confidence : undefined,
-  });
-}
-
-async function createKnowledgeRelationTool(args: Record<string, unknown>) {
-  if (
-    typeof args.subjectId !== 'string' ||
-    !args.subjectId.trim() ||
-    typeof args.predicateId !== 'string' ||
-    !args.predicateId.trim() ||
-    typeof args.targetId !== 'string' ||
-    !args.targetId.trim()
-  ) {
-    throw new Error('create_knowledge_relation 缺少必填参数 subjectId、predicateId 或 targetId');
-  }
-
-  return createKnowledgeRelationStructured({
-    subjectId: args.subjectId,
-    predicateId: args.predicateId,
-    targetId: args.targetId,
-    source: typeof args.source === 'string' ? args.source : undefined,
-    confidence: typeof args.confidence === 'number' ? args.confidence : undefined,
-  });
-}
-
-async function deleteKnowledgeEntityTool(args: Record<string, unknown>) {
-  if (typeof args.id !== 'string' || !args.id.trim()) {
-    throw new Error('delete_knowledge_entity 缺少必填参数 id');
-  }
-
-  const deleted = await deleteKnowledgeEntityStructured(args.id);
-  if (!deleted) {
-    throw new Error(`未找到知识实体: ${args.id}`);
-  }
-
-  return {
-    id: args.id,
-    deleted: true,
-  };
-}
-
-async function deleteKnowledgeDocumentTool(args: Record<string, unknown>) {
-  if (typeof args.id !== 'string' || !args.id.trim()) {
-    throw new Error('delete_knowledge_document 缺少必填参数 id');
-  }
-
-  const deleted = await deleteKnowledgeDocumentStructured(args.id);
-  if (!deleted) {
-    throw new Error(`未找到知识文档: ${args.id}`);
-  }
-
-  return {
-    id: args.id,
-    deleted: true,
-  };
-}
-
-async function deleteKnowledgeAssertionTool(args: Record<string, unknown>) {
-  if (typeof args.id !== 'string' || !args.id.trim()) {
-    throw new Error('delete_knowledge_assertion 缺少必填参数 id');
-  }
-
-  const deleted = await deleteKnowledgeAssertionStructured(args.id);
-  if (!deleted) {
-    throw new Error(`未找到知识断言: ${args.id}`);
-  }
-
-  return {
-    id: args.id,
-    deleted: true,
-  };
-}
-
-async function deleteKnowledgeRelationTool(args: Record<string, unknown>) {
-  if (
-    typeof args.subjectId !== 'string' ||
-    !args.subjectId.trim() ||
-    typeof args.predicateId !== 'string' ||
-    !args.predicateId.trim() ||
-    typeof args.targetId !== 'string' ||
-    !args.targetId.trim()
-  ) {
-    throw new Error('delete_knowledge_relation 缺少必填参数 subjectId、predicateId 或 targetId');
-  }
-
-  const deleted = await deleteKnowledgeRelationStructured(
-    args.subjectId,
-    args.predicateId,
-    args.targetId
-  );
-  if (!deleted) {
-    throw new Error(
-      `未找到知识关系: ${args.subjectId} - ${args.predicateId} - ${args.targetId}`
-    );
-  }
-
-  return {
-    subjectId: args.subjectId,
-    predicateId: args.predicateId,
-    targetId: args.targetId,
-    deleted: true,
-  };
-}
-
 const toolRegistry: Record<string, ToolDefinition> = {
   query_tasks: {
     requiresConfirmation: false,
@@ -719,38 +510,6 @@ const toolRegistry: Record<string, ToolDefinition> = {
   delete_task: {
     requiresConfirmation: true,
     execute: deleteTaskTool,
-  },
-  upsert_knowledge_entity: {
-    requiresConfirmation: true,
-    execute: upsertKnowledgeEntityTool,
-  },
-  upsert_knowledge_document: {
-    requiresConfirmation: true,
-    execute: upsertKnowledgeDocumentTool,
-  },
-  upsert_knowledge_assertion: {
-    requiresConfirmation: true,
-    execute: upsertKnowledgeAssertionTool,
-  },
-  create_knowledge_relation: {
-    requiresConfirmation: true,
-    execute: createKnowledgeRelationTool,
-  },
-  delete_knowledge_entity: {
-    requiresConfirmation: true,
-    execute: deleteKnowledgeEntityTool,
-  },
-  delete_knowledge_document: {
-    requiresConfirmation: true,
-    execute: deleteKnowledgeDocumentTool,
-  },
-  delete_knowledge_assertion: {
-    requiresConfirmation: true,
-    execute: deleteKnowledgeAssertionTool,
-  },
-  delete_knowledge_relation: {
-    requiresConfirmation: true,
-    execute: deleteKnowledgeRelationTool,
   },
 };
 

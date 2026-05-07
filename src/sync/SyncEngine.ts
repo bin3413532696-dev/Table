@@ -8,6 +8,15 @@ import { eventEmitter, EventTopics } from '../core/events';
 import { AppError, ErrorCode } from '../core/errors';
 import { fetchWithAuth } from '../lib/auth';
 
+type KnowledgeLoadPayload = {
+  notes: unknown[];
+  presetTags: unknown[];
+  metadata: {
+    noteCount: number;
+    presetTagCount: number;
+  };
+};
+
 /**
  * 同步队列项
  */
@@ -147,40 +156,16 @@ class SyncEngineClass {
 
   private async performSync(types: SyncDataType[]): Promise<SyncResult> {
     try {
-      const { getKnowledgeDataset } = await import('../kb');
-
-      const payload: Record<string, unknown> = {};
-
-      for (const type of types) {
-        if (type === 'knowledge') {
-          payload.knowledge = getKnowledgeDataset();
-        }
-      }
-
-      if (Object.keys(payload).length === 0) {
+      if (!types.includes('knowledge')) {
         return {
           success: true,
           timestamp: Date.now(),
         };
       }
 
-      const response = await fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_DATASET_WRITE_ENDPOINT, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dataset: payload.knowledge,
-        }),
-      });
-
-      if (!response.ok) {
-        throw AppError.fromCode(ErrorCode.SYNC_FAILED, `HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
-
       return {
         success: true,
-        timestamp: result?.data?.updatedAt || Date.now(),
+        timestamp: Date.now(),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -196,24 +181,38 @@ class SyncEngineClass {
    */
   async loadKnowledgeFromServer(): Promise<{
     success: boolean;
-    data?: {
-      knowledge?: unknown;
-    };
+    data?: KnowledgeLoadPayload;
     error?: string;
   }> {
     try {
-      const response = await fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_DATASET_READ_ENDPOINT);
+      const [notesResponse, presetTagsResponse, metadataResponse] = await Promise.all([
+        fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_NOTES_ENDPOINT),
+        fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_PRESET_TAGS_ENDPOINT),
+        fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_METADATA_ENDPOINT),
+      ]);
 
-      if (!response.ok) {
-        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${response.status}`);
+      if (!notesResponse.ok) {
+        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${notesResponse.status}`);
+      }
+      if (!presetTagsResponse.ok) {
+        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${presetTagsResponse.status}`);
+      }
+      if (!metadataResponse.ok) {
+        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${metadataResponse.status}`);
       }
 
-      const result = await response.json();
+      const [notesResult, presetTagsResult, metadataResult] = await Promise.all([
+        notesResponse.json(),
+        presetTagsResponse.json(),
+        metadataResponse.json(),
+      ]);
 
       return {
         success: true,
         data: {
-          knowledge: result.data,
+          notes: Array.isArray(notesResult?.items) ? notesResult.items : [],
+          presetTags: Array.isArray(presetTagsResult?.items) ? presetTagsResult.items : [],
+          metadata: metadataResult?.data ?? { noteCount: 0, presetTagCount: 0 },
         },
       };
     } catch (error) {
@@ -228,12 +227,8 @@ class SyncEngineClass {
   async loadKnowledgeMetadata(): Promise<{
     success: boolean;
     data?: {
-      updatedAt: number;
-      version: number;
-      entityCount: number;
-      documentCount: number;
-      assertionCount: number;
-      source: string;
+      noteCount: number;
+      presetTagCount: number;
     };
     error?: string;
   }> {

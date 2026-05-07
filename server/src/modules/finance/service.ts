@@ -7,7 +7,6 @@ import {
   updateFinanceRecord,
 } from './repository';
 import { toFinanceRecordDto } from './dto';
-import { kickProjectionRuntime } from '../projection/runtime';
 
 export async function getFinanceList() {
   const records = await listFinanceRecords();
@@ -16,7 +15,6 @@ export async function getFinanceList() {
 
 export async function createFinanceRecordEntry(input: CreateFinanceRecordInput) {
   const record = await createFinanceRecord(input);
-  kickProjectionRuntime();
   return toFinanceRecordDto(record);
 }
 
@@ -31,7 +29,6 @@ export async function updateFinanceRecordEntry(id: string, input: UpdateFinanceR
     return null;
   }
   const record = await updateFinanceRecord(id, input);
-  kickProjectionRuntime();
   return toFinanceRecordDto(record);
 }
 
@@ -41,6 +38,5 @@ export async function deleteFinanceRecordEntry(id: string) {
     return null;
   }
   const record = await softDeleteFinanceRecord(id);
-  kickProjectionRuntime();
   return toFinanceRecordDto(record);
 }

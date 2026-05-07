@@ -5,10 +5,8 @@ import { taskRoutes } from './modules/tasks/routes';
 import { financeRoutes } from './modules/finance/routes';
 import { knowledgeRoutes } from './modules/knowledge/routes';
 import { maintenanceRoutes } from './modules/maintenance/routes';
-import { searchRoutes } from './modules/search/routes';
 import { agentRoutes } from './modules/agent/routes';
 import { providerRoutes } from './modules/providers/routes';
-import { registerProjectionRuntime } from './modules/projection/runtime';
 import { authenticateRequest, runAuthenticatedRequest } from './shared/auth';
 import { sendInfrastructureError } from './shared/http';
 
@@ -47,11 +45,9 @@ export function createApp() {
   app.register(taskRoutes, { prefix: '/api/tasks' });
   app.register(financeRoutes, { prefix: '/api/finance' });
   app.register(knowledgeRoutes, { prefix: '/api' });
-  app.register(searchRoutes, { prefix: '/api' });
   app.register(providerRoutes, { prefix: '/api' });
   app.register(agentRoutes, { prefix: '/api' });
   app.register(maintenanceRoutes, { prefix: '/api/maintenance' });
-  registerProjectionRuntime(app);
 
   return app;
 }

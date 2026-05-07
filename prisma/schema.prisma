@@ -8,30 +8,22 @@ datasource db {
 }
 
 model User {
-  id                         String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email                      String?                      @unique
-  displayName                String                       @map("display_name")
-  status                     String                       @default("active")
-  createdAt                  DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                  DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  agentRuns                  AgentRun[]
-  agentMessages              AgentMessage[]
-  agentRunSnapshots          AgentRunStateSnapshot[]
-  providers                  ApiProvider[]
-  finances                   FinanceRecord[]
-  knowledgeBase              KnowledgeBase?
-  knowledgeOntologyClasses   KnowledgeOntologyClassRecord[]
-  knowledgeOntologyRelations KnowledgeOntologyRelationRecord[]
-  knowledgeEntities          KnowledgeEntityRecord[]
-  knowledgeDocuments         KnowledgeDocumentRecord[]
-  knowledgeAssertions        KnowledgeAssertionRecord[]
-  knowledgeRelations         KnowledgeRelationRecord[]
-  knowledgeDocumentLinks     KnowledgeDocumentEntityLink[]
-  knowledgeAssertionEvidence KnowledgeAssertionEvidenceLink[]
-  projectionOutboxEvents     ProjectionOutboxEvent[]
-  tasks                      Task[]
-  settings                   UserSetting?
-  toolExecutions             ToolExecution[]
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email            String?            @unique
+  displayName      String             @map("display_name")
+  status           String             @default("active")
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  agentRuns        AgentRun[]
+  agentMessages    AgentMessage[]
+  agentRunSnapshots AgentRunStateSnapshot[]
+  providers        ApiProvider[]
+  finances         FinanceRecord[]
+  knowledgeNotes   KnowledgeNote[]
+  knowledgePresetTags KnowledgePresetTag[]
+  tasks            Task[]
+  settings         UserSetting?
+  toolExecutions   ToolExecution[]
 
   @@map("users")
 }
@@ -188,167 +180,32 @@ model FinanceRecord {
   @@map("finance_records")
 }
 
-model KnowledgeBase {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String   @unique @map("user_id") @db.Uuid
-  datasetJson Json     @map("dataset_json")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  version     Int      @default(1)
-  user        User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@map("knowledge_bases")
-}
-
-model KnowledgeEntityRecord {
-  id             String    @id @db.Text
-  userId         String    @map("user_id") @db.Uuid
-  typeId         String    @map("type_id")
-  title          String
-  summary        String    @default("")
-  aliasesJson    Json      @default("[]") @map("aliases_json")
-  tagsJson       Json      @default("[]") @map("tags_json")
-  attributesJson Json      @default("{}") @map("attributes_json")
-  source         String?
-  confidence     Float?
-  createdAt      DateTime  @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime  @map("updated_at") @db.Timestamptz(6)
-  user           User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([userId])
-  @@index([userId, updatedAt(sort: Desc)])
-  @@map("knowledge_entities")
-}
-
-model KnowledgeOntologyClassRecord {
-  id           String    @id @db.Text
-  userId       String    @map("user_id") @db.Uuid
-  label        String
-  description  String    @default("")
-  parentIdsJson Json     @default("[]") @map("parent_ids_json")
-  createdAt    DateTime  @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime  @map("updated_at") @db.Timestamptz(6)
-  user         User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([userId])
-  @@index([userId, updatedAt(sort: Desc)])
-  @@map("knowledge_ontology_classes")
-}
-
-model KnowledgeOntologyRelationRecord {
-  id             String    @id @db.Text
-  userId         String    @map("user_id") @db.Uuid
-  label          String
-  description    String    @default("")
-  symmetric      Boolean   @default(false)
-  transitive     Boolean   @default(false)
-  inverseOf      String?   @map("inverse_of")
-  createdAt      DateTime  @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime  @map("updated_at") @db.Timestamptz(6)
-  user           User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([userId])
-  @@index([userId, updatedAt(sort: Desc)])
-  @@map("knowledge_ontology_relations")
-}
-
-model KnowledgeRelationRecord {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  subjectId   String    @map("subject_id") @db.Text
-  predicateId String    @map("predicate_id")
-  targetId    String    @map("target_id") @db.Text
-  source      String?
-  confidence  Float?
-  createdAt   DateTime  @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime  @map("updated_at") @db.Timestamptz(6)
-  user        User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([userId, subjectId, predicateId, targetId])
-  @@index([userId, subjectId])
-  @@index([userId, targetId])
-  @@map("knowledge_relations")
-}
-
-model KnowledgeDocumentRecord {
-  id        String    @id @db.Text
-  userId    String    @map("user_id") @db.Uuid
+model KnowledgeNote {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
   title     String
-  summary   String    @default("")
-  content   String    @default("")
-  tagsJson  Json      @default("[]") @map("tags_json")
-  source    String?
-  createdAt DateTime  @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime  @map("updated_at") @db.Timestamptz(6)
-  user      User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  content   String   @default("")
+  tagsJson  Json     @default("[]") @map("tags_json")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([userId])
   @@index([userId, updatedAt(sort: Desc)])
-  @@map("knowledge_documents")
+  @@map("knowledge_notes")
 }
 
-model KnowledgeDocumentEntityLink {
-  userId     String @map("user_id") @db.Uuid
-  documentId String @map("document_id") @db.Text
-  entityId   String @map("entity_id") @db.Text
-  user       User   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+model KnowledgePresetTag {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String
+  color     String   @default("#6B7280")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@id([userId, documentId, entityId])
-  @@index([userId, documentId])
-  @@index([userId, entityId])
-  @@map("knowledge_document_entities")
-}
-
-model KnowledgeAssertionRecord {
-  id             String    @id @db.Text
-  userId         String    @map("user_id") @db.Uuid
-  subjectId      String    @map("subject_id") @db.Text
-  predicateId    String    @map("predicate_id")
-  objectId       String?   @map("object_id") @db.Text
-  scalarValueJson Json?    @map("scalar_value_json")
-  source         String?
-  confidence     Float?
-  createdAt      DateTime  @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime  @map("updated_at") @db.Timestamptz(6)
-  user           User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([userId])
-  @@index([userId, subjectId])
-  @@index([userId, objectId])
-  @@map("knowledge_assertions")
-}
-
-model KnowledgeAssertionEvidenceLink {
-  userId      String @map("user_id") @db.Uuid
-  assertionId String @map("assertion_id") @db.Text
-  documentId  String @map("document_id") @db.Text
-  user        User   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@id([userId, assertionId, documentId])
-  @@index([userId, assertionId])
-  @@index([userId, documentId])
-  @@map("knowledge_assertion_evidence")
-}
-
-model ProjectionOutboxEvent {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId        String    @map("user_id") @db.Uuid
-  topic         String
-  aggregateType String    @map("aggregate_type")
-  aggregateId   String    @map("aggregate_id")
-  operation     String
-  payloadJson   Json      @default("{}") @map("payload_json")
-  status        String    @default("pending")
-  attempts      Int       @default(0)
-  availableAt   DateTime  @default(now()) @map("available_at") @db.Timestamptz(6)
-  processedAt   DateTime? @map("processed_at") @db.Timestamptz(6)
-  lastError     String?   @map("last_error")
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user          User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([status, availableAt(sort: Asc)])
-  @@index([userId, status, availableAt(sort: Asc)])
-  @@index([userId, topic, status])
-  @@map("projection_outbox_events")
+  @@unique([userId, name])
+  @@index([userId, sortOrder])
+  @@map("knowledge_preset_tags")
 }

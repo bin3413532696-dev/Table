@@ -1,13 +1,6 @@
 import { prisma } from '../../db/client';
 import { getCurrentUserId } from '../../shared/user-context';
 import { toBusinessSnapshotDto } from './dto';
-import { createDefaultKnowledgeDataset } from '../knowledge/dataset';
-import { replaceKnowledgeDataset } from '../knowledge/repository';
-import {
-  enqueueProjectionOutboxEvents,
-  KNOWLEDGE_PROJECTION_TOPIC,
-  toProjectionPayload,
-} from '../projection/outbox';
 
 type ImportedTask = {
   title?: string;
@@ -96,35 +89,6 @@ function toTimestampDate(value?: number): Date {
   return isFiniteTimestamp(value) ? new Date(value) : new Date();
 }
 
-function buildTaskKnowledgeProjectionPayload(task: ImportedTask & { id: string; createdAt?: number; updatedAt?: number }) {
-  return {
-    id: task.id,
-    title: task.title!.trim(),
-    completed: task.completed ?? false,
-    priority: task.priority ?? 'medium',
-    dueDate: task.dueDate,
-    notes: typeof task.notes === 'string' ? task.notes : undefined,
-    createdAt: isFiniteTimestamp(task.createdAt) ? task.createdAt : Date.now(),
-    updatedAt: isFiniteTimestamp(task.updatedAt) ? task.updatedAt : Date.now(),
-  };
-}
-
-function buildFinanceKnowledgeProjectionPayload(
-  record: ImportedFinance & { id: string; createdAt?: number; updatedAt?: number }
-) {
-  return {
-    id: record.id,
-    type: record.type!,
-    amount: record.amount!,
-    description: record.description!.trim(),
-    category: record.category!.trim(),
-    date: record.date!,
-    model: typeof record.model === 'string' && record.model.trim().length > 0 ? record.model : undefined,
-    createdAt: isFiniteTimestamp(record.createdAt) ? record.createdAt : Date.now(),
-    updatedAt: isFiniteTimestamp(record.updatedAt) ? record.updatedAt : Date.now(),
-  };
-}
-
 export async function exportBusinessSnapshot() {
   const userId = getCurrentUserId();
 
@@ -177,12 +141,6 @@ export async function importBusinessSnapshot(payload: unknown) {
       },
     });
 
-    await tx.projectionOutboxEvent.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
     if (tasks.length > 0) {
       const createdAt = Date.now();
       await tx.task.createMany({
@@ -216,57 +174,6 @@ export async function importBusinessSnapshot(payload: unknown) {
         })),
       });
     }
-
-    const persistedTasks = await tx.task.findMany({
-      where: {
-        userId,
-        deletedAt: null,
-      },
-    });
-    const persistedFinance = await tx.financeRecord.findMany({
-      where: {
-        userId,
-        deletedAt: null,
-      },
-    });
-
-    await enqueueProjectionOutboxEvents(tx, [
-      ...persistedTasks.map((task) => ({
-        userId,
-        topic: KNOWLEDGE_PROJECTION_TOPIC,
-        aggregateType: 'task',
-        aggregateId: task.id,
-        operation: 'upsert',
-        payload: toProjectionPayload({
-          id: task.id,
-          title: task.title,
-          completed: task.completed,
-          priority: task.priority,
-          dueDate: task.dueDate ? task.dueDate.toISOString().slice(0, 10) : undefined,
-          notes: task.notes ?? undefined,
-          createdAt: task.createdAt.getTime(),
-          updatedAt: task.updatedAt.getTime(),
-        }),
-      })),
-      ...persistedFinance.map((record) => ({
-        userId,
-        topic: KNOWLEDGE_PROJECTION_TOPIC,
-        aggregateType: 'finance-record',
-        aggregateId: record.id,
-        operation: 'upsert',
-        payload: toProjectionPayload({
-          id: record.id,
-          type: record.type,
-          amount: Number(record.amount),
-          description: record.description,
-          category: record.category,
-          date: record.recordDate.toISOString().slice(0, 10),
-          model: record.model ?? undefined,
-          createdAt: record.createdAt.getTime(),
-          updatedAt: record.updatedAt.getTime(),
-        }),
-      })),
-    ]);
   });
 
   return {
@@ -279,7 +186,6 @@ export async function importBusinessSnapshot(payload: unknown) {
 
 export async function resetWorkspaceData() {
   const userId = getCurrentUserId();
-  const knowledgeDataset = createDefaultKnowledgeDataset();
 
   await prisma.$transaction(async (tx) => {
     await tx.task.deleteMany({
@@ -294,61 +200,13 @@ export async function resetWorkspaceData() {
       },
     });
 
-    await tx.projectionOutboxEvent.deleteMany({
+    await tx.knowledgeNote.deleteMany({
       where: {
         userId,
       },
     });
 
-    await tx.knowledgeAssertionEvidenceLink.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
-    await tx.knowledgeDocumentEntityLink.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
-    await tx.knowledgeRelationRecord.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
-    await tx.knowledgeAssertionRecord.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
-    await tx.knowledgeOntologyRelationRecord.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
-    await tx.knowledgeOntologyClassRecord.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
-    await tx.knowledgeDocumentRecord.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
-    await tx.knowledgeEntityRecord.deleteMany({
-      where: {
-        userId,
-      },
-    });
-
-    await tx.knowledgeBase.deleteMany({
+    await tx.knowledgePresetTag.deleteMany({
       where: {
         userId,
       },
@@ -400,60 +258,46 @@ export async function resetWorkspaceData() {
       ],
     });
 
-    const tasks = await tx.task.findMany({
-      where: {
-        userId,
-        deletedAt: null,
-      },
-    });
-    const financeRecords = await tx.financeRecord.findMany({
-      where: {
-        userId,
-        deletedAt: null,
-      },
+    await tx.knowledgeNote.createMany({
+      data: [
+        {
+          userId,
+          title: '系统架构设计笔记',
+          content: '采用 Fastify + Prisma + PostgreSQL 的后端架构',
+          tagsJson: ['architecture', 'backend'],
+        },
+      ],
     });
 
-    await enqueueProjectionOutboxEvents(tx, [
-      ...tasks.map((task) => ({
-        userId,
-        topic: KNOWLEDGE_PROJECTION_TOPIC,
-        aggregateType: 'task',
-        aggregateId: task.id,
-        operation: 'upsert',
-        payload: toProjectionPayload({
-          id: task.id,
-          title: task.title,
-          completed: task.completed,
-          priority: task.priority,
-          dueDate: task.dueDate ? task.dueDate.toISOString().slice(0, 10) : undefined,
-          notes: task.notes ?? undefined,
-          createdAt: task.createdAt.getTime(),
-          updatedAt: task.updatedAt.getTime(),
-        }),
-      })),
-      ...financeRecords.map((record) => ({
-        userId,
-        topic: KNOWLEDGE_PROJECTION_TOPIC,
-        aggregateType: 'finance-record',
-        aggregateId: record.id,
-        operation: 'upsert',
-        payload: toProjectionPayload({
-          id: record.id,
-          type: record.type,
-          amount: Number(record.amount),
-          description: record.description,
-          category: record.category,
-          date: record.recordDate.toISOString().slice(0, 10),
-          model: record.model ?? undefined,
-          createdAt: record.createdAt.getTime(),
-          updatedAt: record.updatedAt.getTime(),
-        }),
-      })),
-    ]);
-
+    await tx.knowledgePresetTag.createMany({
+      data: [
+        {
+          userId,
+          name: 'architecture',
+          color: '#3B82F6',
+          sortOrder: 0,
+        },
+        {
+          userId,
+          name: 'backend',
+          color: '#10B981',
+          sortOrder: 1,
+        },
+        {
+          userId,
+          name: 'frontend',
+          color: '#F59E0B',
+          sortOrder: 2,
+        },
+        {
+          userId,
+          name: 'design',
+          color: '#EF4444',
+          sortOrder: 3,
+        },
+      ],
+    });
   });
-
-  await replaceKnowledgeDataset(knowledgeDataset);
 
   return {
     success: true,

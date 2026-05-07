@@ -23,8 +23,7 @@ import {
   switchAuthSession,
   updateAuthMe,
 } from '../../lib/auth';
-import { loadKnowledgeFromServer } from '../../lib/dataSync';
-import { hydrateKnowledgeDataset } from '../../kb';
+import { initializeData } from '../../lib/dataSync';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User, desc: '管理您的个人信息' },
@@ -155,11 +154,7 @@ function ProfileSettings() {
       financeDB.getAll(),
       taskDB.getAll(),
     ]);
-
-    const knowledgeResult = await loadKnowledgeFromServer();
-    if (knowledgeResult.success && knowledgeResult.data?.knowledge !== undefined) {
-      await hydrateKnowledgeDataset(knowledgeResult.data.knowledge);
-    }
+    await initializeData();
   };
 
   const handleSwitchUser = async (nextUserId: string) => {
@@ -526,9 +521,8 @@ function DataManager() {
   const [stats, setStats] = useState({
     finance: 0,
     tasks: 0,
-    knowledgeEntities: 0,
-    knowledgeDocuments: 0,
-    knowledgeAssertions: 0,
+    knowledgeNotes: 0,
+    knowledgePresetTags: 0,
     totalSize: 0,
   });
 
@@ -627,16 +621,12 @@ function DataManager() {
           <p className="text-xs text-text-muted">任务</p>
         </div>
         <div className="text-center">
-          <p className="text-2xl font-bold text-text-primary">{stats.knowledgeEntities}</p>
-          <p className="text-xs text-text-muted">知识实体</p>
+          <p className="text-2xl font-bold text-text-primary">{stats.knowledgeNotes}</p>
+          <p className="text-xs text-text-muted">知识笔记</p>
         </div>
         <div className="text-center">
-          <p className="text-2xl font-bold text-text-primary">{stats.knowledgeDocuments}</p>
-          <p className="text-xs text-text-muted">知识文档</p>
-        </div>
-        <div className="text-center">
-          <p className="text-2xl font-bold text-text-primary">{stats.knowledgeAssertions}</p>
-          <p className="text-xs text-text-muted">知识断言</p>
+          <p className="text-2xl font-bold text-text-primary">{stats.knowledgePresetTags}</p>
+          <p className="text-xs text-text-muted">预设标签</p>
         </div>
         <div className="text-center">
           <p className="text-2xl font-bold text-text-primary">{formatSize(stats.totalSize)}</p>
@@ -676,7 +666,7 @@ function DataManager() {
           </div>
           <div>
             <div className="text-sm font-medium text-text-primary">导出知识库</div>
-            <div className="text-xs text-text-muted">导出实体、文档、断言和知识结构</div>
+            <div className="text-xs text-text-muted">导出服务端知识笔记与预设标签概览</div>
           </div>
         </button>
 

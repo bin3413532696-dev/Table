@@ -16,11 +16,11 @@ export const SYNC_CONFIG = {
   /** 重试基础延迟（指数退避） */
   RETRY_BASE_DELAY: 1000,
 
-  /** 知识库权威数据写入端点 */
-  KNOWLEDGE_DATASET_WRITE_ENDPOINT: '/api/knowledge/dataset',
+  /** 知识库笔记列表端点 */
+  KNOWLEDGE_NOTES_ENDPOINT: '/api/knowledge/notes',
 
-  /** 知识库权威数据读取端点 */
-  KNOWLEDGE_DATASET_READ_ENDPOINT: '/api/knowledge/dataset',
+  /** 知识库预设标签端点 */
+  KNOWLEDGE_PRESET_TAGS_ENDPOINT: '/api/knowledge/tags/preset',
 
   /** 知识库 metadata 端点 */
   KNOWLEDGE_METADATA_ENDPOINT: '/api/knowledge/metadata',

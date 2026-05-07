@@ -1,12 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db/client';
-import { ensureKnowledgeBase } from '../modules/knowledge/repository';
-import {
-  enqueueProjectionOutboxEvents,
-  KNOWLEDGE_PROJECTION_TOPIC,
-  toProjectionPayload,
-} from '../modules/projection/outbox';
 import { createProviderForCurrentUser, listProvidersForCurrentUser } from '../modules/providers/service';
 import {
   DEV_SESSION_COOKIE,
@@ -49,52 +43,6 @@ function ensureValidUserContext(context: ServerUserContext) {
     }
     throw new AuthError(`Invalid ${USER_ID_HEADER} header`, 401, 'UNAUTHORIZED');
   }
-}
-
-function toTaskProjectionPayload(task: {
-  id: string;
-  title: string;
-  completed: boolean;
-  priority: string;
-  dueDate: Date | null;
-  notes: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}) {
-  return {
-    id: task.id,
-    title: task.title,
-    completed: task.completed,
-    priority: task.priority,
-    dueDate: task.dueDate ? task.dueDate.toISOString().slice(0, 10) : undefined,
-    notes: task.notes ?? undefined,
-    createdAt: task.createdAt.getTime(),
-    updatedAt: task.updatedAt.getTime(),
-  };
-}
-
-function toFinanceProjectionPayload(record: {
-  id: string;
-  type: string;
-  amount: { toString(): string };
-  description: string;
-  category: string;
-  recordDate: Date;
-  model: string | null;
-  createdAt: Date;
-  updatedAt: Date;
-}) {
-  return {
-    id: record.id,
-    type: record.type,
-    amount: Number(record.amount),
-    description: record.description,
-    category: record.category,
-    date: record.recordDate.toISOString().slice(0, 10),
-    model: record.model ?? undefined,
-    createdAt: record.createdAt.getTime(),
-    updatedAt: record.updatedAt.getTime(),
-  };
 }
 
 async function ensureUserRecordExists(context: ServerUserContext) {
@@ -147,20 +95,9 @@ async function ensureUserBaseline(context: ServerUserContext) {
     });
   }
 
-  const existingKnowledgeBase = await prisma.knowledgeBase.findUnique({
-    where: {
-      userId: context.userId,
-    },
-  });
-
-  if (!existingKnowledgeBase) {
-    await ensureKnowledgeBase();
-  }
-
   const existingProviders = await listProvidersForCurrentUser();
   const shouldBootstrapWorkspace =
     !existingSettings &&
-    !existingKnowledgeBase &&
     existingProviders.length === 0;
 
   if (shouldBootstrapWorkspace) {
@@ -245,39 +182,45 @@ async function ensureUserBaseline(context: ServerUserContext) {
         ],
       });
 
-      const [seededTasks, seededFinance] = await Promise.all([
-        tx.task.findMany({
-          where: {
+      await tx.knowledgeNote.createMany({
+        data: [
+          {
             userId: context.userId,
-            deletedAt: null,
+            title: '系统架构设计笔记',
+            content: '采用 Fastify + Prisma + PostgreSQL 的后端架构',
+            tagsJson: ['architecture', 'backend'],
           },
-        }),
-        tx.financeRecord.findMany({
-          where: {
-            userId: context.userId,
-            deletedAt: null,
-          },
-        }),
-      ]);
+        ],
+      });
 
-      await enqueueProjectionOutboxEvents(tx, [
-        ...seededTasks.map((task) => ({
-          userId: context.userId,
-          topic: KNOWLEDGE_PROJECTION_TOPIC,
-          aggregateType: 'task',
-          aggregateId: task.id,
-          operation: 'upsert',
-          payload: toProjectionPayload(toTaskProjectionPayload(task)),
-        })),
-        ...seededFinance.map((record) => ({
-          userId: context.userId,
-          topic: KNOWLEDGE_PROJECTION_TOPIC,
-          aggregateType: 'finance-record',
-          aggregateId: record.id,
-          operation: 'upsert',
-          payload: toProjectionPayload(toFinanceProjectionPayload(record)),
-        })),
-      ]);
+      await tx.knowledgePresetTag.createMany({
+        data: [
+          {
+            userId: context.userId,
+            name: 'architecture',
+            color: '#3B82F6',
+            sortOrder: 0,
+          },
+          {
+            userId: context.userId,
+            name: 'backend',
+            color: '#10B981',
+            sortOrder: 1,
+          },
+          {
+            userId: context.userId,
+            name: 'frontend',
+            color: '#F59E0B',
+            sortOrder: 2,
+          },
+          {
+            userId: context.userId,
+            name: 'design',
+            color: '#EF4444',
+            sortOrder: 3,
+          },
+        ],
+      });
     });
   }
 }
@@ -346,7 +289,6 @@ export async function provisionUser(input: {
         },
       });
 
-      await ensureKnowledgeBase();
       await ensureUserBaselineOnce({
         userId: nextUser.id,
         source: nextUser.id === getDefaultUserId() ? 'default' : 'header',

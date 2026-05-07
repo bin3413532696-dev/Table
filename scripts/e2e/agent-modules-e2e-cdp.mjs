@@ -14,37 +14,28 @@ async function fetchJson(url) {
   return response.json();
 }
 
-async function loadKnowledgeSnapshot() {
-  const payload = await fetchJson(`${PAGE_ORIGIN}/api/knowledge/dataset?ts=${Date.now()}`);
-  return payload?.data;
-}
-
-async function waitForKnowledgeCondition(
-  predicate,
-  { timeout = 15000, interval = 250, description = 'knowledge condition' } = {}
-) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    const knowledge = await loadKnowledgeSnapshot();
-    if (predicate(knowledge)) {
-      return knowledge;
-    }
-    await sleep(interval);
-  }
-
-  throw new Error(`Timed out waiting for ${description}`);
-}
-
-async function saveKnowledgeSnapshot(knowledge) {
-  const response = await fetch(`${PAGE_ORIGIN}/api/knowledge/dataset`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ dataset: knowledge }),
+async function requestApi(path, init = {}) {
+  const response = await fetch(`${PAGE_ORIGIN}${path}`, {
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+    ...init,
   });
 
-  if (!response.ok) {
-    throw new Error(`Failed to restore knowledge snapshot: HTTP ${response.status}`);
+  if (response.status === 204) {
+    return undefined;
   }
+
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : undefined;
+
+  if (!response.ok) {
+    throw new Error(`${init.method || 'GET'} ${path} failed: ${payload?.message || response.status}`);
+  }
+
+  return payload;
 }
 
 async function getPageDebuggerUrl() {
@@ -341,25 +332,16 @@ async function runPrompt(cdp, prompt, { expectBody = [], expectTool, confirm = f
 }
 
 async function main() {
-  const backupKnowledge = await loadKnowledgeSnapshot();
   const wsUrl = await getPageDebuggerUrl();
   const cdp = new CDPClient(wsUrl);
   const suffix = Date.now().toString(36);
-  const knowledgeEntityTitle = `Agent Tool Entity ${suffix}`;
-  const knowledgeDocumentTitle = `Agent Tool Document ${suffix}`;
-  const knowledgeRelationSource = `agent-relation-${suffix}`;
-  const knowledgeAssertionSource = `agent-assertion-${suffix}`;
   const taskTitle = `Authority Test Task ${suffix}`;
-  const financeDescription = `Authority Finance ${suffix}`;
-  let createdKnowledgeEntityId = null;
-  let createdKnowledgeDocumentId = null;
-  let createdKnowledgeAssertionId = null;
+  let createdTaskId = null;
 
   const summary = {
     pageUrl: null,
     tests: [],
     failures: [],
-    restoredKnowledge: false,
   };
 
   try {
@@ -437,203 +419,6 @@ async function main() {
       summary.failures.push('get_current_time: 时间结果未完整显示');
     }
 
-    const knowledgeOverviewResult = await runPrompt(
-      cdp,
-      '请严格只调用 get_knowledge_overview 工具，读取知识库概览，不要调用其他工具。',
-      { expectTool: 'get_knowledge_overview', expectBody: ['entityCount', 'documentCount'] }
-    );
-    summary.tests.push({
-      test: 'get_knowledge_overview',
-      toolCalled: knowledgeOverviewResult.toolCalled,
-      matchedExpectations: knowledgeOverviewResult.matchedExpectations,
-    });
-    if (knowledgeOverviewResult.matchedExpectations.length < 2) {
-      summary.failures.push('get_knowledge_overview: 知识库概览结果未完整显示');
-    }
-
-    const upsertKnowledgeEntityResult = await runPrompt(
-      cdp,
-      `请严格只调用 upsert_knowledge_entity 工具，不要调用其他工具。参数如下：\`\`\`json\n{"typeId":"class:project","title":"${knowledgeEntityTitle}","summary":"Agent 知识库工具回归实体","tags":["agent","knowledge","e2e"],"source":"agent-modules-e2e-cdp","attributes":{"stage":"agent-e2e","kind":"entity"}}\n\`\`\``,
-      { expectTool: 'upsert_knowledge_entity', confirm: true }
-    );
-    const knowledgeAfterCreate = await loadKnowledgeSnapshot();
-    const createdKnowledgeEntity = knowledgeAfterCreate?.entities?.find(
-      (entity) => entity.title === knowledgeEntityTitle
-    );
-    summary.tests.push({
-      test: 'upsert_knowledge_entity',
-      toolCalled: upsertKnowledgeEntityResult.toolCalled,
-      persisted: Boolean(createdKnowledgeEntity),
-    });
-    if (!createdKnowledgeEntity) {
-      summary.failures.push('upsert_knowledge_entity: 未在知识库权威源中找到新实体');
-    } else {
-      createdKnowledgeEntityId = createdKnowledgeEntity.id;
-    }
-
-    if (createdKnowledgeEntityId) {
-      const createKnowledgeRelationResult = await runPrompt(
-        cdp,
-        `请严格只调用 create_knowledge_relation 工具，不要调用其他工具。参数如下：\`\`\`json\n{"subjectId":"${createdKnowledgeEntityId}","predicateId":"relation:relatedTo","targetId":"entity:workspace","source":"${knowledgeRelationSource}","confidence":0.9}\n\`\`\``,
-        { expectTool: 'create_knowledge_relation', confirm: true }
-      );
-      const knowledgeAfterRelation = await loadKnowledgeSnapshot();
-      const relationEntity = knowledgeAfterRelation?.entities?.find(
-        (entity) => entity.id === createdKnowledgeEntityId
-      );
-      const relationExists = relationEntity?.relations?.some(
-        (relation) =>
-          relation.predicateId === 'relation:relatedTo' &&
-          relation.targetId === 'entity:workspace' &&
-          relation.source === knowledgeRelationSource
-      );
-      const mirroredRelationAssertion = knowledgeAfterRelation?.assertions?.some(
-        (assertion) =>
-          assertion.subjectId === createdKnowledgeEntityId &&
-          assertion.predicateId === 'relation:relatedTo' &&
-          assertion.objectId === 'entity:workspace' &&
-          assertion.source === knowledgeRelationSource
-      );
-      summary.tests.push({
-        test: 'create_knowledge_relation',
-        toolCalled: createKnowledgeRelationResult.toolCalled,
-        persisted: Boolean(relationExists),
-        mirroredAssertion: Boolean(mirroredRelationAssertion),
-      });
-      if (!relationExists) {
-        summary.failures.push('create_knowledge_relation: 未在知识实体上找到新关系');
-      }
-      if (!mirroredRelationAssertion) {
-        summary.failures.push('create_knowledge_relation: 未生成对应关系断言');
-      }
-
-      const getKnowledgeEntityResult = await runPrompt(
-        cdp,
-        `请严格只调用 get_knowledge_entity 工具，不要调用其他工具。参数如下：\`\`\`json\n{"id":"${createdKnowledgeEntityId}","relationDepth":1}\n\`\`\``,
-        { expectTool: 'get_knowledge_entity', expectBody: [knowledgeEntityTitle, 'relatedEntities'] }
-      );
-      summary.tests.push({
-        test: 'get_knowledge_entity',
-        toolCalled: getKnowledgeEntityResult.toolCalled,
-        matchedExpectations: getKnowledgeEntityResult.matchedExpectations,
-      });
-      if (getKnowledgeEntityResult.matchedExpectations.length < 2) {
-        summary.failures.push('get_knowledge_entity: 实体详情结果未完整显示');
-      }
-
-      const upsertKnowledgeDocumentResult = await runPrompt(
-        cdp,
-        `请严格只调用 upsert_knowledge_document 工具，不要调用其他工具。参数如下：\`\`\`json\n{"title":"${knowledgeDocumentTitle}","summary":"Agent 知识库工具回归文档","content":"该文档用于验证智能体对知识库文档与断言的写入删除链路。","tags":["agent","knowledge","document"],"entityIds":["${createdKnowledgeEntityId}"],"source":"agent-modules-e2e-cdp"}\n\`\`\``,
-        { expectTool: 'upsert_knowledge_document', confirm: true }
-      );
-      const knowledgeAfterDocument = await loadKnowledgeSnapshot();
-      const createdKnowledgeDocument = knowledgeAfterDocument?.documents?.find(
-        (document) => document.title === knowledgeDocumentTitle
-      );
-      createdKnowledgeDocumentId = createdKnowledgeDocument?.id || null;
-      summary.tests.push({
-        test: 'upsert_knowledge_document',
-        toolCalled: upsertKnowledgeDocumentResult.toolCalled,
-        persisted: Boolean(createdKnowledgeDocument),
-        linkedEntity: Boolean(createdKnowledgeDocument?.entityIds?.includes(createdKnowledgeEntityId)),
-      });
-      if (!createdKnowledgeDocument) {
-        summary.failures.push('upsert_knowledge_document: 未在知识库权威源中找到新文档');
-      }
-
-      if (createdKnowledgeDocumentId) {
-        const upsertKnowledgeAssertionResult = await runPrompt(
-          cdp,
-          `请严格只调用 upsert_knowledge_assertion 工具，不要调用其他工具。参数如下：\`\`\`json\n{"subjectId":"${createdKnowledgeEntityId}","predicateId":"relation:mentions","objectId":"${createdKnowledgeDocumentId}","evidenceDocumentIds":["${createdKnowledgeDocumentId}"],"source":"${knowledgeAssertionSource}","confidence":0.8}\n\`\`\``,
-          { expectTool: 'upsert_knowledge_assertion', confirm: true }
-        );
-        const knowledgeAfterAssertion = await loadKnowledgeSnapshot();
-        const createdKnowledgeAssertion = knowledgeAfterAssertion?.assertions?.find(
-          (assertion) =>
-            assertion.subjectId === createdKnowledgeEntityId &&
-            assertion.objectId === createdKnowledgeDocumentId &&
-            assertion.source === knowledgeAssertionSource
-        );
-        createdKnowledgeAssertionId = createdKnowledgeAssertion?.id || null;
-        summary.tests.push({
-          test: 'upsert_knowledge_assertion',
-          toolCalled: upsertKnowledgeAssertionResult.toolCalled,
-          persisted: Boolean(createdKnowledgeAssertion),
-          evidenceLinked: Boolean(
-            createdKnowledgeAssertion?.evidenceDocumentIds?.includes(createdKnowledgeDocumentId)
-          ),
-        });
-        if (!createdKnowledgeAssertion) {
-          summary.failures.push('upsert_knowledge_assertion: 未在知识库权威源中找到新断言');
-        }
-
-        if (createdKnowledgeAssertionId) {
-          const deleteKnowledgeAssertionResult = await runPrompt(
-            cdp,
-            `请严格只调用 delete_knowledge_assertion 工具，不要调用其他工具。参数如下：\`\`\`json\n{"id":"${createdKnowledgeAssertionId}"}\n\`\`\``,
-            { expectTool: 'delete_knowledge_assertion', confirm: true }
-          );
-          const knowledgeAfterAssertionDelete = await loadKnowledgeSnapshot();
-          const assertionStillExists = knowledgeAfterAssertionDelete?.assertions?.some(
-            (assertion) => assertion.id === createdKnowledgeAssertionId
-          );
-          summary.tests.push({
-            test: 'delete_knowledge_assertion',
-            toolCalled: deleteKnowledgeAssertionResult.toolCalled,
-            removed: !assertionStillExists,
-          });
-          if (assertionStillExists) {
-            summary.failures.push('delete_knowledge_assertion: 知识断言未删除');
-          } else {
-            createdKnowledgeAssertionId = null;
-          }
-        }
-
-        const deleteKnowledgeDocumentResult = await runPrompt(
-          cdp,
-          `请严格只调用 delete_knowledge_document 工具，不要调用其他工具。参数如下：\`\`\`json\n{"id":"${createdKnowledgeDocumentId}"}\n\`\`\``,
-          { expectTool: 'delete_knowledge_document', confirm: true }
-        );
-        const knowledgeAfterDocumentDelete = await loadKnowledgeSnapshot();
-        const documentStillExists = knowledgeAfterDocumentDelete?.documents?.some(
-          (document) => document.id === createdKnowledgeDocumentId
-        );
-        summary.tests.push({
-          test: 'delete_knowledge_document',
-          toolCalled: deleteKnowledgeDocumentResult.toolCalled,
-          removed: !documentStillExists,
-        });
-        if (documentStillExists) {
-          summary.failures.push('delete_knowledge_document: 知识文档未删除');
-        } else {
-          createdKnowledgeDocumentId = null;
-        }
-      }
-
-      const deleteKnowledgeRelationResult = await runPrompt(
-        cdp,
-        `请严格只调用 delete_knowledge_relation 工具，不要调用其他工具。参数如下：\`\`\`json\n{"subjectId":"${createdKnowledgeEntityId}","predicateId":"relation:relatedTo","targetId":"entity:workspace"}\n\`\`\``,
-        { expectTool: 'delete_knowledge_relation', confirm: true }
-      );
-      const knowledgeAfterRelationDelete = await loadKnowledgeSnapshot();
-      const relationEntityAfterDelete = knowledgeAfterRelationDelete?.entities?.find(
-        (entity) => entity.id === createdKnowledgeEntityId
-      );
-      const relationStillExists = relationEntityAfterDelete?.relations?.some(
-        (relation) =>
-          relation.predicateId === 'relation:relatedTo' &&
-          relation.targetId === 'entity:workspace'
-      );
-      summary.tests.push({
-        test: 'delete_knowledge_relation',
-        toolCalled: deleteKnowledgeRelationResult.toolCalled,
-        removed: !relationStillExists,
-      });
-      if (relationStillExists) {
-        summary.failures.push('delete_knowledge_relation: 知识关系未删除');
-      }
-    }
-
     const createTaskResult = await runPrompt(
       cdp,
       `请严格只调用 create_task 工具，不要调用其他工具。参数如下：\`\`\`json\n{"title":"${taskTitle}","priority":"medium"}\n\`\`\``,
@@ -650,126 +435,12 @@ async function main() {
     });
     if (!createdTaskPersisted) {
       summary.failures.push('create_task: 未观察到任务创建成功结果');
-    }
-
-    let taskKnowledgeEntityId = null;
-    if (createdTaskPersisted) {
-      let taskKnowledgeSnapshot = null;
-
-      try {
-        taskKnowledgeSnapshot = await waitForKnowledgeCondition(
-          (knowledge) =>
-            Array.isArray(knowledge?.entities) &&
-            knowledge.entities.some((entity) => entity.title === taskTitle && String(entity.id || '').startsWith('entity:task-')) &&
-            Array.isArray(knowledge?.assertions) &&
-            knowledge.assertions.some(
-              (assertion) =>
-                assertion.subjectId === 'entity:workspace' &&
-                assertion.predicateId === 'relation:linkedTask' &&
-                String(assertion.objectId || '').startsWith('entity:task-')
-            ),
-          {
-            description: `task knowledge mapping ${taskTitle}`,
-          }
-        );
-      } catch (error) {
-        summary.failures.push(
-          `task_knowledge_mapping: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-
-      const taskMappedEntity = taskKnowledgeSnapshot?.entities?.find(
-        (entity) => entity.title === taskTitle && String(entity.id || '').startsWith('entity:task-')
-      );
-      taskKnowledgeEntityId = taskMappedEntity?.id || null;
-      const taskMappedRelation = taskKnowledgeSnapshot?.assertions?.some(
-        (assertion) =>
-          assertion.subjectId === 'entity:workspace' &&
-          assertion.predicateId === 'relation:linkedTask' &&
-          assertion.objectId === taskKnowledgeEntityId
-      );
-
-      summary.tests.push({
-        test: 'task_knowledge_mapping',
-        entityCreated: !!taskMappedEntity,
-        relationCreated: !!taskMappedRelation,
-      });
-
-      if (!taskMappedEntity) {
-        summary.failures.push('task_knowledge_mapping: 未自动创建任务知识实体');
-      }
-      if (!taskMappedRelation) {
-        summary.failures.push('task_knowledge_mapping: 未自动创建工作站到任务实体的关系');
-      }
-    }
-
-    const addFinanceResult = await runPrompt(
-      cdp,
-      `请严格只调用 add_finance_record 工具，不要调用其他工具。参数如下：\`\`\`json\n{"type":"expense","amount":88,"description":"${financeDescription}","category":"其他支出","date":"2026-05-03","model":"GPT-4"}\n\`\`\``,
-      { expectTool: 'add_finance_record', confirm: true }
-    );
-    const createdFinancePersisted =
-      String(addFinanceResult.bodyText || '').includes(financeDescription) ||
-      String(addFinanceResult.bodyText || '').includes('工具 add_finance_record 执行结果') ||
-      String(addFinanceResult.bodyText || '').includes('工具 add_finance_record 已执行成功');
-    summary.tests.push({
-      test: 'add_finance_record',
-      toolCalled: addFinanceResult.toolCalled,
-      persisted: createdFinancePersisted,
-    });
-    if (!createdFinancePersisted) {
-      summary.failures.push('add_finance_record: 未观察到财务记录创建成功结果');
-    }
-
-    let financeKnowledgeEntityId = null;
-    if (createdFinancePersisted) {
-      let financeKnowledgeSnapshot = null;
-
-      try {
-        financeKnowledgeSnapshot = await waitForKnowledgeCondition(
-          (knowledge) =>
-            Array.isArray(knowledge?.entities) &&
-            knowledge.entities.some((entity) => entity.summary?.includes(financeDescription) && String(entity.id || '').startsWith('entity:finance-')) &&
-            Array.isArray(knowledge?.assertions) &&
-            knowledge.assertions.some(
-              (assertion) =>
-                assertion.subjectId === 'entity:workspace' &&
-                assertion.predicateId === 'relation:linkedFinanceRecord' &&
-                String(assertion.objectId || '').startsWith('entity:finance-')
-            ),
-          {
-            description: `finance knowledge mapping ${financeDescription}`,
-          }
-        );
-      } catch (error) {
-        summary.failures.push(
-          `finance_knowledge_mapping: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-
-      const financeMappedEntity = financeKnowledgeSnapshot?.entities?.find(
-        (entity) => entity.summary?.includes(financeDescription) && String(entity.id || '').startsWith('entity:finance-')
-      );
-      financeKnowledgeEntityId = financeMappedEntity?.id || null;
-      const financeMappedRelation = financeKnowledgeSnapshot?.assertions?.some(
-        (assertion) =>
-          assertion.subjectId === 'entity:workspace' &&
-          assertion.predicateId === 'relation:linkedFinanceRecord' &&
-          assertion.objectId === financeKnowledgeEntityId
-      );
-
-      summary.tests.push({
-        test: 'finance_knowledge_mapping',
-        entityCreated: !!financeMappedEntity,
-        relationCreated: !!financeMappedRelation,
-      });
-
-      if (!financeMappedEntity) {
-        summary.failures.push('finance_knowledge_mapping: 未自动创建财务知识实体');
-      }
-      if (!financeMappedRelation) {
-        summary.failures.push('finance_knowledge_mapping: 未自动创建工作站到财务实体的关系');
-      }
+    } else {
+      const tasksPayload = await requestApi('/api/tasks');
+      const createdTask = Array.isArray(tasksPayload?.items)
+        ? tasksPayload.items.find((item) => item.title === taskTitle)
+        : null;
+      createdTaskId = createdTask?.id || null;
     }
 
     const weatherResult = await runPrompt(
@@ -785,105 +456,29 @@ async function main() {
       summary.failures.push('get_weather: 工具未被调用');
     }
 
-    if (taskKnowledgeEntityId) {
+    if (createdTaskId) {
       const deleteTaskResult = await runPrompt(
         cdp,
-        `请严格只调用 delete_task 工具，不要调用其他工具。参数如下：\`\`\`json\n{"id":"${String(taskKnowledgeEntityId).replace('entity:task-', '')}"}\n\`\`\``,
+        `请严格只调用 delete_task 工具，不要调用其他工具。参数如下：\`\`\`json\n{"id":"${createdTaskId}"}\n\`\`\``,
         { expectTool: 'delete_task', confirm: true }
       );
-      let taskKnowledgeRemoved = false;
-
-      try {
-        await waitForKnowledgeCondition(
-          (knowledge) =>
-            !knowledge?.entities?.some((entity) => entity.id === taskKnowledgeEntityId),
-          {
-            description: `task knowledge deletion ${taskKnowledgeEntityId}`,
-          }
-        );
-        taskKnowledgeRemoved = true;
-      } catch (error) {
-        summary.failures.push(
-          `delete_task_knowledge_mapping: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-
       summary.tests.push({
         test: 'delete_task',
         toolCalled: deleteTaskResult.toolCalled,
-        removed: taskKnowledgeRemoved,
-        knowledgeRemoved: taskKnowledgeRemoved,
       });
-      if (!taskKnowledgeRemoved) {
-        summary.failures.push('delete_task: 任务未删除');
-      }
-    }
-
-    if (financeKnowledgeEntityId) {
-      const deleteFinanceResult = await runPrompt(
-        cdp,
-        `请严格只调用 delete_finance_record 工具，不要调用其他工具。参数如下：\`\`\`json\n{"id":"${String(financeKnowledgeEntityId).replace('entity:finance-', '')}"}\n\`\`\``,
-        { expectTool: 'delete_finance_record', confirm: true }
-      );
-      let financeKnowledgeRemoved = false;
-
-      try {
-        await waitForKnowledgeCondition(
-          (knowledge) =>
-            !knowledge?.entities?.some((entity) => entity.id === financeKnowledgeEntityId),
-          {
-            description: `finance knowledge deletion ${financeKnowledgeEntityId}`,
-          }
-        );
-        financeKnowledgeRemoved = true;
-      } catch (error) {
-        summary.failures.push(
-          `delete_finance_knowledge_mapping: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-
-      summary.tests.push({
-        test: 'delete_finance_record',
-        toolCalled: deleteFinanceResult.toolCalled,
-        removed: financeKnowledgeRemoved,
-        knowledgeRemoved: financeKnowledgeRemoved,
-      });
-      if (!financeKnowledgeRemoved) {
-        summary.failures.push('delete_finance_record: 财务记录未删除');
-      }
-    }
-
-    if (createdKnowledgeEntityId) {
-      const deleteKnowledgeEntityResult = await runPrompt(
-        cdp,
-        `请严格只调用 delete_knowledge_entity 工具，不要调用其他工具。参数如下：\`\`\`json\n{"id":"${createdKnowledgeEntityId}"}\n\`\`\``,
-        { expectTool: 'delete_knowledge_entity', confirm: true }
-      );
-      const knowledgeAfterEntityDelete = await loadKnowledgeSnapshot();
-      const entityStillExists = knowledgeAfterEntityDelete?.entities?.some(
-        (entity) => entity.id === createdKnowledgeEntityId
-      );
-      summary.tests.push({
-        test: 'delete_knowledge_entity',
-        toolCalled: deleteKnowledgeEntityResult.toolCalled,
-        removed: !entityStillExists,
-      });
-      if (entityStillExists) {
-        summary.failures.push('delete_knowledge_entity: 知识实体未删除');
+      if (!deleteTaskResult.toolCalled) {
+        summary.failures.push('delete_task: 工具未被调用');
       } else {
-        createdKnowledgeEntityId = null;
+        createdTaskId = null;
       }
     }
-  } finally {
-    try {
-      await saveKnowledgeSnapshot(backupKnowledge);
-      summary.restoredKnowledge = true;
-    } catch (error) {
-      summary.failures.push(
-        `restore_knowledge_snapshot: ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
 
+  } finally {
+    if (createdTaskId) {
+      await requestApi(`/api/tasks/${createdTaskId}`, {
+        method: 'DELETE',
+      }).catch(() => undefined);
+    }
     console.log(JSON.stringify(summary, null, 2));
     process.exitCode = summary.failures.length > 0 ? 1 : 0;
     cdp.close();

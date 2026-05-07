@@ -1,138 +1,88 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { sendInfrastructureError } from '../../shared/http';
-import { kickProjectionRuntime } from '../projection/runtime';
 import {
-  createKnowledgeRelationSchema,
-  knowledgeDatasetBodySchema,
-  knowledgeIdParamSchema,
-  knowledgeRelationParamSchema,
-  knowledgeSearchQuerySchema,
-  updateOntologyClassSchema,
-  updateOntologyRelationSchema,
-  updateKnowledgeDocumentSchema,
-  updateKnowledgeEntitySchema,
-  updateKnowledgeAssertionSchema,
-  upsertOntologyClassSchema,
-  upsertOntologyRelationSchema,
-  upsertKnowledgeAssertionSchema,
-  upsertKnowledgeDocumentSchema,
-  upsertKnowledgeEntitySchema,
+  noteIdParamSchema,
+  presetTagIdParamSchema,
+  createNoteSchema,
+  updateNoteSchema,
+  noteSearchQuerySchema,
+  createPresetTagSchema,
+  updatePresetTagSchema,
 } from './schema';
 import {
-  createKnowledgeRelationRecord,
-  deleteKnowledgeOntologyClass,
-  deleteKnowledgeOntologyRelation,
-  deleteKnowledgeAssertionRecord,
-  deleteKnowledgeDocumentRecord,
-  deleteKnowledgeEntityRecord,
-  deleteKnowledgeRelationRecord,
-  getKnowledgeDataset,
-  getKnowledgeMetadata,
-  listKnowledgeOntologyClasses,
-  listKnowledgeOntologyRelations,
-  listKnowledgeAssertions,
-  listKnowledgeDocuments,
-  listKnowledgeEntities,
-  rebuildKnowledgeProjectionRecords,
-  searchKnowledge,
-  upsertKnowledgeOntologyClass,
-  upsertKnowledgeOntologyRelation,
-  upsertKnowledgeAssertionRecord,
-  upsertKnowledgeDocumentRecord,
-  upsertKnowledgeEntityRecord,
-  replaceKnowledgeAuthorityDataset,
+  getNoteList,
+  createNoteRecord,
+  getNoteDetail,
+  updateNoteRecord,
+  deleteNoteRecord,
+  searchNoteRecords,
+  getAllTags,
+  getPresetTagList,
+  createPresetTagRecord,
+  getPresetTagDetail,
+  updatePresetTagRecord,
+  deletePresetTagRecord,
+  getKnowledgeOverview,
 } from './service';
 
 export async function knowledgeRoutes(app: FastifyInstance) {
-  app.get('/knowledge/dataset', async (_request: FastifyRequest, reply: FastifyReply) => {
+  // 笔记列表
+  app.get('/knowledge/notes', async (_request, reply) => {
     try {
-      const dataset = await getKnowledgeDataset();
-      return {
-        data: dataset,
-        source: 'postgres',
-      };
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.get('/knowledge/metadata', async (_request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const metadata = await getKnowledgeMetadata();
-      return {
-        data: metadata,
-        source: 'postgres',
-      };
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.put('/knowledge/dataset', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const payload = knowledgeDatasetBodySchema.parse(request.body);
-      const dataset = await replaceKnowledgeAuthorityDataset(payload.dataset);
-      return {
-        data: dataset,
-        source: 'postgres',
-      };
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.get('/knowledge/entities', async (_request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const items = await listKnowledgeEntities();
+      const items = await getNoteList();
       return { items, total: items.length, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.post('/knowledge/entities', async (request: FastifyRequest, reply: FastifyReply) => {
+  // 创建笔记
+  app.post('/knowledge/notes', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const payload = upsertKnowledgeEntitySchema.parse(request.body);
-      const item = await upsertKnowledgeEntityRecord(payload);
-      return reply.code(201).send(item);
+      const payload = createNoteSchema.parse(request.body);
+      const note = await createNoteRecord(payload);
+      return reply.code(201).send(note);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.patch('/knowledge/entities/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  // 获取单个笔记
+  app.get('/knowledge/notes/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const payload = updateKnowledgeEntitySchema.parse(request.body);
-      const dataset = await getKnowledgeDataset();
-      const existing = dataset.entities.find((entity) => entity.id === id);
-      if (!existing) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Knowledge entity not found' });
+      const { id } = noteIdParamSchema.parse(request.params);
+      const note = await getNoteDetail(id);
+      if (!note) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Note not found' });
       }
-
-      const item = await upsertKnowledgeEntityRecord({
-        id,
-        typeId: payload.typeId ?? existing.typeId,
-        title: payload.title ?? existing.title,
-        summary: payload.summary ?? existing.summary,
-        aliases: payload.aliases ?? existing.aliases,
-        tags: payload.tags ?? existing.tags,
-        attributes: (payload.attributes ?? existing.attributes) as any,
-        source: payload.source ?? existing.source,
-        confidence: payload.confidence ?? existing.confidence,
-      });
-      return item;
+      return note;
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.delete('/knowledge/entities/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  // 更新笔记
+  app.patch('/knowledge/notes/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const deleted = await deleteKnowledgeEntityRecord(id);
+      const { id } = noteIdParamSchema.parse(request.params);
+      const payload = updateNoteSchema.parse(request.body);
+      const note = await updateNoteRecord(id, payload);
+      if (!note) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Note not found' });
+      }
+      return note;
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  // 删除笔记
+  app.delete('/knowledge/notes/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = noteIdParamSchema.parse(request.params);
+      const deleted = await deleteNoteRecord(id);
       if (!deleted) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Knowledge entity not found' });
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Note not found' });
       }
       return reply.code(204).send();
     } catch (error) {
@@ -140,128 +90,84 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/knowledge/documents', async (_request: FastifyRequest, reply: FastifyReply) => {
+  // 搜索笔记
+  app.get('/knowledge/search', async (request: FastifyRequest, reply) => {
     try {
-      const items = await listKnowledgeDocuments();
+      const query = noteSearchQuerySchema.parse(request.query);
+      const items = await searchNoteRecords(query);
       return { items, total: items.length, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.post('/knowledge/documents', async (request: FastifyRequest, reply: FastifyReply) => {
+  // 获取所有使用过的标签
+  app.get('/knowledge/tags', async (_request, reply) => {
     try {
-      const payload = upsertKnowledgeDocumentSchema.parse(request.body);
-      const item = await upsertKnowledgeDocumentRecord(payload);
-      return reply.code(201).send(item);
+      const tags = await getAllTags();
+      return { items: tags, total: tags.length, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.patch('/knowledge/documents/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  // 获取预设标签列表
+  app.get('/knowledge/tags/preset', async (_request, reply) => {
     try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const payload = updateKnowledgeDocumentSchema.parse(request.body);
-      const dataset = await getKnowledgeDataset();
-      const existing = dataset.documents.find((document) => document.id === id);
-      if (!existing) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Knowledge document not found' });
-      }
-
-      const item = await upsertKnowledgeDocumentRecord({
-        id,
-        title: payload.title ?? existing.title,
-        summary: payload.summary ?? existing.summary,
-        content: payload.content ?? existing.content,
-        tags: payload.tags ?? existing.tags,
-        entityIds: payload.entityIds ?? existing.entityIds,
-        source: payload.source ?? existing.source,
-      });
-      return item;
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.delete('/knowledge/documents/:id', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const deleted = await deleteKnowledgeDocumentRecord(id);
-      if (!deleted) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Knowledge document not found' });
-      }
-      return reply.code(204).send();
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.get('/knowledge/assertions', async (_request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const items = await listKnowledgeAssertions();
+      const items = await getPresetTagList();
       return { items, total: items.length, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.get('/knowledge/search', async (request: FastifyRequest, reply: FastifyReply) => {
+  // 创建预设标签
+  app.post('/knowledge/tags/preset', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const query = knowledgeSearchQuerySchema.parse(request.query);
-      const items = await searchKnowledge(query);
-      return {
-        items,
-        total: items.length,
-        source: 'postgres',
-      };
+      const payload = createPresetTagSchema.parse(request.body);
+      const tag = await createPresetTagRecord(payload);
+      return reply.code(201).send(tag);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.post('/knowledge/assertions', async (request: FastifyRequest, reply: FastifyReply) => {
+  // 获取单个预设标签
+  app.get('/knowledge/tags/preset/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const payload = upsertKnowledgeAssertionSchema.parse(request.body);
-      const item = await upsertKnowledgeAssertionRecord(payload);
-      return reply.code(201).send(item);
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.patch('/knowledge/assertions/:id', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const payload = updateKnowledgeAssertionSchema.parse(request.body);
-      const dataset = await getKnowledgeDataset();
-      const existing = dataset.assertions.find((assertion) => assertion.id === id);
-      if (!existing) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Knowledge assertion not found' });
+      const { id } = presetTagIdParamSchema.parse(request.params);
+      const tag = await getPresetTagDetail(id);
+      if (!tag) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Preset tag not found' });
       }
-
-      const item = await upsertKnowledgeAssertionRecord({
-        id,
-        subjectId: payload.subjectId ?? existing.subjectId,
-        predicateId: payload.predicateId ?? existing.predicateId,
-        objectId: payload.objectId ?? existing.objectId,
-        value: payload.value !== undefined ? payload.value : existing.value,
-        evidenceDocumentIds: payload.evidenceDocumentIds ?? existing.evidenceDocumentIds,
-        source: payload.source ?? existing.source,
-        confidence: payload.confidence ?? existing.confidence,
-      });
-      return item;
+      return tag;
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.delete('/knowledge/assertions/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+  // 更新预设标签
+  app.patch('/knowledge/tags/preset/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const deleted = await deleteKnowledgeAssertionRecord(id);
+      const { id } = presetTagIdParamSchema.parse(request.params);
+      const payload = updatePresetTagSchema.parse(request.body);
+      const tag = await updatePresetTagRecord(id, payload);
+      if (!tag) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Preset tag not found' });
+      }
+      return tag;
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  // 删除预设标签
+  app.delete('/knowledge/tags/preset/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = presetTagIdParamSchema.parse(request.params);
+      const deleted = await deletePresetTagRecord(id);
       if (!deleted) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Knowledge assertion not found' });
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Preset tag not found' });
       }
       return reply.code(204).send();
     } catch (error) {
@@ -269,151 +175,11 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get('/knowledge/ontology/classes', async (_request: FastifyRequest, reply: FastifyReply) => {
+  // 获取知识库概览
+  app.get('/knowledge/metadata', async (_request, reply) => {
     try {
-      const items = await listKnowledgeOntologyClasses();
-      return { items, total: items.length, source: 'postgres' };
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.post('/knowledge/ontology/classes', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const payload = upsertOntologyClassSchema.parse(request.body);
-      const item = await upsertKnowledgeOntologyClass(payload);
-      return reply.code(201).send(item);
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.patch('/knowledge/ontology/classes/:id', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const payload = updateOntologyClassSchema.parse(request.body);
-      const classes = await listKnowledgeOntologyClasses();
-      const existing = classes.find((item) => item.id === id);
-      if (!existing) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ontology class not found' });
-      }
-
-      const item = await upsertKnowledgeOntologyClass({
-        id,
-        label: payload.label ?? existing.label,
-        description: payload.description ?? existing.description,
-        parentIds: payload.parentIds ?? existing.parentIds,
-      });
-      return item;
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.delete('/knowledge/ontology/classes/:id', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const deleted = await deleteKnowledgeOntologyClass(id);
-      if (!deleted) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ontology class not found' });
-      }
-      return reply.code(204).send();
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.get('/knowledge/ontology/relations', async (_request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const items = await listKnowledgeOntologyRelations();
-      return { items, total: items.length, source: 'postgres' };
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.post('/knowledge/ontology/relations', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const payload = upsertOntologyRelationSchema.parse(request.body);
-      const item = await upsertKnowledgeOntologyRelation(payload);
-      return reply.code(201).send(item);
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.patch('/knowledge/ontology/relations/:id', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const payload = updateOntologyRelationSchema.parse(request.body);
-      const relations = await listKnowledgeOntologyRelations();
-      const existing = relations.find((item) => item.id === id);
-      if (!existing) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ontology relation not found' });
-      }
-
-      const item = await upsertKnowledgeOntologyRelation({
-        id,
-        label: payload.label ?? existing.label,
-        description: payload.description ?? existing.description,
-        inverseId: payload.inverseId === null ? undefined : (payload.inverseId ?? existing.inverseId),
-        symmetric: payload.symmetric ?? existing.symmetric,
-        transitive: payload.transitive ?? existing.transitive,
-      });
-      return item;
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.delete('/knowledge/ontology/relations/:id', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = knowledgeIdParamSchema.parse(request.params);
-      const deleted = await deleteKnowledgeOntologyRelation(id);
-      if (!deleted) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Ontology relation not found' });
-      }
-      return reply.code(204).send();
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.post('/knowledge/rebuild/projections', async (_request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const result = await rebuildKnowledgeProjectionRecords();
-      kickProjectionRuntime();
-      return reply.code(202).send({
-        data: result,
-        source: 'postgres',
-      });
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.post('/knowledge/relations', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const payload = createKnowledgeRelationSchema.parse(request.body);
-      const item = await createKnowledgeRelationRecord(payload);
-      return reply.code(201).send(item);
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.delete('/knowledge/relations', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const payload = knowledgeRelationParamSchema.parse(request.body);
-      const deleted = await deleteKnowledgeRelationRecord(
-        payload.subjectId,
-        payload.predicateId,
-        payload.targetId
-      );
-      if (!deleted) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Knowledge relation not found' });
-      }
-      return reply.code(204).send();
+      const data = await getKnowledgeOverview();
+      return { data, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }

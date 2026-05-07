@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X, Network, Search } from 'lucide-react';
+import { Home, CheckSquare, Calendar, Settings, Wallet, Menu, X, Network } from 'lucide-react';
 import { useCurrentUser } from '../../contexts/UserContext';
 
 const menuItems = [
   { path: '/dashboard', icon: Home, label: '首页' },
-  { path: '/search', icon: Search, label: '全局搜索' },
   { path: '/knowledge', icon: Network, label: '知识库' },
   { path: '/tasks', icon: CheckSquare, label: '任务' },
   { path: '/finance', icon: Wallet, label: '费用统计' },
