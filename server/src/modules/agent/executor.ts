@@ -9,6 +9,7 @@ import type {
   AgentProviderInput,
   CreateAgentRunInput,
 } from './schema';
+import type { AgentRunStreamEvent } from './service';
 
 type AgentRole = 'system' | 'user' | 'assistant';
 
@@ -30,6 +31,8 @@ type ToolDefinition = {
   requiresConfirmation: boolean;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
 };
+
+export type StreamEventEmitter = (event: AgentRunStreamEvent) => Promise<void> | void;
 
 const MAX_AGENT_EXECUTION_ITERATIONS = 5;
 
@@ -62,44 +65,36 @@ export type AgentExecutionOutcome =
       snapshot: PendingConfirmationSnapshot;
     };
 
-const TOOL_FORMAT = `当需要使用工具时，请按以下 JSON 格式输出：
+const TOOL_FORMAT = `工具调用格式：
 \`\`\`tool
-{"name": "工具名", "arguments": {"参数名": "参数值"}}
-\`\`\`
+{"name": "工具名", "arguments": {"参数": "值"}}
+\`\`\``;
 
-注意：
-- name 必须是可用工具列表中的确切名称
-- arguments 必须是有效的 JSON 对象
-- 多个工具调用请分别输出多个 tool 块`;
+const QUERY_TOOLS_DESC = `查询工具（可直接调用）：
+- query_tasks(completed?, priority?, limit?) - 查询任务
+- get_task_stats() - 任务统计
+- query_finance(type?, category?, startDate?, endDate?, limit?) - 查询财务
+- get_finance_stats() - 务统计
+- search_knowledge(query?, tags?, limit?) - 搜索知识库`;
 
-const SYSTEM_PROMPT = `你是这个个人工作站应用的后端智能助手执行器。你可以帮助用户：
-- 查询和汇总任务
-- 查询和汇总财务记录
-- 搜索知识库笔记
-- 创建任务
-- 新增财务记录
-- 做跨模块摘要
+const WRITE_TOOLS_DESC = `写操作工具（需用户确认）：
+- create_task(title!, priority?, dueDate?) - 创建任务
+- add_finance_record(type!, amount!, description!, category!, date!) - 新增财务
+- update_task(id!, title?, completed?, priority?, dueDate?) - 更新任务
+- delete_task(id!) - 删除任务`;
 
-当前允许调用以下工具：
-- query_tasks: 查询任务列表，参数可用 completed(boolean)、priority(string)、limit(number)
-- get_task_stats: 获取任务汇总统计，无参数
-- query_finance: 查询财务记录，参数可用 type('income'|'expense'|'all')、category(string)、startDate(string)、endDate(string)、limit(number)
-- get_finance_stats: 获取财务汇总统计，无参数
-- search_knowledge: 搜索知识库笔记，参数可用 query(string)、tags(string[])、limit(number)
-- create_task: 创建任务，参数可用 title(string, 必填)、priority(string)、dueDate(string)
-- add_finance_record: 新增财务记录，参数可用 type(string, 必填)、amount(number, 必填)、description(string, 必填)、category(string, 必填)、date(string, 必填)、model(string)
-- update_task: 更新任务，参数可用 id(string, 必填)、title(string)、completed(boolean)、priority(string)、dueDate(string)
-- delete_task: 删除任务，参数可用 id(string, 必填)
+const SYSTEM_PROMPT = `你是个人工作站智能助手。可用工具：
+
+${QUERY_TOOLS_DESC}
+${WRITE_TOOLS_DESC}
 
 ${TOOL_FORMAT}
 
 规则：
-1. 查询类请求可以直接调用工具。
-2. create_task、add_finance_record 属于写操作，必须通过工具调用，由系统确认后再执行。
-3. 如果直接回答更合适，可以不调用工具。
-4. 如果缺少必要参数，先自然语言说明，不要猜测。
-5. 最终回复默认使用简体中文，简洁直接。
-6. 工具结果返回后，最终回答必须严格基于结果，不能编造。`;
+1. 查询直接执行，写操作需确认
+2. 缺参数时询问用户，勿猜测
+3. 用简体中文回复，简洁直接
+4. 结果基于工具返回，勿编造`;
 
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/+$/, '');
@@ -513,16 +508,56 @@ const toolRegistry: Record<string, ToolDefinition> = {
   },
 };
 
+// 查询类工具缓存（5秒有效期，减少重复查询）
+const queryCache = new Map<string, { result: unknown; expiresAt: number }>();
+const CACHE_TTL_MS = 5000;
+
+function getCacheKey(toolName: string, args: Record<string, unknown>): string {
+  return `${toolName}:${JSON.stringify(args)}`;
+}
+
+function getCachedResult(toolName: string, args: Record<string, unknown>): unknown | null {
+  const key = getCacheKey(toolName, args);
+  const cached = queryCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+  queryCache.delete(key);
+  return null;
+}
+
+function setCachedResult(toolName: string, args: Record<string, unknown>, result: unknown): void {
+  const key = getCacheKey(toolName, args);
+  queryCache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
 async function executeToolCall(toolCall: ToolCall): Promise<ExecutedToolCall> {
   const tool = toolRegistry[toolCall.name];
   if (!tool) {
     throw new Error(`后端执行器暂不支持工具: ${toolCall.name}`);
   }
 
-  return {
-    ...toolCall,
-    result: await tool.execute(toolCall.arguments),
-  };
+  // 查询类工具使用缓存
+  if (!tool.requiresConfirmation) {
+    const cached = getCachedResult(toolCall.name, toolCall.arguments);
+    if (cached !== null) {
+      return { ...toolCall, result: cached };
+    }
+  }
+
+  const result = await tool.execute(toolCall.arguments);
+
+  // 缓存查询结果
+  if (!tool.requiresConfirmation) {
+    setCachedResult(toolCall.name, toolCall.arguments, result);
+  }
+
+  return { ...toolCall, result };
+}
+
+// 并行执行多个工具调用（仅用于不需要确认的工具）
+async function executeToolCallsParallel(toolCalls: ToolCall[]): Promise<ExecutedToolCall[]> {
+  return Promise.all(toolCalls.map(executeToolCall));
 }
 
 function getToolDefinition(toolName: string) {
@@ -547,6 +582,108 @@ async function requestProviderCompletion(
 
   const payload = await response.json();
   return extractTextFromPayload(provider, payload);
+}
+
+function buildStreamRequestBody(
+  provider: AgentProviderInput,
+  messages: AgentConversationMessage[],
+  model: string
+): Record<string, unknown> {
+  const baseBody = buildProviderRequestBody(provider, messages, model);
+  return { ...baseBody, stream: true };
+}
+
+async function streamProviderCompletion(
+  provider: AgentProviderInput,
+  messages: AgentConversationMessage[],
+  model: string,
+  runId: string,
+  emit: StreamEventEmitter
+): Promise<string> {
+  const response = await fetch(getProviderChatUrl(provider), {
+    method: 'POST',
+    headers: buildProviderHeaders(provider),
+    body: JSON.stringify(buildStreamRequestBody(provider, messages, model)),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Provider error: ${response.status} ${errorText || response.statusText}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Provider response body is null');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed === 'data: [DONE]') {
+        continue;
+      }
+
+      const chunk = extractStreamChunk(provider, trimmed);
+      if (chunk) {
+        fullText += chunk;
+        await emit({ type: 'text_chunk', runId, text: chunk });
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    const chunk = extractStreamChunk(provider, buffer.trim());
+    if (chunk) {
+      fullText += chunk;
+      await emit({ type: 'text_chunk', runId, text: chunk });
+    }
+  }
+
+  return fullText;
+}
+
+function extractStreamChunk(provider: AgentProviderInput, line: string): string {
+  if (!line.startsWith('data: ')) {
+    return '';
+  }
+
+  const jsonStr = line.slice(6);
+  if (!jsonStr || jsonStr === '[DONE]') {
+    return '';
+  }
+
+  try {
+    const payload = JSON.parse(jsonStr);
+
+    switch (provider.apiFormat) {
+      case 'anthropic':
+        if (payload.type === 'content_block_delta' && payload.delta?.type === 'text_delta') {
+          return payload.delta.text || '';
+        }
+        return '';
+      case 'gemini':
+        return payload?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      case 'openai':
+      case 'custom':
+      default:
+        return payload?.choices?.[0]?.delta?.content || '';
+    }
+  } catch {
+    return '';
+  }
 }
 
 function buildToolFollowupPrompt(toolCalls: ExecutedToolCall[]) {
@@ -621,6 +758,13 @@ async function continueExecutionLoop(input: {
       }
 
       if (toolDefinition.requiresConfirmation) {
+        // 写操作需要确认，先执行之前的所有查询类工具
+        const queryToolCalls = pendingToolCalls.slice(0, index);
+        if (queryToolCalls.length > 0) {
+          const queryResults = await executeToolCallsParallel(queryToolCalls);
+          executedToolCalls.push(...queryResults);
+        }
+
         const confirmationMessage = `即将执行 ${toolCall.name}，参数如下：\n${JSON.stringify(toolCall.arguments, null, 2)}`;
         return {
           status: 'waiting_confirmation',
@@ -639,10 +783,11 @@ async function continueExecutionLoop(input: {
           },
         };
       }
-
-      executedToolCalls.push(await executeToolCall(toolCall));
     }
 
+    // 所有工具都是查询类，并行执行
+    const results = await executeToolCallsParallel(pendingToolCalls);
+    executedToolCalls.push(...results);
     pendingToolCalls = [];
   }
 
@@ -747,5 +892,156 @@ export async function confirmAgentRunToolExecution(input: {
     confirmedToolCall,
     finalText: result.finalText,
     toolCalls: result.toolCalls,
+  };
+}
+
+export async function executeAgentRunWithStream(
+  input: CreateAgentRunInput & { runId: string },
+  emit: StreamEventEmitter
+): Promise<AgentExecutionOutcome> {
+  const provider = input.provider;
+  if (!provider) {
+    throw new Error('缺少激活的 Provider 配置，暂时无法由后端执行智能体。');
+  }
+
+  const model = input.model === 'default' ? (provider.model || 'default') : input.model;
+  const baseMessages = buildBaseMessages(input, model);
+
+  const firstResponse = await streamProviderCompletion(provider, baseMessages, model, input.runId, emit);
+  const firstParsed = parseToolCalls(firstResponse);
+
+  if (firstParsed.toolCalls.length === 0) {
+    return {
+      status: 'completed',
+      finalText: firstParsed.textContent || firstResponse,
+      toolCalls: [],
+    };
+  }
+
+  return continueExecutionLoopWithStream({
+    provider,
+    model,
+    baseMessages,
+    inputText: input.inputText,
+    initialMessages: input.initialMessages,
+    assistantText: firstParsed.textContent || '',
+    executedToolCalls: [],
+    remainingToolCalls: firstParsed.toolCalls,
+    runId: input.runId,
+    emit,
+  });
+}
+
+async function continueExecutionLoopWithStream(input: {
+  provider: AgentProviderInput;
+  model: string;
+  baseMessages: AgentConversationMessage[];
+  inputText: string;
+  initialMessages: CreateAgentRunInput['initialMessages'];
+  assistantText: string;
+  executedToolCalls: ExecutedToolCall[];
+  remainingToolCalls: ToolCall[];
+  runId: string;
+  emit: StreamEventEmitter;
+}): Promise<AgentExecutionOutcome> {
+  let assistantText = input.assistantText;
+  let executedToolCalls = [...input.executedToolCalls];
+  let pendingToolCalls = [...input.remainingToolCalls];
+
+  for (let iteration = 0; iteration < MAX_AGENT_EXECUTION_ITERATIONS; iteration += 1) {
+    if (pendingToolCalls.length === 0) {
+      const response = await streamProviderCompletion(
+        input.provider,
+        [
+          ...input.baseMessages,
+          ...(assistantText ? [{ role: 'assistant' as const, content: assistantText }] : []),
+          { role: 'user', content: buildNoMoreToolPrompt(executedToolCalls) },
+        ],
+        input.model,
+        input.runId,
+        input.emit
+      );
+
+      const parsed = parseToolCalls(response);
+      assistantText = parsed.textContent || response;
+      pendingToolCalls = parsed.toolCalls;
+
+      if (pendingToolCalls.length === 0) {
+        return {
+          status: 'completed',
+          finalText: assistantText,
+          toolCalls: executedToolCalls,
+        };
+      }
+    }
+
+    for (let index = 0; index < pendingToolCalls.length; index += 1) {
+      const toolCall = pendingToolCalls[index];
+      const toolDefinition = getToolDefinition(toolCall.name);
+      if (!toolDefinition) {
+        throw new Error(`后端执行器暂不支持工具: ${toolCall.name}`);
+      }
+
+      await input.emit({
+        type: 'tool_call',
+        runId: input.runId,
+        toolName: toolCall.name,
+        arguments: toolCall.arguments,
+      });
+
+      if (toolDefinition.requiresConfirmation) {
+        // 写操作需要确认，先并行执行之前的所有查询类工具
+        const queryToolCalls = pendingToolCalls.slice(0, index);
+        if (queryToolCalls.length > 0) {
+          const queryResults = await executeToolCallsParallel(queryToolCalls);
+          for (const result of queryResults) {
+            await input.emit({
+              type: 'tool_result',
+              runId: input.runId,
+              toolName: result.name,
+              result: result.result,
+            });
+          }
+          executedToolCalls.push(...queryResults);
+        }
+
+        const confirmationMessage = `即将执行 ${toolCall.name}，参数如下：\n${JSON.stringify(toolCall.arguments, null, 2)}`;
+        return {
+          status: 'waiting_confirmation',
+          interimText: assistantText || confirmationMessage,
+          executedToolCalls,
+          pendingToolCall: toolCall,
+          confirmationMessage,
+          snapshot: {
+            kind: 'pending_confirmation',
+            model: input.model,
+            inputText: input.inputText,
+            initialMessages: input.initialMessages,
+            assistantText,
+            executedToolCalls,
+            remainingToolCalls: pendingToolCalls.slice(index + 1),
+          },
+        };
+      }
+    }
+
+    // 所有工具都是查询类，并行执行并推送结果
+    const results = await executeToolCallsParallel(pendingToolCalls);
+    for (const executedCall of results) {
+      await input.emit({
+        type: 'tool_result',
+        runId: input.runId,
+        toolName: executedCall.name,
+        result: executedCall.result,
+      });
+      executedToolCalls.push(executedCall);
+    }
+    pendingToolCalls = [];
+  }
+
+  return {
+    status: 'completed',
+    finalText: assistantText,
+    toolCalls: executedToolCalls,
   };
 }

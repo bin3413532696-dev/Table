@@ -14,16 +14,26 @@ function toJsonValue(value: Record<string, unknown> | undefined): Prisma.InputJs
 }
 
 export async function listAgentRuns(input: ListAgentRunsQuery) {
-  return prisma.agentRun.findMany({
-    where: {
-      userId: getCurrentUserId(),
-      ...(input.status ? { status: input.status } : {}),
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-    take: input.limit,
-  });
+  const whereClause = {
+    userId: getCurrentUserId(),
+    ...(input.status ? { status: input.status } : {}),
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.agentRun.findMany({
+      where: whereClause,
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: input.limit,
+      skip: input.offset,
+    }),
+    prisma.agentRun.count({
+      where: whereClause,
+    }),
+  ]);
+
+  return { items, total };
 }
 
 export async function findAgentRunById(id: string) {
@@ -296,5 +306,48 @@ export async function updateToolExecution(
     }
 
     return execution;
+  });
+}
+
+export async function deleteAgentRunById(id: string) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.agentRun.findFirst({
+      where: {
+        id,
+        userId: getCurrentUserId(),
+      },
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    // 级联删除关联数据（Prisma schema 中已有 onDelete: Cascade，但显式删除更安全）
+    await tx.agentMessage.deleteMany({
+      where: {
+        runId: id,
+        userId: getCurrentUserId(),
+      },
+    });
+
+    await tx.toolExecution.deleteMany({
+      where: {
+        runId: id,
+        userId: getCurrentUserId(),
+      },
+    });
+
+    await tx.agentRunStateSnapshot.deleteMany({
+      where: {
+        runId: id,
+        userId: getCurrentUserId(),
+      },
+    });
+
+    return tx.agentRun.delete({
+      where: {
+        id,
+      },
+    });
   });
 }

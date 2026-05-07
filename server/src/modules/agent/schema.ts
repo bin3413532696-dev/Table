@@ -39,6 +39,7 @@ export const toolExecutionIdParamSchema = z.object({
 
 export const listAgentRunsQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(50).optional().default(20),
+  offset: z.coerce.number().int().min(0).optional().default(0),
   status: agentRunStatusSchema.optional(),
 });
 

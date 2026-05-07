@@ -68,10 +68,14 @@ export interface AgentRuntimeStatusDto {
 }
 
 export interface AgentRunStreamEvent {
-  type: 'run_created' | 'status' | 'run_completed' | 'run_waiting_confirmation' | 'run_failed' | 'run_cancelled';
+  type: 'run_created' | 'status' | 'run_completed' | 'run_waiting_confirmation' | 'run_failed' | 'run_cancelled' | 'text_chunk' | 'tool_call' | 'tool_result';
   run?: AgentRunDetailDto;
   runId?: string;
   status?: 'running' | 'waiting_confirmation' | 'completed' | 'failed' | 'cancelled';
+  text?: string;
+  toolName?: string;
+  arguments?: Record<string, unknown>;
+  result?: unknown;
 }
 
 export async function fetchAgentRuntimeStatus(): Promise<AgentRuntimeStatusDto> {
@@ -104,6 +108,9 @@ export async function streamAgentRun(
   },
   handlers: {
     onEvent?: (event: AgentRunStreamEvent) => void;
+    onTextChunk?: (text: string) => void;
+    onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
+    onToolResult?: (toolName: string, result: unknown) => void;
     onDone?: () => void;
   } = {}
 ): Promise<AgentRunDetailDto> {
@@ -162,6 +169,19 @@ export async function streamAgentRun(
 
     const typedPayload = payload as AgentRunStreamEvent;
     handlers.onEvent?.(typedPayload);
+
+    if (typedPayload.type === 'text_chunk' && typedPayload.text) {
+      handlers.onTextChunk?.(typedPayload.text);
+    }
+
+    if (typedPayload.type === 'tool_call' && typedPayload.toolName && typedPayload.arguments) {
+      handlers.onToolCall?.(typedPayload.toolName, typedPayload.arguments);
+    }
+
+    if (typedPayload.type === 'tool_result' && typedPayload.toolName && typedPayload.result) {
+      handlers.onToolResult?.(typedPayload.toolName, typedPayload.result);
+    }
+
     if (typedPayload.run) {
       finalRun = typedPayload.run;
     }
@@ -193,6 +213,93 @@ export async function streamAgentRun(
   }
 
   return finalRun;
+}
+
+export interface AgentRunDto {
+  id: string;
+  sessionId?: string;
+  status: string;
+  inputText: string;
+  model: string;
+  requiresConfirmation: boolean;
+  errorMessage?: string;
+  startedAt: number;
+  finishedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+  version: number;
+}
+
+export interface AgentRunListResponse {
+  items: AgentRunDto[];
+  total: number;
+  source: string;
+}
+
+export async function fetchAgentRunList(params?: {
+  limit?: number;
+  offset?: number;
+  status?: string;
+}): Promise<AgentRunListResponse> {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.offset) query.set('offset', String(params.offset));
+  if (params?.status) query.set('status', params.status);
+
+  const response = await fetchWithAuth(`/api/agent/runs?${query}`);
+  if (!response.ok) {
+    let message = `Failed to fetch agent runs: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string };
+      if (payload.message) {
+        message = payload.message;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<AgentRunListResponse>;
+}
+
+export async function fetchAgentRunDetail(runId: string): Promise<AgentRunDetailDto> {
+  const response = await fetchWithAuth(`/api/agent/runs/${runId}`);
+  if (!response.ok) {
+    let message = `Failed to fetch agent run detail: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string };
+      if (payload.message) {
+        message = payload.message;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<AgentRunDetailDto>;
+}
+
+export async function deleteAgentRunApi(runId: string): Promise<{ id: string; deleted: boolean }> {
+  const response = await fetchWithAuth(`/api/agent/runs/${runId}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    let message = `Failed to delete agent run: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string };
+      if (payload.message) {
+        message = payload.message;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<{ id: string; deleted: boolean }>;
 }
 
 export async function createAgentRun(input: {

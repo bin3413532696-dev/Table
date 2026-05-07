@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, X, Send, Loader2, AlertCircle, Settings, Trash2, CheckCircle, XCircle, Square } from 'lucide-react';
+import { Bot, X, Send, Loader2, AlertCircle, Trash2, CheckCircle, XCircle, Square, History, ChevronLeft, Clock } from 'lucide-react';
 import { useAgent } from '../../agent/AgentContext';
 import { AgentMessage } from '../../agent/types';
 import { registeredToolNames } from '../../agent/toolMetadata';
+import { fetchAgentRunList, fetchAgentRunDetail, deleteAgentRunApi, type AgentRunDto } from '../../lib/agentApi';
 
 interface AgentPanelProps {
   isOpen: boolean;
@@ -11,9 +12,11 @@ interface AgentPanelProps {
 }
 
 export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
-  const { state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, selectModel } = useAgent();
+  const { state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, loadHistoryRun } = useAgent();
   const [input, setInput] = useState('');
-  const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyRuns, setHistoryRuns] = useState<AgentRunDto[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -45,6 +48,62 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
     if (!state.confirmationRequest) return;
     await confirmAction();
   }, [state.confirmationRequest, confirmAction]);
+
+  // 加载历史记录
+  const loadHistory = useCallback(async () => {
+    setIsLoadingHistory(true);
+    try {
+      const result = await fetchAgentRunList({ limit: 10 });
+      setHistoryRuns(result.items);
+    } catch (error) {
+      console.error('Failed to load history:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  // 打开历史面板
+  useEffect(() => {
+    if (showHistory) {
+      loadHistory();
+    }
+  }, [showHistory, loadHistory]);
+
+  // 加载历史会话到当前对话
+  const handleLoadRun = useCallback(async (runId: string) => {
+    try {
+      const detail = await fetchAgentRunDetail(runId);
+      loadHistoryRun(detail);
+      setShowHistory(false);
+    } catch (error) {
+      console.error('Failed to load run:', error);
+    }
+  }, [loadHistoryRun]);
+
+  // 删除历史记录
+  const handleDeleteRun = useCallback(async (runId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('确定要删除这条对话记录吗？')) return;
+    try {
+      await deleteAgentRunApi(runId);
+      setHistoryRuns(prev => prev.filter(r => r.id !== runId));
+    } catch (error) {
+      console.error('Failed to delete run:', error);
+    }
+  }, []);
+
+  // 格式化时间
+  const formatTime = (timestamp: number) => {
+    const diff = Date.now() - timestamp;
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (minutes < 1) return '刚刚';
+    if (minutes < 60) return `${minutes}分钟前`;
+    if (hours < 24) return `${hours}小时前`;
+    if (days < 7) return `${days}天前`;
+    return new Date(timestamp).toLocaleDateString('zh-CN');
+  };
 
   const renderMessage = (message: AgentMessage) => {
     const isUser = message.role === 'user';
@@ -138,11 +197,11 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
             </div>
             <div className="flex items-center gap-1">
               <button
-                onClick={() => setShowSettings(!showSettings)}
-                className="p-1.5 hover:bg-bg-secondary rounded-lg transition-colors"
-                title="设置"
+                onClick={() => setShowHistory(!showHistory)}
+                className={`p-1.5 hover:bg-bg-secondary rounded-lg transition-colors ${showHistory ? 'bg-primary/10' : ''}`}
+                title="历史记录"
               >
-                <Settings className="w-4 h-4 text-text-muted" />
+                <History className={`w-4 h-4 ${showHistory ? 'text-primary' : 'text-text-muted'}`} />
               </button>
               <button
                 onClick={clearConversation}
@@ -161,39 +220,79 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
             </div>
           </div>
 
+          {/* 历史记录面板 */}
           <AnimatePresence>
-            {showSettings && (
+            {showHistory && (
               <motion.div
-                initial={{ height: 0 }}
-                animate={{ height: 'auto' }}
-                exit={{ height: 0 }}
-                className="border-b border-border-primary overflow-hidden shrink-0"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex-1 overflow-auto p-3"
               >
-                <div className="p-3 space-y-2">
-                  <label className="text-xs text-text-muted">选择模型</label>
-                  <select
-                    value={state.selectedModel}
-                    onChange={(e) => selectModel(e.target.value)}
-                    disabled={state.availableModels.length === 0}
-                    className="w-full text-sm border border-border-primary rounded-lg px-2 py-1.5 bg-bg-card focus:outline-none focus:border-primary disabled:opacity-50"
-                  >
-                    {state.availableModels.length === 0 ? (
-                      <option>无可用模型</option>
-                    ) : (
-                      state.availableModels.map((model) => (
-                        <option key={model} value={model}>{model}</option>
-                      ))
-                    )}
-                  </select>
-                  <p className="text-xs text-text-muted">
-                    可用工具：{registeredToolNames.length} 个
-                  </p>
-                </div>
+                <button
+                  onClick={() => setShowHistory(false)}
+                  className="flex items-center gap-2 mb-3 hover:opacity-70 transition-opacity"
+                >
+                  <ChevronLeft className="w-4 h-4 text-text-muted" />
+                  <h4 className="text-sm font-medium text-text-primary">对话历史</h4>
+                </button>
+
+                {isLoadingHistory ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-5 h-5 animate-spin text-text-muted" />
+                  </div>
+                ) : historyRuns.length === 0 ? (
+                  <div className="text-center py-8 text-text-muted text-sm">
+                    <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p>暂无对话记录</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {historyRuns.map((run) => (
+                      <motion.div
+                        key={run.id}
+                        initial={{ opacity: 0, y: 5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onClick={() => handleLoadRun(run.id)}
+                        className="group p-2 rounded-lg border border-border-primary hover:border-primary cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-start gap-2">
+                          <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                            run.status === 'completed' ? 'bg-green-500/10 text-green-500' :
+                            run.status === 'failed' ? 'bg-red-500/10 text-red-500' :
+                            'bg-gray-500/10 text-gray-500'
+                          }`}>
+                            {run.status === 'completed' ? <CheckCircle className="w-3 h-3" /> :
+                             run.status === 'failed' ? <XCircle className="w-3 h-3" /> :
+                             <Clock className="w-3 h-3" />}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-text-primary truncate">
+                              {run.inputText.slice(0, 40)}{run.inputText.length > 40 ? '...' : ''}
+                            </p>
+                            <p className="text-xs text-text-muted mt-1">
+                              {formatTime(run.createdAt)}
+                            </p>
+                          </div>
+
+                          <button
+                            onClick={(e) => handleDeleteRun(run.id, e)}
+                            className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/10 rounded transition-all"
+                          >
+                            <Trash2 className="w-3 h-3 text-red-500" />
+                          </button>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>
 
-          <div className="flex-1 overflow-auto p-3 space-y-3">
+          {/* 消息区域 */}
+          <div className={`flex-1 overflow-auto p-3 space-y-3 ${showHistory ? 'hidden' : ''}`}>
             {state.messages.length === 0 && (
               <div className="h-full flex items-center justify-center text-center text-text-muted text-sm">
                 <div>

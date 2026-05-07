@@ -21,6 +21,7 @@ import {
   rejectAgentRunTool,
   streamAgentRunRecord,
   updateAgentRunRecord,
+  deleteAgentRunRecord,
 } from './service';
 
 export async function agentRoutes(app: FastifyInstance) {
@@ -37,10 +38,10 @@ export async function agentRoutes(app: FastifyInstance) {
   app.get('/agent/runs', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = listAgentRunsQuerySchema.parse(request.query);
-      const items = await getAgentRunList(query);
+      const result = await getAgentRunList(query);
       return {
-        items,
-        total: items.length,
+        items: result.items,
+        total: result.total,
         source: 'postgres',
       };
     } catch (error) {
@@ -102,6 +103,19 @@ export async function agentRoutes(app: FastifyInstance) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Agent run not found' });
       }
       return run;
+    } catch (error) {
+      return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.delete('/agent/runs/:id', async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const { id } = agentRunIdParamSchema.parse(request.params);
+      const result = await deleteAgentRunRecord(id);
+      if (!result) {
+        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Agent run not found' });
+      }
+      return result;
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }

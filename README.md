@@ -23,6 +23,26 @@
 6. 启动后端：`npm run server:dev`
 7. 启动前端：`npm run dev`
 
+### 端口占用处理
+
+如果启动后端时提示端口 8787 已被占用：
+
+```bash
+# 方法一：PowerShell 直接杀死占用进程
+Get-Process -Id (Get-NetTCPConnection -LocalPort 8787).OwningProcess | Stop-Process -Force
+
+# 方法二：手动查找并杀死进程
+# 1. 查找占用端口的进程 PID
+netstat -ano | findstr :8787
+# 输出示例：TCP 127.0.0.1:8787 0.0.0.0:0 LISTENING 12345
+# 最后的数字 12345 就是 PID
+
+# 2. 杀死进程
+taskkill /PID 12345 /F
+```
+
+处理完成后重新运行 `npm run server:dev`。
+
 ## 构建命令
 
 - 前端类型检查：`npm run typecheck`

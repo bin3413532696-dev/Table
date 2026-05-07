@@ -23,20 +23,20 @@ import {
   switchAuthSession,
   updateAuthMe,
 } from '../../lib/auth';
-import { initializeData } from '../../lib/dataSync';
+import { registeredToolNames } from '../../agent/toolMetadata';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User, desc: '管理您的个人信息' },
   { id: 'security', label: '安全隐私', icon: Shield, desc: '保护账户和数据安全' },
   { id: 'data', label: '数据管理', icon: HardDrive, desc: '导入导出与备份' },
-  { id: 'api', label: 'API配置', icon: Globe, desc: '管理第三方API连接' },
+  { id: 'api', label: '智能体配置', icon: Globe, desc: '管理智能体 Provider 与工具' },
 ];
 
 const tabContent: Record<string, { title: string; desc: string }> = {
   profile: { title: '个人资料', desc: '管理您的个人信息和账户设置' },
   security: { title: '安全隐私', desc: '保护您的账户和数据安全' },
   data: { title: '数据管理', desc: '浏览数据统计，导入导出备份' },
-  api: { title: 'API配置', desc: '管理第三方API连接和密钥' },
+  api: { title: '智能体配置', desc: '管理智能体 Provider 与可用工具' },
 };
 
 type ApiConfig = ApiProvider;
@@ -1235,6 +1235,26 @@ function ApiConfigSettings() {
           <li>• 激活的 Provider 将被智能体使用</li>
           <li>• 配置模型名称后，智能体将使用指定的模型</li>
         </ul>
+      </div>
+
+      <div className="p-4 rounded-xl bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
+          <SettingsIcon className="w-4 h-4" />
+          可用工具
+        </h4>
+        <p className="text-sm text-text-muted mb-3">
+          当前智能体已注册 <span className="text-primary font-medium">{registeredToolNames.length}</span> 个工具
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {registeredToolNames.map((toolName) => (
+            <span
+              key={toolName}
+              className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary border border-primary/20"
+            >
+              {toolName}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );

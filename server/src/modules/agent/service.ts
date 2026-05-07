@@ -9,10 +9,12 @@ import {
   listAgentRuns,
   updateAgentRun,
   updateToolExecution,
+  deleteAgentRunById,
 } from './repository';
 import {
   confirmAgentRunToolExecution,
   executeAgentRun,
+  executeAgentRunWithStream,
   type PendingConfirmationSnapshot,
 } from './executor';
 import { getActiveProviderForCurrentUser, getRequiredActiveProviderForCurrentUser } from '../providers/service';
@@ -42,6 +44,23 @@ export type AgentRunStreamEvent =
       status: 'running' | 'waiting_confirmation' | 'completed' | 'failed' | 'cancelled';
     }
   | {
+      type: 'text_chunk';
+      runId: string;
+      text: string;
+    }
+  | {
+      type: 'tool_call';
+      runId: string;
+      toolName: string;
+      arguments: Record<string, unknown>;
+    }
+  | {
+      type: 'tool_result';
+      runId: string;
+      toolName: string;
+      result: unknown;
+    }
+  | {
       type: 'run_completed' | 'run_waiting_confirmation' | 'run_failed' | 'run_cancelled';
       run: NonNullable<Awaited<ReturnType<typeof getAgentRunDetail>>>;
     };
@@ -66,8 +85,8 @@ export async function getAgentRuntimeStatus() {
 }
 
 export async function getAgentRunList(input: ListAgentRunsQuery) {
-  const runs = await listAgentRuns(input);
-  return runs.map(toAgentRunDto);
+  const { items, total } = await listAgentRuns(input);
+  return { items: items.map(toAgentRunDto), total };
 }
 
 async function emitAgentRunEvent(
@@ -111,10 +130,19 @@ async function executeAgentRunRecordLifecycle(
       status: 'running',
     });
 
-    const execution = await executeAgentRun({
-      ...input,
-      provider,
-    });
+    const execution = emit
+      ? await executeAgentRunWithStream(
+          {
+            ...input,
+            provider,
+            runId: run.id,
+          },
+          emit
+        )
+      : await executeAgentRun({
+          ...input,
+          provider,
+        });
 
     if (execution.status === 'waiting_confirmation') {
       for (const toolCall of execution.executedToolCalls) {
@@ -514,4 +542,12 @@ export async function createAgentToolExecution(id: string, input: CreateToolExec
 
   const execution = await createToolExecution(id, input);
   return toToolExecutionDto(execution);
+}
+
+export async function deleteAgentRunRecord(id: string) {
+  const deleted = await deleteAgentRunById(id);
+  if (!deleted) {
+    return null;
+  }
+  return { id: deleted.id, deleted: true };
 }

@@ -18,7 +18,8 @@ type AgentAction =
   | { type: 'SELECT_MODEL'; payload: string }
   | { type: 'SET_CONFIRMATION'; payload: ConfirmationRequest | null }
   | { type: 'CLEAR_MESSAGES' }
-  | { type: 'SET_ERROR'; payload: string | null };
+  | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'LOAD_HISTORY'; payload: { messages: AgentMessage[]; runId: string } };
 
 interface ActiveRequestState {
   controller: AbortController;
@@ -37,6 +38,7 @@ const initialState: AgentState = {
   availableModels: [],
   confirmationRequest: null,
   error: null,
+  currentRunId: null,
 };
 
 /**
@@ -100,6 +102,14 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
       return { ...state, messages: [], error: null };
     case 'SET_ERROR':
       return { ...state, error: action.payload };
+    case 'LOAD_HISTORY':
+      return {
+        ...state,
+        messages: action.payload.messages,
+        currentRunId: action.payload.runId,
+        error: null,
+        confirmationRequest: null,
+      };
     default:
       return state;
   }
@@ -114,6 +124,7 @@ interface AgentContextType {
   clearConversation: () => void;
   checkConnection: () => Promise<void>;
   selectModel: (model: string) => void;
+  loadHistoryRun: (run: AgentRunDetailDto) => void;
 }
 
 const AgentContext = createContext<AgentContextType | null>(null);
@@ -437,6 +448,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'SELECT_MODEL', payload: model });
   }, []);
 
+  const loadHistoryRun = useCallback((run: AgentRunDetailDto) => {
+    const messages: AgentMessage[] = run.messages.map((msg) => ({
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.createdAt,
+      status: 'completed' as const,
+    }));
+
+    dispatch({
+      type: 'LOAD_HISTORY',
+      payload: { messages, runId: run.id },
+    });
+  }, []);
+
   const value = useMemo(() => ({
     state,
     sendMessage,
@@ -446,7 +472,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     clearConversation,
     checkConnection,
     selectModel,
-  }), [state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, checkConnection, selectModel]);
+    loadHistoryRun,
+  }), [state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, checkConnection, selectModel, loadHistoryRun]);
 
   return <AgentContext.Provider value={value}>{children}</AgentContext.Provider>;
 }

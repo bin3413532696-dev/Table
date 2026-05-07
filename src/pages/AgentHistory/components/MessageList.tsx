@@ -1,0 +1,120 @@
+import React from 'react';
+import { motion } from 'framer-motion';
+import { User, Bot, Wrench, CheckCircle, XCircle, Clock } from 'lucide-react';
+import type { AgentRunMessageDto, AgentRunToolExecutionDto } from '../../../lib/agentApi';
+
+interface MessageListProps {
+  messages: AgentRunMessageDto[];
+  toolExecutions: AgentRunToolExecutionDto[];
+}
+
+const roleConfig: Record<string, { icon: React.ElementType; label: string; bgColor: string }> = {
+  user: { icon: User, label: '用户', bgColor: 'bg-primary/10' },
+  assistant: { icon: Bot, label: '助手', bgColor: 'bg-bg-secondary' },
+  system: { icon: Clock, label: '系统', bgColor: 'bg-yellow-500/10' },
+  tool: { icon: Wrench, label: '工具', bgColor: 'bg-blue-500/10' },
+};
+
+export const MessageList: React.FC<MessageListProps> = ({ messages, toolExecutions }) => {
+  // 合并消息和工具执行记录，按 sequence 排序
+  const allItems: Array<{ type: 'message' | 'tool'; data: AgentRunMessageDto | AgentRunToolExecutionDto; sequence: number }> = [
+    ...messages.map((msg) => ({ type: 'message' as const, data: msg, sequence: msg.sequence })),
+    ...toolExecutions.map((tool) => ({ type: 'tool' as const, data: tool, sequence: tool.sequence })),
+  ];
+
+  allItems.sort((a, b) => a.sequence - b.sequence);
+
+  if (allItems.length === 0) {
+    return (
+      <div className="flex items-center justify-center py-8 text-text-secondary">
+        <p>暂无消息记录</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {allItems.map((item, index) => {
+        if (item.type === 'message') {
+          const message = item.data as AgentRunMessageDto;
+          const config = roleConfig[message.role] || roleConfig.system;
+          const Icon = config.icon;
+
+          return (
+            <motion.div
+              key={message.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
+              className={`flex gap-3 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
+            >
+              <div className={`flex-shrink-0 w-8 h-8 rounded-full ${config.bgColor} flex items-center justify-center`}>
+                <Icon className="w-4 h-4 text-text-secondary" />
+              </div>
+
+              <div className={`flex-1 max-w-[80%] ${message.role === 'user' ? 'text-right' : ''}`}>
+                <div className={`inline-block p-3 rounded-lg ${
+                  message.role === 'user'
+                    ? 'bg-primary text-white'
+                    : 'bg-bg-secondary text-text-primary'
+                }`}>
+                  <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                </div>
+                <p className="text-xs text-text-secondary mt-1">
+                  {new Date(message.createdAt).toLocaleString('zh-CN')}
+                </p>
+              </div>
+            </motion.div>
+          );
+        } else {
+          const tool = item.data as AgentRunToolExecutionDto;
+          const isSuccess = tool.status === 'completed';
+          const StatusIcon = isSuccess ? CheckCircle : XCircle;
+
+          return (
+            <motion.div
+              key={tool.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
+              className="flex gap-3"
+            >
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500/10 flex items-center justify-center">
+                <Wrench className="w-4 h-4 text-blue-500" />
+              </div>
+
+              <div className="flex-1 p-3 rounded-lg bg-bg-secondary border border-border">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-medium text-text-primary">{tool.toolName}</span>
+                  <StatusIcon className={`w-4 h-4 ${isSuccess ? 'text-green-500' : 'text-red-500'}`} />
+                </div>
+
+                {Object.keys(tool.arguments).length > 0 && (
+                  <div className="mb-2">
+                    <p className="text-xs text-text-secondary mb-1">参数:</p>
+                    <pre className="text-xs bg-bg-primary p-2 rounded overflow-x-auto">
+                      {JSON.stringify(tool.arguments, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {tool.result && (
+                  <div>
+                    <p className="text-xs text-text-secondary mb-1">结果:</p>
+                    <pre className="text-xs bg-bg-primary p-2 rounded overflow-x-auto max-h-40">
+                      {JSON.stringify(tool.result, null, 2)}
+                    </pre>
+                  </div>
+                )}
+
+                {tool.errorMessage && (
+                  <p className="text-xs text-red-500 mt-2">{tool.errorMessage}</p>
+                )}
+              </div>
+            </motion.div>
+          );
+        }
+      })}
+    </div>
+  );
+};

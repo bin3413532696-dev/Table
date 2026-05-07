@@ -77,6 +77,7 @@ export interface AgentState {
   availableModels: string[];
   confirmationRequest: ConfirmationRequest | null;
   error: string | null;
+  currentRunId: string | null;
 }
 
 /** 对话历史管理常量 */
