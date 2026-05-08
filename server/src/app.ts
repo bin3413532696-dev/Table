@@ -33,13 +33,35 @@ export function createApp() {
     });
   });
 
+  function sanitizeLogBody(body: unknown): unknown {
+    if (!body || typeof body !== 'object') {
+      return body;
+    }
+    const sensitiveKeys = new Set([
+      'apiKey', 'apiKeyEncrypted', 'api_key', 'api_key_encrypted',
+      'password', 'pin', 'secret', 'token', 'authorization',
+      'securityPin', 'security_pin', 'securityPinHash', 'security_pin_hash',
+    ]);
+    const clone: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
+      if (sensitiveKeys.has(key.toLowerCase())) {
+        clone[key] = '***';
+      } else if (typeof value === 'object' && value !== null) {
+        clone[key] = sanitizeLogBody(value);
+      } else {
+        clone[key] = value;
+      }
+    }
+    return clone;
+  }
+
   app.addHook('onResponse', (request, reply, done) => {
     app.log.info({
       req: {
         method: request.method,
         url: request.url,
         query: request.query,
-        body: request.body,
+        body: sanitizeLogBody(request.body),
       },
       res: {
         statusCode: reply.statusCode,

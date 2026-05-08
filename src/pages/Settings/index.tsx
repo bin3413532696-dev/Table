@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon, Shield, HardDrive, Plus, Edit2, Trash2 as TrashIcon, Globe, ChevronDown, ChevronUp, Power } from 'lucide-react';
-import { dataManager, financeDB, hashPin, taskDB } from '../../db';
+import { dataManager, financeDB, taskDB } from '../../db';
 import { initializeData } from '../../lib/dataSync';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useCurrentUser } from '../../contexts/UserContext';
@@ -17,10 +17,13 @@ import {
 } from '../../lib/apiConfig';
 import {
   clearAuthSession,
+  clearPinApi,
   createAuthUser,
   DEFAULT_USER_ID,
   fetchAuthUsers,
+  fetchPinStatus,
   setCurrentUserId,
+  setPinApi,
   switchAuthSession,
   updateAuthMe,
 } from '../../lib/auth';
@@ -420,26 +423,34 @@ function SecuritySettings() {
   const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
-    const hashedPin = localStorage.getItem('security_pin_hashed');
-    if (hashedPin) setEnabled(true);
+    fetchPinStatus()
+      .then((status) => setEnabled(status.enabled))
+      .catch(() => setEnabled(false));
   }, []);
 
   const handleSavePin = async () => {
     if (pin.length < 4) { setPinError('密码至少需要4位'); return; }
     if (pin !== confirmPin) { setPinError('两次输入的密码不一致'); return; }
     setPinError('');
-    const hashedPin = await hashPin(pin);
-    localStorage.setItem('security_pin_hashed', hashedPin);
-    setEnabled(true);
-    setPin('');
-    setConfirmPin('');
+    try {
+      await setPinApi(pin);
+      setEnabled(true);
+      setPin('');
+      setConfirmPin('');
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : '设置失败');
+    }
   };
 
-  const handleClearPin = () => {
-    localStorage.removeItem('security_pin_hashed');
-    setPin('');
-    setConfirmPin('');
-    setEnabled(false);
+  const handleClearPin = async () => {
+    try {
+      await clearPinApi();
+      setPin('');
+      setConfirmPin('');
+      setEnabled(false);
+    } catch {
+      // ignore
+    }
   };
 
   return (

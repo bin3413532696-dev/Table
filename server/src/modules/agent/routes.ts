@@ -60,38 +60,58 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   app.post('/agent/runs/stream', async (request: FastifyRequest, reply: FastifyReply) => {
+    let connectionClosed = false;
+
+    const cleanup = () => {
+      connectionClosed = true;
+    };
+    request.raw.on('close', cleanup);
+
     try {
       const payload = createAgentRunSchema.parse(request.body);
 
+      reply.hijack();
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',
       });
 
-      const sendEvent = async (event: string, data: unknown) => {
+      const sendEvent = (event: string, data: unknown) => {
+        if (connectionClosed) {
+          throw new Error('Client disconnected');
+        }
         reply.raw.write(`event: ${event}\n`);
         reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
       };
 
-      await streamAgentRunRecord(payload, async (event) => {
-        await sendEvent(event.type, event);
+      await streamAgentRunRecord(payload, (event) => {
+        sendEvent(event.type, event);
       });
 
-      await sendEvent('done', { ok: true });
-      reply.raw.end();
-      return reply;
+      if (!connectionClosed) {
+        sendEvent('done', { ok: true });
+        reply.raw.end();
+      }
     } catch (error) {
       if (!reply.raw.headersSent) {
+        request.raw.off('close', cleanup);
         return sendInfrastructureError(reply, error);
       }
 
-      reply.raw.write(`event: error\n`);
-      reply.raw.write(`data: ${JSON.stringify({
-        message: error instanceof Error ? error.message : 'Unknown error',
-      })}\n\n`);
-      reply.raw.end();
-      return reply;
+      if (!connectionClosed) {
+        try {
+          reply.raw.write(`event: error\n`);
+          reply.raw.write(`data: ${JSON.stringify({
+            message: error instanceof Error ? error.message : 'Unknown error',
+          })}\n\n`);
+          reply.raw.end();
+        } catch {
+          // ignore write errors after disconnect
+        }
+      }
+    } finally {
+      request.raw.off('close', cleanup);
     }
   });
 

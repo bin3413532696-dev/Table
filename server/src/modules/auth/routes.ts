@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
 import { provisionUser } from '../../shared/auth';
+import { hashPin as hashPinSecure, verifyPin as verifyPinSecure } from '../../shared/pin';
 import {
   DEV_SESSION_COOKIE,
   getCurrentUserContext,
@@ -291,5 +292,70 @@ export async function authRoutes(app: FastifyInstance) {
         },
       },
     };
+  });
+
+  // PIN 管理
+  app.get('/pin', async () => {
+    const context = getCurrentUserContext();
+    const settings = await prisma.userSetting.findUnique({
+      where: { userId: context.userId },
+      select: { securityPinHash: true },
+    });
+    return { enabled: Boolean(settings?.securityPinHash) };
+  });
+
+  const pinSchema = z.object({
+    pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
+  });
+
+  const verifyPinSchema = z.object({
+    pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
+  });
+
+  app.post('/pin/verify', async (request, reply) => {
+    const context = getCurrentUserContext();
+    const payload = verifyPinSchema.parse(request.body);
+
+    const settings = await prisma.userSetting.findUnique({
+      where: { userId: context.userId },
+      select: { securityPinHash: true },
+    });
+
+    if (!settings?.securityPinHash) {
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'PIN not set' });
+    }
+
+    const isValid = verifyPinSecure(payload.pin, settings.securityPinHash);
+    return { valid: isValid };
+  });
+
+  app.patch('/pin', async (request) => {
+    const context = getCurrentUserContext();
+    const payload = pinSchema.parse(request.body);
+    const hashed = hashPinSecure(payload.pin);
+
+    await prisma.userSetting.upsert({
+      where: { userId: context.userId },
+      update: { securityPinHash: hashed },
+      create: {
+        userId: context.userId,
+        theme: 'light',
+        profile_json: {},
+        notification_json: {},
+        agentPreferencesJson: {},
+        securityPinHash: hashed,
+      },
+    });
+
+    return { success: true };
+  });
+
+  app.delete('/pin', async () => {
+    const context = getCurrentUserContext();
+    await prisma.userSetting.updateMany({
+      where: { userId: context.userId },
+      data: { securityPinHash: null },
+    });
+    return { success: true };
   });
 }

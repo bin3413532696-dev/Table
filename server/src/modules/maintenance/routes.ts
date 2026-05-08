@@ -1,6 +1,17 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import { sendInfrastructureError } from '../../shared/http';
 import { exportBusinessSnapshot, importBusinessSnapshot, resetWorkspaceData } from './service';
+
+const importSnapshotSchema = z.object({
+  version: z.number().optional(),
+  tasks: z.array(z.unknown()).max(10000).optional(),
+  finance: z.array(z.unknown()).max(10000).optional(),
+});
+
+const resetScopeSchema = z.object({
+  scope: z.enum(['all', 'tasks', 'finance', 'knowledge']).default('all'),
+});
 
 export async function maintenanceRoutes(app: FastifyInstance) {
   app.get('/business-snapshot', async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -14,16 +25,18 @@ export async function maintenanceRoutes(app: FastifyInstance) {
 
   app.post('/business-snapshot', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const result = await importBusinessSnapshot(request.body);
+      const payload = importSnapshotSchema.parse(request.body);
+      const result = await importBusinessSnapshot(payload);
       return reply.code(200).send(result);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
   });
 
-  app.post('/reset', async (_request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/reset', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
-      const result = await resetWorkspaceData();
+      const payload = resetScopeSchema.parse(request.body ?? {});
+      const result = await resetWorkspaceData(payload.scope);
       return reply.code(200).send(result);
     } catch (error) {
       return sendInfrastructureError(reply, error);

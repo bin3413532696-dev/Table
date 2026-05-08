@@ -163,8 +163,7 @@ export function getStorageUsage(): { used: number; available: boolean } {
   try {
     const theme = localStorage.getItem('theme') || '';
     const notificationSettings = localStorage.getItem('notification_settings') || '';
-    const securityPin = localStorage.getItem('security_pin_hashed') || '';
-    const used = new Blob([theme + notificationSettings + securityPin]).size;
+    const used = new Blob([theme + notificationSettings]).size;
     return { used, available: true };
   } catch {
     return { used: 0, available: false };
@@ -438,7 +437,6 @@ export const dataManager = {
         }) : null,
         theme: localStorage.getItem('theme'),
         notificationSettings: localStorage.getItem('notification_settings'),
-        securityPin: localStorage.getItem('security_pin_hashed'),
       },
     }, null, 2);
   },
@@ -499,9 +497,6 @@ export const dataManager = {
       if (typeof settings.notificationSettings === 'string') {
         localStorage.setItem('notification_settings', settings.notificationSettings);
       }
-      if (typeof settings.securityPin === 'string') {
-        localStorage.setItem('security_pin_hashed', settings.securityPin);
-      }
 
       return true;
     } catch (error) {
@@ -537,7 +532,6 @@ export const dataManager = {
 
     localStorage.removeItem('theme');
     localStorage.removeItem('notification_settings');
-    localStorage.removeItem('security_pin_hashed');
   },
 
   async getStats() {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, AlertCircle } from 'lucide-react';
-import { verifyPin } from '../db';
+import { verifyPinApi, clearPinApi } from '../lib/auth';
 
 interface PinLockProps {
   onSuccess: () => void;
@@ -27,16 +27,17 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
     e.preventDefault();
     if (disabled) return;
 
-    const hashedPin = localStorage.getItem('security_pin_hashed');
-    if (!hashedPin) {
-      onSuccess();
-      return;
-    }
-
-    const isValid = await verifyPin(pin, hashedPin);
-    if (isValid) {
-      onSuccess();
-    } else {
+    try {
+      const result = await verifyPinApi(pin);
+      if (result.valid) {
+        onSuccess();
+      } else {
+        setError(true);
+        setAttempts(prev => prev + 1);
+        setPin('');
+        setTimeout(() => setError(false), 2000);
+      }
+    } catch {
       setError(true);
       setAttempts(prev => prev + 1);
       setPin('');
@@ -52,6 +53,15 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
 
   const handleDelete = () => {
     setPin(prev => prev.slice(0, -1));
+  };
+
+  const handleRemoveProtection = async () => {
+    try {
+      await clearPinApi();
+      onSuccess();
+    } catch {
+      // ignore
+    }
   };
 
   return (
@@ -136,10 +146,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onSuccess }) => {
           </form>
 
           <button
-            onClick={() => {
-              localStorage.removeItem('security_pin_hashed');
-              onSuccess();
-            }}
+            onClick={handleRemoveProtection}
             className="w-full mt-6 text-center text-sm text-text-muted hover:text-text-secondary transition-colors"
           >
             忘记密码？移除保护

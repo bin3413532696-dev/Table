@@ -157,7 +157,14 @@ export async function streamAgentRun(
       return;
     }
 
-    const payload = JSON.parse(dataLines.join('\n')) as AgentRunStreamEvent | { ok?: boolean; message?: string };
+    let payload: AgentRunStreamEvent | { ok?: boolean; message?: string };
+    try {
+      payload = JSON.parse(dataLines.join('\n')) as AgentRunStreamEvent | { ok?: boolean; message?: string };
+    } catch {
+      console.error('[Agent] Failed to parse SSE event block');
+      return;
+    }
+
     if (eventName === 'error') {
       throw new Error('message' in payload && payload.message ? payload.message : 'Agent stream failed');
     }

@@ -5,6 +5,7 @@ import { PinLock } from './components/PinLock';
 import { AgentTrigger } from './components/Agent';
 import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
+import { fetchPinStatus } from './lib/auth';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Knowledge = lazy(() => import('./pages/Knowledge'));
@@ -18,18 +19,18 @@ function App() {
   const [checkingPin, setCheckingPin] = useState(true);
 
   useEffect(() => {
-    let savedPin: string | null = null;
-
-    try {
-      savedPin = window.localStorage.getItem('security_pin_hashed');
-    } catch (error) {
-      console.warn('[App] Failed to read security pin from localStorage:', error);
-    }
-
-    if (!savedPin) {
-      setIsAuthenticated(true);
-    }
-    setCheckingPin(false);
+    fetchPinStatus()
+      .then((status) => {
+        if (!status.enabled) {
+          setIsAuthenticated(true);
+        }
+      })
+      .catch(() => {
+        setIsAuthenticated(true);
+      })
+      .finally(() => {
+        setCheckingPin(false);
+      });
   }, []);
 
   const handlePinSuccess = () => {

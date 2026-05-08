@@ -8,6 +8,18 @@ import { eventEmitter, EventTopics } from '../core/events';
 import { AppError, ErrorCode } from '../core/errors';
 import { fetchWithAuth } from '../lib/auth';
 
+const KNOWLEDGE_CACHE_KEY = 'knowledge_cache_v1';
+
+export type KnowledgeCache = {
+  notes: unknown[];
+  presetTags: unknown[];
+  metadata: {
+    noteCount: number;
+    presetTagCount: number;
+  };
+  cachedAt: number;
+};
+
 type KnowledgeLoadPayload = {
   notes: unknown[];
   presetTags: unknown[];
@@ -184,6 +196,28 @@ class SyncEngineClass {
     }
   }
 
+  private saveKnowledgeCache(data: KnowledgeLoadPayload): void {
+    try {
+      const cache: KnowledgeCache = {
+        ...data,
+        cachedAt: Date.now(),
+      };
+      localStorage.setItem(KNOWLEDGE_CACHE_KEY, JSON.stringify(cache));
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  getCachedKnowledgeData(): KnowledgeCache | null {
+    try {
+      const raw = localStorage.getItem(KNOWLEDGE_CACHE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw) as KnowledgeCache;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * 从服务器加载知识库权威数据
    */
@@ -215,13 +249,18 @@ class SyncEngineClass {
         metadataResponse.json(),
       ]);
 
+      const data: KnowledgeLoadPayload = {
+        notes: Array.isArray(notesResult?.items) ? notesResult.items : [],
+        presetTags: Array.isArray(presetTagsResult?.items) ? presetTagsResult.items : [],
+        metadata: metadataResult?.data ?? { noteCount: 0, presetTagCount: 0 },
+      };
+
+      this.saveKnowledgeCache(data);
+      eventEmitter.emit(EventTopics.KNOWLEDGE_SYNCED);
+
       return {
         success: true,
-        data: {
-          notes: Array.isArray(notesResult?.items) ? notesResult.items : [],
-          presetTags: Array.isArray(presetTagsResult?.items) ? presetTagsResult.items : [],
-          metadata: metadataResult?.data ?? { noteCount: 0, presetTagCount: 0 },
-        },
+        data,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';

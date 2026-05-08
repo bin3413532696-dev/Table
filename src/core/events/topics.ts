@@ -24,6 +24,7 @@ export const EventTopics = {
   SYNC_STARTED: { key: 'sync:started', description: '同步开始' },
   SYNC_COMPLETED: { key: 'sync:completed', description: '同步完成' },
   SYNC_FAILED: { key: 'sync:failed', description: '同步失败' },
+  KNOWLEDGE_SYNCED: { key: 'knowledge:synced', description: '知识库数据已同步' },
 
   // 存储事件
   STORAGE_QUOTA_EXCEEDED: { key: 'storage:quota', description: '存储空间不足' },

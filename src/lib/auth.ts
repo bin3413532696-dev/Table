@@ -199,3 +199,52 @@ export async function clearAuthSession(): Promise<AuthMeResponse> {
 
   return response.json() as Promise<AuthMeResponse>;
 }
+
+export interface PinStatusResponse {
+  enabled: boolean;
+}
+
+export async function fetchPinStatus(): Promise<PinStatusResponse> {
+  const response = await fetchWithAuth('/api/auth/pin');
+  if (!response.ok) {
+    throw new Error(`Failed to fetch PIN status: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<PinStatusResponse>;
+}
+
+export async function verifyPinApi(pin: string): Promise<{ valid: boolean }> {
+  const response = await fetchWithAuth('/api/auth/pin/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+    throw new Error(payload.message || `Failed to verify PIN: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{ valid: boolean }>;
+}
+
+export async function setPinApi(pin: string): Promise<{ success: boolean }> {
+  const response = await fetchWithAuth('/api/auth/pin', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+    throw new Error(payload.message || `Failed to set PIN: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{ success: boolean }>;
+}
+
+export async function clearPinApi(): Promise<{ success: boolean }> {
+  const response = await fetchWithAuth('/api/auth/pin', {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ message: `HTTP ${response.status}` }));
+    throw new Error(payload.message || `Failed to clear PIN: HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{ success: boolean }>;
+}

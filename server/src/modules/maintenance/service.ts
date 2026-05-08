@@ -184,123 +184,135 @@ export async function importBusinessSnapshot(payload: unknown) {
   };
 }
 
-export async function resetWorkspaceData() {
+export async function resetWorkspaceData(scope: 'all' | 'tasks' | 'finance' | 'knowledge' = 'all') {
   const userId = getCurrentUserId();
 
+  const shouldResetTasks = scope === 'all' || scope === 'tasks';
+  const shouldResetFinance = scope === 'all' || scope === 'finance';
+  const shouldResetKnowledge = scope === 'all' || scope === 'knowledge';
+
   await prisma.$transaction(async (tx) => {
-    await tx.task.deleteMany({
-      where: {
-        userId,
-      },
-    });
+    if (shouldResetTasks) {
+      await tx.task.updateMany({
+        where: { userId },
+        data: { deletedAt: new Date() },
+      });
+    }
 
-    await tx.financeRecord.deleteMany({
-      where: {
-        userId,
-      },
-    });
+    if (shouldResetFinance) {
+      await tx.financeRecord.updateMany({
+        where: { userId },
+        data: { deletedAt: new Date() },
+      });
+    }
 
-    await tx.knowledgeNote.deleteMany({
-      where: {
-        userId,
-      },
-    });
+    if (shouldResetKnowledge) {
+      await tx.knowledgeNote.updateMany({
+        where: { userId },
+        data: { deletedAt: new Date() },
+      });
 
-    await tx.knowledgePresetTag.deleteMany({
-      where: {
-        userId,
-      },
-    });
+      await tx.knowledgePresetTag.deleteMany({
+        where: { userId },
+      });
+    }
 
-    await tx.task.createMany({
-      data: [
-        {
-          userId,
-          title: '梳理存储层改造边界',
-          completed: false,
-          priority: 'high',
-          dueDate: new Date('2026-05-10'),
-          notes: '明确前后端职责与迁移路径',
-        },
-        {
-          userId,
-          title: '落地 PostgreSQL 权威写路径',
-          completed: true,
-          priority: 'medium',
-          dueDate: new Date('2026-05-03'),
-          notes: '第一阶段基础能力',
-        },
-      ],
-    });
+    if (shouldResetTasks) {
+      await tx.task.createMany({
+        data: [
+          {
+            userId,
+            title: '梳理存储层改造边界',
+            completed: false,
+            priority: 'high',
+            dueDate: new Date('2026-05-10'),
+            notes: '明确前后端职责与迁移路径',
+          },
+          {
+            userId,
+            title: '落地 PostgreSQL 权威写路径',
+            completed: true,
+            priority: 'medium',
+            dueDate: new Date('2026-05-03'),
+            notes: '第一阶段基础能力',
+          },
+        ],
+      });
+    }
 
-    await tx.financeRecord.createMany({
-      data: [
-        {
-          userId,
-          type: 'expense',
-          amount: 299.0,
-          category: 'infrastructure',
-          description: 'PostgreSQL 环境准备',
-          recordDate: new Date('2026-05-04'),
-          model: 'backend',
-          metadataJson: {},
-        },
-        {
-          userId,
-          type: 'income',
-          amount: 1200.0,
-          category: 'project',
-          description: '阶段性项目结算',
-          recordDate: new Date('2026-05-01'),
-          model: 'delivery',
-          metadataJson: {},
-        },
-      ],
-    });
+    if (shouldResetFinance) {
+      await tx.financeRecord.createMany({
+        data: [
+          {
+            userId,
+            type: 'expense',
+            amount: 299.0,
+            category: 'infrastructure',
+            description: 'PostgreSQL 环境准备',
+            recordDate: new Date('2026-05-04'),
+            model: 'backend',
+            metadataJson: {},
+          },
+          {
+            userId,
+            type: 'income',
+            amount: 1200.0,
+            category: 'project',
+            description: '阶段性项目结算',
+            recordDate: new Date('2026-05-01'),
+            model: 'delivery',
+            metadataJson: {},
+          },
+        ],
+      });
+    }
 
-    await tx.knowledgeNote.createMany({
-      data: [
-        {
-          userId,
-          title: '系统架构设计笔记',
-          content: '采用 Fastify + Prisma + PostgreSQL 的后端架构',
-          tagsJson: ['architecture', 'backend'],
-        },
-      ],
-    });
+    if (shouldResetKnowledge) {
+      await tx.knowledgeNote.createMany({
+        data: [
+          {
+            userId,
+            title: '系统架构设计笔记',
+            content: '采用 Fastify + Prisma + PostgreSQL 的后端架构',
+            tagsJson: ['architecture', 'backend'],
+          },
+        ],
+      });
 
-    await tx.knowledgePresetTag.createMany({
-      data: [
-        {
-          userId,
-          name: 'architecture',
-          color: '#3B82F6',
-          sortOrder: 0,
-        },
-        {
-          userId,
-          name: 'backend',
-          color: '#10B981',
-          sortOrder: 1,
-        },
-        {
-          userId,
-          name: 'frontend',
-          color: '#F59E0B',
-          sortOrder: 2,
-        },
-        {
-          userId,
-          name: 'design',
-          color: '#EF4444',
-          sortOrder: 3,
-        },
-      ],
-    });
+      await tx.knowledgePresetTag.createMany({
+        data: [
+          {
+            userId,
+            name: 'architecture',
+            color: '#3B82F6',
+            sortOrder: 0,
+          },
+          {
+            userId,
+            name: 'backend',
+            color: '#10B981',
+            sortOrder: 1,
+          },
+          {
+            userId,
+            name: 'frontend',
+            color: '#F59E0B',
+            sortOrder: 2,
+          },
+          {
+            userId,
+            name: 'design',
+            color: '#EF4444',
+            sortOrder: 3,
+          },
+        ],
+      });
+    }
   });
 
   return {
     success: true,
+    scope,
     resetAt: new Date().toISOString(),
   };
 }
