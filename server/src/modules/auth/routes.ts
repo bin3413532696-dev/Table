@@ -244,9 +244,10 @@ export async function authRoutes(app: FastifyInstance) {
       });
     }
 
+    const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
     reply.header(
       'Set-Cookie',
-      `${DEV_SESSION_COOKIE}=${encodeURIComponent(payload.userId)}; Path=/; HttpOnly; SameSite=Lax`
+      `${DEV_SESSION_COOKIE}=${encodeURIComponent(payload.userId)}; Path=/; HttpOnly; SameSite=Lax${secureFlag}`
     );
 
     return {
@@ -263,9 +264,10 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   app.delete('/session', async (_request, reply) => {
+    const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
     reply.header(
       'Set-Cookie',
-      `${DEV_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+      `${DEV_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureFlag}`
     );
 
     const defaultUser = await prisma.user.findUniqueOrThrow({
@@ -312,7 +314,7 @@ export async function authRoutes(app: FastifyInstance) {
     pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
   });
 
-  app.post('/pin/verify', async (request, reply) => {
+  app.post('/pin/verify', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (request, reply) => {
     const context = getCurrentUserContext();
     const payload = verifyPinSchema.parse(request.body);
 

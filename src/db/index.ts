@@ -413,14 +413,16 @@ export const dataManager = {
   },
 
   async exportKnowledgeData(): Promise<string> {
-    const result = await requestApi<{
-      data?: unknown;
-    }>('/api/knowledge/metadata');
+    const notes = await requestApi<ApiListResponse<{ id: string; title: string; content: string; tags: string[]; createdAt: number; updatedAt: number }>>('/api/knowledge/notes');
+    const presetTags = await requestApi<ApiListResponse<{ id: string; name: string; color: string; sortOrder: number }>>('/api/knowledge/tags/preset');
 
     return JSON.stringify({
       version: 1,
       exportedAt: new Date().toISOString(),
-      knowledge: result.data || {},
+      knowledge: {
+        notes: notes.items,
+        presetTags: presetTags.items,
+      },
     }, null, 2);
   },
 
@@ -464,7 +466,15 @@ export const dataManager = {
 
   async importKnowledgeData(jsonString: string): Promise<boolean> {
     try {
-      console.log('[DB] Knowledge import - now handled by backend');
+      const data = JSON.parse(jsonString);
+      await requestApi('/api/maintenance/business-snapshot', {
+        method: 'POST',
+        body: JSON.stringify({
+          knowledge: data.knowledge || data,
+        }),
+      });
+
+      scheduleKnowledgeRefresh();
       return true;
     } catch (error) {
       console.error('[DB] Knowledge import failed:', error);

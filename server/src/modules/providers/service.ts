@@ -192,6 +192,13 @@ export async function updateProviderForCurrentUser(id: string, input: UpdateProv
     return null;
   }
 
+  if (input.version !== undefined && input.version !== existing.version) {
+    throw Object.assign(new Error('Provider was modified by another request. Please refresh and try again.'), {
+      statusCode: 409,
+      code: 'VERSION_CONFLICT',
+    });
+  }
+
   const shouldActivate = input.isActive === true;
   const nextApiKey = input.apiKey !== undefined
     ? normalizeOptionalString(input.apiKey)

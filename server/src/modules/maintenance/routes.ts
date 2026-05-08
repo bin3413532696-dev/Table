@@ -33,7 +33,7 @@ export async function maintenanceRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/reset', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/reset', { config: { rateLimit: { max: 3, timeWindow: '1 minute' } } }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const payload = resetScopeSchema.parse(request.body ?? {});
       const result = await resetWorkspaceData(payload.scope);

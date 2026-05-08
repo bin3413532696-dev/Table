@@ -117,15 +117,22 @@ export async function deleteNote(id: string): Promise<boolean> {
 
 export async function searchNotes(input: NoteSearchQueryInput): Promise<KnowledgeSearchResult[]> {
   const userId = getCurrentUserId();
-  const normalizedQuery = input.query.trim();
+  const rawQuery = input.query.trim();
   const normalizedTags = Array.isArray(input.tags)
     ? input.tags.map((item) => item.trim()).filter(Boolean)
     : typeof input.tags === 'string' && input.tags.trim()
       ? [input.tags.trim()]
       : [];
 
-  const hasQuery = normalizedQuery.length > 0;
-  const escapedQuery = hasQuery ? `%${escapeLikePattern(normalizedQuery)}%` : '';
+  const hasQuery = rawQuery.length > 0;
+  const tsquery = hasQuery
+    ? rawQuery
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((w) => w.replace(/[&|!():'"\\]/g, ''))
+        .join(' & ')
+    : '';
+  const escapedQuery = hasQuery ? `%${escapeLikePattern(rawQuery)}%` : '';
   const limit = input.limit ?? 20;
   const offset = input.offset ?? 0;
 
@@ -147,7 +154,9 @@ export async function searchNotes(input: NoteSearchQueryInput): Promise<Knowledg
   const searchFilter = hasQuery
     ? Prisma.sql`
         and (
-          n.title ilike ${escapedQuery} escape '\'
+          to_tsvector('simple', n.title) @@ to_tsquery('simple', ${tsquery})
+          or to_tsvector('simple', n.content) @@ to_tsquery('simple', ${tsquery})
+          or n.title ilike ${escapedQuery} escape '\'
           or n.content ilike ${escapedQuery} escape '\'
         )
       `
@@ -172,8 +181,10 @@ export async function searchNotes(input: NoteSearchQueryInput): Promise<Knowledg
         hasQuery
           ? Prisma.sql`
               case
-                when n.title ilike ${escapedQuery} escape '\' then 1.0
-                when n.content ilike ${escapedQuery} escape '\' then 0.5
+                when to_tsvector('simple', n.title) @@ to_tsquery('simple', ${tsquery}) then 2.0
+                when to_tsvector('simple', n.content) @@ to_tsquery('simple', ${tsquery}) then 1.0
+                when n.title ilike ${escapedQuery} escape '\' then 0.8
+                when n.content ilike ${escapedQuery} escape '\' then 0.4
                 else 0
               end
             `
@@ -202,20 +213,24 @@ export async function searchNotes(input: NoteSearchQueryInput): Promise<Knowledg
 
 export async function listAllTags(): Promise<string[]> {
   const userId = getCurrentUserId();
-  const notes = await prisma.knowledgeNote.findMany({
-    where: { userId },
-    select: { tagsJson: true },
-  });
 
-  const allTags = new Set<string>();
-  for (const note of notes) {
-    const tags = toStringArray(note.tagsJson);
-    for (const tag of tags) {
-      allTags.add(tag);
-    }
-  }
+  type TagRow = { tag: string };
 
-  return Array.from(allTags).sort();
+  const rows = await prisma.$queryRaw<TagRow[]>(Prisma.sql`
+    select distinct tag.value as tag
+    from knowledge_notes n
+    cross join jsonb_array_elements_text(
+      case
+        when jsonb_typeof(n.tags_json) = 'array' then n.tags_json
+        else '[]'::jsonb
+      end
+    ) as tag(value)
+    where n.user_id = cast(${userId} as uuid)
+      and n.deleted_at is null
+    order by tag.value asc
+  `);
+
+  return rows.map((row) => row.tag);
 }
 
 export async function listPresetTags(): Promise<KnowledgePresetTagRecord[]> {

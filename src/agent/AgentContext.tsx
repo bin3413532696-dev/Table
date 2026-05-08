@@ -54,18 +54,20 @@ function trimMessagesHistory(messages: AgentMessage[]): AgentMessage[] {
   // 首先按数量裁剪，保留最近的消息
   let trimmed = messages.slice(-MAX_HISTORY_MESSAGES);
 
-  // 然后按字符数裁剪
+  // 然后按字符数裁剪：找到合适的起始索引，一次性截取
   let totalChars = trimmed.reduce((sum, msg) => sum + msg.content.length, 0);
 
-  while (totalChars > MAX_CONTEXT_CHARS && trimmed.length > 1) {
-    // 移除最早的消息（但保留最后一条用户消息和所有最近的交互）
-    const removed = trimmed.shift();
-    if (removed) {
-      totalChars -= removed.content.length;
-    }
+  if (totalChars <= MAX_CONTEXT_CHARS) {
+    return trimmed;
   }
 
-  return trimmed;
+  let cutIndex = 0;
+  while (cutIndex < trimmed.length - 1 && totalChars > MAX_CONTEXT_CHARS) {
+    totalChars -= trimmed[cutIndex].content.length;
+    cutIndex++;
+  }
+
+  return trimmed.slice(cutIndex);
 }
 
 function appendManualStopMessage(content: string): string {
@@ -108,6 +110,7 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
         ...state,
         messages: action.payload.messages,
         currentRunId: action.payload.runId,
+        isProcessing: false,
         error: null,
         confirmationRequest: null,
       };

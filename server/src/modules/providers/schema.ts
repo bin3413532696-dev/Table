@@ -25,6 +25,7 @@ export const updateProviderSchema = z.object({
   model: z.string().trim().max(200).optional(),
   headers: z.record(z.string(), z.string()).optional(),
   isActive: z.boolean().optional(),
+  version: z.number().int().positive().optional(),
 }).refine((value) => Object.keys(value).length > 0, {
   message: 'At least one field must be provided',
 });

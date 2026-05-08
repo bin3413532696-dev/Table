@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import rateLimit from '@fastify/rate-limit';
 import { authRoutes } from './modules/auth/routes';
 import { healthRoutes } from './modules/health/routes';
 import { taskRoutes } from './modules/tasks/routes';
@@ -13,6 +14,12 @@ import { sendInfrastructureError } from './shared/http';
 export function createApp() {
   const app = Fastify({
     logger: true,
+  });
+
+  app.register(rateLimit, {
+    max: 100,
+    timeWindow: '1 minute',
+    allowList: ['127.0.0.1', '::1'],
   });
 
   app.addHook('onRequest', (request, reply, done) => {
@@ -73,6 +80,14 @@ export function createApp() {
 
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);
+
+    if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 409) {
+      return reply.code(409).send({
+        error: 'VERSION_CONFLICT',
+        message: error.message || 'Resource was modified by another request. Please refresh and try again.',
+      });
+    }
+
     if (!reply.sent) {
       return sendInfrastructureError(reply, error);
     }

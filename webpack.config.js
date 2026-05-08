@@ -54,7 +54,7 @@ module.exports = (env, argv) => {
     },
     devServer: {
       port: 3266,
-      allowedHosts: 'all',
+      allowedHosts: ['localhost', '127.0.0.1'],
       proxy: [
         {
           context: (pathname) => pathname.startsWith('/api/'),
