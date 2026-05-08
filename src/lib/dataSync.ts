@@ -35,19 +35,17 @@ export async function initializeData(): Promise<boolean> {
 }
 
 export async function syncNow(): Promise<SyncResult> {
-  return { success: true, timestamp: Date.now() };
+  return syncEngine.syncNow();
 }
 
 export async function forceSyncNow(): Promise<SyncResult> {
-  return { success: true, timestamp: Date.now() };
+  return syncEngine.syncNow();
 }
 
 export function startAutoSync(): () => void {
-  console.log('[Sync] Auto sync started');
-  return () => console.log('[Sync] Auto sync stopped');
+  return () => {};
 }
 
 export function startRealtimeSync(): () => void {
-  console.log('[Sync] Realtime sync started');
-  return () => console.log('[Sync] Realtime sync stopped');
+  return () => {};
 }

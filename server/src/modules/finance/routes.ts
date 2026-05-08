@@ -31,7 +31,7 @@ export async function financeRoutes(app: FastifyInstance) {
     try {
       const payload = createFinanceRecordSchema.parse(request.body);
       const record = await createFinanceRecordEntry(payload);
-      return reply.code(201).send(record);
+      return reply.code(201).send({ data: record, source: 'postgres' });
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -44,7 +44,7 @@ export async function financeRoutes(app: FastifyInstance) {
       if (!record) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Finance record not found' });
       }
-      return record;
+      return { data: record, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -58,7 +58,7 @@ export async function financeRoutes(app: FastifyInstance) {
       if (!record) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Finance record not found' });
       }
-      return record;
+      return { data: record, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }

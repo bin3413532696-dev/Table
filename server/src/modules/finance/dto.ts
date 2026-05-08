@@ -1,12 +1,5 @@
 import type { FinanceRecord } from '@prisma/client';
-
-function toTimestamp(value: Date): number {
-  return value.getTime();
-}
-
-function toDateOnly(value: Date): string {
-  return value.toISOString().slice(0, 10);
-}
+import { toTimestamp, toDateOnly } from '../../shared/date';
 
 export function toFinanceRecordDto(record: FinanceRecord) {
   return {
@@ -19,5 +12,6 @@ export function toFinanceRecordDto(record: FinanceRecord) {
     model: record.model ?? undefined,
     createdAt: toTimestamp(record.createdAt),
     updatedAt: toTimestamp(record.updatedAt),
+    version: record.version,
   };
 }

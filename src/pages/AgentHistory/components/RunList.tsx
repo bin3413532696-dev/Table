@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { AgentRunDto } from '../../../lib/agentApi';
 import { Button } from '../../../components/ui';
+import { MESSAGES } from '../../../core/messages';
 
 interface RunListProps {
   runs: AgentRunDto[];
@@ -22,12 +23,12 @@ interface RunListProps {
 }
 
 const statusConfig: Record<string, { icon: React.ElementType; color: string; label: string }> = {
-  completed: { icon: CheckCircle, color: 'text-green-500', label: '已完成' },
-  failed: { icon: XCircle, color: 'text-red-500', label: '失败' },
-  cancelled: { icon: XCircle, color: 'text-gray-400', label: '已取消' },
-  waiting_confirmation: { icon: Clock, color: 'text-yellow-500', label: '待确认' },
-  running: { icon: AlertCircle, color: 'text-blue-500', label: '运行中' },
-  pending: { icon: Clock, color: 'text-gray-400', label: '等待中' },
+  completed: { icon: CheckCircle, color: 'text-green-500', label: MESSAGES.agent.statusCompleted },
+  failed: { icon: XCircle, color: 'text-red-500', label: MESSAGES.agent.statusFailed },
+  cancelled: { icon: XCircle, color: 'text-gray-400', label: MESSAGES.agent.statusCancelled },
+  waiting_confirmation: { icon: Clock, color: 'text-yellow-500', label: MESSAGES.agent.statusWaiting },
+  running: { icon: AlertCircle, color: 'text-blue-500', label: MESSAGES.agent.statusRunning },
+  pending: { icon: Clock, color: 'text-gray-400', label: MESSAGES.agent.statusPending },
 };
 
 function formatRelativeTime(timestamp: number): string {

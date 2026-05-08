@@ -17,6 +17,7 @@ export interface BaseEntity {
   id: EntityId;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+  version?: number;
 }
 
 /**

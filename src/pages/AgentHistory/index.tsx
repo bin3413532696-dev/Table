@@ -12,6 +12,7 @@ import { useAgent } from '../../agent/AgentContext';
 import { RunList, RunDetail } from './components';
 import { Button } from '../../components/ui';
 import Loading from '../../components/Loading';
+import { MESSAGES } from '../../core/messages';
 
 const PAGE_SIZE = 20;
 
@@ -37,7 +38,7 @@ export default function AgentHistory() {
         hasMore: offset + result.items.length < result.total,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败');
+      setError(err instanceof Error ? err.message : MESSAGES.agent.loadHistoryFailed);
     } finally {
       setIsLoading(false);
     }
@@ -55,7 +56,7 @@ export default function AgentHistory() {
       const detail = await fetchAgentRunDetail(run.id);
       setSelectedRun(detail);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载详情失败');
+      setError(err instanceof Error ? err.message : MESSAGES.agent.loadDetailFailed);
     } finally {
       setIsLoadingDetail(false);
     }
@@ -75,7 +76,7 @@ export default function AgentHistory() {
       }
       setPagination((prev) => ({ ...prev, total: prev.total - 1 }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : '删除失败');
+      setError(err instanceof Error ? err.message : MESSAGES.agent.deleteRunFailed);
     }
   };
 

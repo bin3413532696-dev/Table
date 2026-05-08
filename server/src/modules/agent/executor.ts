@@ -34,7 +34,7 @@ type ToolDefinition = {
 
 export type StreamEventEmitter = (event: AgentRunStreamEvent) => Promise<void> | void;
 
-const MAX_AGENT_EXECUTION_ITERATIONS = 5;
+const MAX_AGENT_EXECUTION_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS) || 5;
 
 export interface PendingConfirmationSnapshot {
   kind: 'pending_confirmation';
@@ -258,8 +258,8 @@ function parseToolCalls(content: string): { textContent: string; toolCalls: Tool
           arguments: parsed.arguments || {},
         });
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.error('[Agent] Failed to parse tool block:', error);
     }
   }
 
@@ -272,8 +272,8 @@ function parseToolCalls(content: string): { textContent: string; toolCalls: Tool
           arguments: parsed.arguments,
         });
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.error('[Agent] Failed to parse JSON tool block:', error);
     }
   }
 
@@ -286,8 +286,8 @@ function parseToolCalls(content: string): { textContent: string; toolCalls: Tool
           arguments: parsed.arguments || {},
         });
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      console.error('[Agent] Failed to parse inline tool JSON:', error);
     }
   }
 

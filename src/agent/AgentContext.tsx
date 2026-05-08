@@ -8,6 +8,7 @@ import {
   rejectAgentToolExecution,
   streamAgentRun,
 } from '../lib/agentApi';
+import { MESSAGES } from '../core/messages';
 
 type AgentAction =
   | { type: 'ADD_MESSAGE'; payload: AgentMessage }
@@ -366,12 +367,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         type: 'UPDATE_MESSAGE',
         payload: {
           id: assistantMessage.id,
-          updates: { status: 'error', content: '处理请求时发生错误。' },
+          updates: { status: 'error', content: MESSAGES.agent.processError },
         },
       });
       dispatch({
         type: 'SET_ERROR',
-        payload: error instanceof Error ? error.message : '未知错误',
+        payload: error instanceof Error ? error.message : MESSAGES.common.unknownError,
       });
     } finally {
       if (activeRequestRef.current === requestState) {
@@ -408,7 +409,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       dispatch({
         type: 'SET_ERROR',
-        payload: error instanceof Error ? error.message : '执行失败',
+        payload: error instanceof Error ? error.message : MESSAGES.agent.executeFailed,
       });
     } finally {
       dispatch({ type: 'SET_PROCESSING', payload: false });
@@ -433,7 +434,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       dispatch({
         type: 'SET_ERROR',
-        payload: error instanceof Error ? error.message : '取消执行失败',
+        payload: error instanceof Error ? error.message : MESSAGES.agent.cancelFailed,
       });
     } finally {
       dispatch({ type: 'SET_PROCESSING', payload: false });

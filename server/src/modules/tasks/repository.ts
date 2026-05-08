@@ -39,7 +39,7 @@ export async function findTaskById(id: string) {
 
 export async function updateTask(id: string, input: UpdateTaskInput) {
   return prisma.task.update({
-    where: { id },
+    where: { id, ...(input.version !== undefined ? { version: input.version } : {}) },
     data: {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.priority !== undefined ? { priority: input.priority } : {}),

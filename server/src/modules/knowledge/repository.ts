@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/client';
 import { getCurrentUserId } from '../../shared/user-context';
+import { toNoteDto, toPresetTagDto } from './dto';
 import type {
   CreateNoteInput,
   UpdateNoteInput,
@@ -9,21 +10,8 @@ import type {
   UpdatePresetTagInput,
 } from './schema';
 
-export type KnowledgeNoteRecord = {
-  id: string;
-  title: string;
-  content: string;
-  tags: string[];
-  createdAt: number;
-  updatedAt: number;
-};
-
-export type KnowledgePresetTagRecord = {
-  id: string;
-  name: string;
-  color: string;
-  sortOrder: number;
-};
+export type KnowledgeNoteRecord = ReturnType<typeof toNoteDto>;
+export type KnowledgePresetTagRecord = ReturnType<typeof toPresetTagDto>;
 
 export type KnowledgeSearchResult = {
   id: string;
@@ -59,14 +47,7 @@ export async function listNotes(): Promise<KnowledgeNoteRecord[]> {
     orderBy: { updatedAt: 'desc' },
   });
 
-  return notes.map((note) => ({
-    id: note.id,
-    title: note.title,
-    content: note.content,
-    tags: toStringArray(note.tagsJson),
-    createdAt: toTimestamp(note.createdAt),
-    updatedAt: toTimestamp(note.updatedAt),
-  }));
+  return notes.map(toNoteDto);
 }
 
 export async function createNote(input: CreateNoteInput): Promise<KnowledgeNoteRecord> {
@@ -83,14 +64,7 @@ export async function createNote(input: CreateNoteInput): Promise<KnowledgeNoteR
     },
   });
 
-  return {
-    id: note.id,
-    title: note.title,
-    content: note.content,
-    tags: toStringArray(note.tagsJson),
-    createdAt: toTimestamp(note.createdAt),
-    updatedAt: toTimestamp(note.updatedAt),
-  };
+  return toNoteDto(note);
 }
 
 export async function findNoteById(id: string): Promise<KnowledgeNoteRecord | null> {
@@ -101,14 +75,7 @@ export async function findNoteById(id: string): Promise<KnowledgeNoteRecord | nu
 
   if (!note) return null;
 
-  return {
-    id: note.id,
-    title: note.title,
-    content: note.content,
-    tags: toStringArray(note.tagsJson),
-    createdAt: toTimestamp(note.createdAt),
-    updatedAt: toTimestamp(note.updatedAt),
-  };
+  return toNoteDto(note);
 }
 
 export async function updateNote(id: string, input: UpdateNoteInput): Promise<KnowledgeNoteRecord | null> {
@@ -129,14 +96,7 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<Kn
     },
   });
 
-  return {
-    id: note.id,
-    title: note.title,
-    content: note.content,
-    tags: toStringArray(note.tagsJson),
-    createdAt: toTimestamp(note.createdAt),
-    updatedAt: toTimestamp(note.updatedAt),
-  };
+  return toNoteDto(note);
 }
 
 export async function deleteNote(id: string): Promise<boolean> {
@@ -263,12 +223,7 @@ export async function listPresetTags(): Promise<KnowledgePresetTagRecord[]> {
     orderBy: { sortOrder: 'asc' },
   });
 
-  return tags.map((tag) => ({
-    id: tag.id,
-    name: tag.name,
-    color: tag.color,
-    sortOrder: tag.sortOrder,
-  }));
+  return tags.map(toPresetTagDto);
 }
 
 export async function createPresetTag(input: CreatePresetTagInput): Promise<KnowledgePresetTagRecord> {
@@ -293,12 +248,7 @@ export async function createPresetTag(input: CreatePresetTagInput): Promise<Know
     },
   });
 
-  return {
-    id: tag.id,
-    name: tag.name,
-    color: tag.color,
-    sortOrder: tag.sortOrder,
-  };
+  return toPresetTagDto(tag);
 }
 
 export async function findPresetTagById(id: string): Promise<KnowledgePresetTagRecord | null> {
@@ -309,12 +259,7 @@ export async function findPresetTagById(id: string): Promise<KnowledgePresetTagR
 
   if (!tag) return null;
 
-  return {
-    id: tag.id,
-    name: tag.name,
-    color: tag.color,
-    sortOrder: tag.sortOrder,
-  };
+  return toPresetTagDto(tag);
 }
 
 export async function updatePresetTag(id: string, input: UpdatePresetTagInput): Promise<KnowledgePresetTagRecord | null> {
@@ -335,12 +280,7 @@ export async function updatePresetTag(id: string, input: UpdatePresetTagInput): 
     },
   });
 
-  return {
-    id: tag.id,
-    name: tag.name,
-    color: tag.color,
-    sortOrder: tag.sortOrder,
-  };
+  return toPresetTagDto(tag);
 }
 
 export async function deletePresetTag(id: string): Promise<boolean> {

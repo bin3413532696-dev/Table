@@ -85,6 +85,11 @@ async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function requestApiData<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await requestApi<{ data: T; source: string }>(path, init);
+  return response.data;
+}
+
 function scheduleKnowledgeRefresh(): void {
   void syncEngine.loadKnowledgeFromServer()
     .then((result) => {
@@ -177,7 +182,7 @@ export const financeDB = {
   },
 
   async add(record: Omit<FinanceRecord, 'id'>): Promise<FinanceRecord> {
-    const created = await requestApi<FinanceRecord>('/api/finance', {
+    const created = await requestApiData<FinanceRecord>('/api/finance', {
       method: 'POST',
       body: JSON.stringify({
         type: record.type,
@@ -212,8 +217,9 @@ export const financeDB = {
     if (updates.category !== undefined) payload.category = updates.category;
     if (updates.date !== undefined) payload.date = updates.date;
     if (updates.model !== undefined) payload.model = updates.model;
+    if (updates.version !== undefined) payload.version = updates.version;
 
-    const updated = await requestApi<FinanceRecord>(`/api/finance/${id}`, {
+    const updated = await requestApiData<FinanceRecord>(`/api/finance/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
@@ -292,7 +298,7 @@ export const taskDB = {
   },
 
   async add(record: Omit<Task, 'id'>): Promise<Task> {
-    const created = await requestApi<Task>('/api/tasks', {
+    const created = await requestApiData<Task>('/api/tasks', {
       method: 'POST',
       body: JSON.stringify({
         title: record.title,
@@ -323,8 +329,9 @@ export const taskDB = {
     if (updates.completed !== undefined) payload.completed = updates.completed;
     if (updates.priority !== undefined) payload.priority = updates.priority;
     if (updates.dueDate !== undefined) payload.dueDate = updates.dueDate === '' ? null : updates.dueDate;
+    if (updates.version !== undefined) payload.version = updates.version;
 
-    const updated = await requestApi<Task>(`/api/tasks/${id}`, {
+    const updated = await requestApiData<Task>(`/api/tasks/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });
@@ -365,10 +372,11 @@ export const taskDB = {
       );
     }
 
-    const updated = await requestApi<Task>(`/api/tasks/${id}`, {
+    const updated = await requestApiData<Task>(`/api/tasks/${id}`, {
       method: 'PATCH',
       body: JSON.stringify({
         completed: !task.completed,
+        ...(task.version !== undefined ? { version: task.version } : {}),
       }),
     });
 

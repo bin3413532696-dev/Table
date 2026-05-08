@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon, Shield, HardDrive, Plus, Edit2, Trash2 as TrashIcon, Globe, ChevronDown, ChevronUp, Power } from 'lucide-react';
 import { dataManager, financeDB, hashPin, taskDB } from '../../db';
+import { initializeData } from '../../lib/dataSync';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useCurrentUser } from '../../contexts/UserContext';
 import { Button, Toggle } from '../../components/ui';
@@ -24,6 +25,7 @@ import {
   updateAuthMe,
 } from '../../lib/auth';
 import { registeredToolNames } from '../../agent/toolMetadata';
+import { MESSAGES } from '../../core/messages';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User, desc: '管理您的个人信息' },
@@ -145,7 +147,7 @@ function ProfileSettings() {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (error) {
-      setEmailError(error instanceof Error ? error.message : '保存个人资料失败');
+      setEmailError(error instanceof Error ? error.message : MESSAGES.settings.saveProfileFailed);
     }
   };
 
@@ -177,7 +179,7 @@ function ProfileSettings() {
       setTimeout(() => setUserSwitchSaved(false), 2000);
     } catch (error) {
       setCurrentUserId(user?.id || DEFAULT_USER_ID);
-      setUserSwitchError(error instanceof Error ? error.message : '切换用户失败，请先创建该用户');
+      setUserSwitchError(error instanceof Error ? error.message : MESSAGES.settings.switchUserFailed);
     } finally {
       setSwitchingUser(false);
     }
@@ -197,7 +199,7 @@ function ProfileSettings() {
       setUserSwitchSaved(true);
       setTimeout(() => setUserSwitchSaved(false), 2000);
     } catch (error) {
-      setUserSwitchError(error instanceof Error ? error.message : '恢复默认用户失败');
+      setUserSwitchError(error instanceof Error ? error.message : MESSAGES.settings.restoreDefaultUserFailed);
     } finally {
       setSwitchingUser(false);
     }
@@ -234,7 +236,7 @@ function ProfileSettings() {
       setCreateUserSaved(true);
       setTimeout(() => setCreateUserSaved(false), 2000);
     } catch (error) {
-      setCreateUserError(error instanceof Error ? error.message : '创建用户失败');
+      setCreateUserError(error instanceof Error ? error.message : MESSAGES.settings.createUserFailed);
     } finally {
       setCreatingUser(false);
     }
@@ -578,7 +580,7 @@ function DataManager() {
         showStatus('success', successMessage);
         setTimeout(() => window.location.reload(), 1200);
       } else {
-        showStatus('error', '导入失败：文件格式不正确或与当前数据类型不匹配');
+        showStatus('error', MESSAGES.settings.importFailed);
       }
     };
     reader.readAsText(file);
@@ -598,7 +600,7 @@ function DataManager() {
       window.location.reload();
     } catch {
       setShowClearConfirm(false);
-      showStatus('error', '清理失败，请稍后重试');
+      showStatus('error', MESSAGES.settings.clearFailed);
     }
   };
 
@@ -654,7 +656,7 @@ function DataManager() {
             <div className="text-sm font-medium text-text-primary">导入业务数据</div>
             <div className="text-xs text-text-muted">覆盖 PostgreSQL 中的任务与财务测试数据</div>
           </div>
-          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importBusinessData, '业务数据导入成功，页面即将刷新...')} className="hidden" />
+          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importBusinessData, MESSAGES.settings.importBusinessSuccess)} className="hidden" />
         </label>
       </div>
 
@@ -678,7 +680,7 @@ function DataManager() {
             <div className="text-sm font-medium text-text-primary">导入知识库</div>
             <div className="text-xs text-text-muted">覆盖当前知识库并同步到服务端知识库</div>
           </div>
-          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importKnowledgeData, '知识库导入成功，页面即将刷新...')} className="hidden" />
+          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importKnowledgeData, MESSAGES.settings.importKnowledgeSuccess)} className="hidden" />
         </label>
       </div>
 
@@ -702,7 +704,7 @@ function DataManager() {
             <div className="text-sm font-medium text-text-primary">导入本地设置</div>
             <div className="text-xs text-text-muted">仅恢复当前浏览器的本地设置项</div>
           </div>
-          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importLocalSettings, '本地设置导入成功，页面即将刷新...')} className="hidden" />
+          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importLocalSettings, MESSAGES.settings.importSettingsSuccess)} className="hidden" />
         </label>
       </div>
 
@@ -840,7 +842,7 @@ function ApiConfigSettings() {
       
       setFetchModelsError('无法获取模型列表，请手动配置模型名称');
     } catch (error) {
-      setFetchModelsError(error instanceof Error ? error.message : '获取模型列表失败');
+      setFetchModelsError(error instanceof Error ? error.message : MESSAGES.settings.fetchModelsFailed);
     } finally {
       setFetchingModels(false);
     }
@@ -876,7 +878,7 @@ function ApiConfigSettings() {
         }
       } catch (error) {
         if (!disposed) {
-          setProviderError(error instanceof Error ? error.message : '加载 Provider 失败');
+          setProviderError(error instanceof Error ? error.message : MESSAGES.settings.loadProviderFailed);
         }
       } finally {
         if (!disposed) {
@@ -939,7 +941,7 @@ function ApiConfigSettings() {
       const nextProviders = await activateApiConfig(id);
       setProviders(nextProviders);
     } catch (error) {
-      setProviderError(error instanceof Error ? error.message : '激活 Provider 失败');
+      setProviderError(error instanceof Error ? error.message : MESSAGES.settings.activateProviderFailed);
     }
   };
 
@@ -949,7 +951,7 @@ function ApiConfigSettings() {
       const nextProviders = await deleteApiConfig(id);
       setProviders(nextProviders);
     } catch (error) {
-      setProviderError(error instanceof Error ? error.message : '删除 Provider 失败');
+      setProviderError(error instanceof Error ? error.message : MESSAGES.settings.deleteProviderFailed);
     }
   };
 
@@ -994,7 +996,7 @@ function ApiConfigSettings() {
       setShowForm(false);
       setEditingProvider(null);
     } catch (error) {
-      setProviderError(error instanceof Error ? error.message : '保存 Provider 失败');
+      setProviderError(error instanceof Error ? error.message : MESSAGES.settings.saveProviderFailed);
     }
   };
 

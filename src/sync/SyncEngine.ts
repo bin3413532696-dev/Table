@@ -163,6 +163,14 @@ class SyncEngineClass {
         };
       }
 
+      const result = await this.loadKnowledgeFromServer();
+      if (!result.success) {
+        return {
+          success: false,
+          error: result.error || 'Knowledge sync failed',
+        };
+      }
+
       return {
         success: true,
         timestamp: Date.now(),

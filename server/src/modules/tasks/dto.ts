@@ -1,16 +1,5 @@
 import type { Task } from '@prisma/client';
-
-function toTimestamp(value: Date): number {
-  return value.getTime();
-}
-
-function toDateOnly(value: Date | null): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  return value.toISOString().slice(0, 10);
-}
+import { toTimestamp, toDateOnly } from '../../shared/date';
 
 export function toTaskDto(task: Task) {
   return {
@@ -22,5 +11,6 @@ export function toTaskDto(task: Task) {
     notes: task.notes ?? undefined,
     createdAt: toTimestamp(task.createdAt),
     updatedAt: toTimestamp(task.updatedAt),
+    version: task.version,
   };
 }

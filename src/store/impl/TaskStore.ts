@@ -6,6 +6,7 @@ import { BaseStore } from '../base/Store';
 import { StoreConfig } from '../base/types';
 import { Task, CreateTaskDTO, UpdateTaskDTO, TaskStats } from '../../core/types';
 import { EventTopics } from '../../core/events';
+import { AppError, ErrorCode } from '../../core/errors';
 import { isValidTask, isValidCreateTaskDTO } from '../../core/validation';
 
 /**
@@ -58,14 +59,12 @@ class TaskStoreClass extends BaseStore<Task, CreateTaskDTO, UpdateTaskDTO> {
   /**
    * 切换任务完成状态
    */
-  async toggle(id: string): Promise<{ success: boolean; error?: import('../../core/errors').AppError }> {
+  async toggle(id: string): Promise<{ success: boolean; error?: AppError }> {
     const task = await this.getById(id);
     if (!task) {
       return {
         success: false,
-        error: import('../../core/errors').then(({ AppError, ErrorCode }) =>
-          AppError.fromCode(ErrorCode.ENTITY_NOT_FOUND, id)
-        ) as any,
+        error: AppError.fromCode(ErrorCode.ENTITY_NOT_FOUND, id),
       };
     }
 

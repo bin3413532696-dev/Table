@@ -21,13 +21,15 @@ interface RunDetailProps {
   isLoading: boolean;
 }
 
+import { MESSAGES } from '../../../core/messages';
+
 const statusConfig: Record<string, { icon: React.ElementType; color: string; label: string; bgColor: string }> = {
-  completed: { icon: CheckCircle, color: 'text-green-500', label: '已完成', bgColor: 'bg-green-500/10' },
-  failed: { icon: XCircle, color: 'text-red-500', label: '失败', bgColor: 'bg-red-500/10' },
-  cancelled: { icon: XCircle, color: 'text-gray-400', label: '已取消', bgColor: 'bg-gray-500/10' },
-  waiting_confirmation: { icon: Clock, color: 'text-yellow-500', label: '待确认', bgColor: 'bg-yellow-500/10' },
-  running: { icon: AlertCircle, color: 'text-blue-500', label: '运行中', bgColor: 'bg-blue-500/10' },
-  pending: { icon: Clock, color: 'text-gray-400', label: '等待中', bgColor: 'bg-gray-500/10' },
+  completed: { icon: CheckCircle, color: 'text-green-500', label: MESSAGES.agent.statusCompleted, bgColor: 'bg-green-500/10' },
+  failed: { icon: XCircle, color: 'text-red-500', label: MESSAGES.agent.statusFailed, bgColor: 'bg-red-500/10' },
+  cancelled: { icon: XCircle, color: 'text-gray-400', label: MESSAGES.agent.statusCancelled, bgColor: 'bg-gray-500/10' },
+  waiting_confirmation: { icon: Clock, color: 'text-yellow-500', label: MESSAGES.agent.statusWaiting, bgColor: 'bg-yellow-500/10' },
+  running: { icon: AlertCircle, color: 'text-blue-500', label: MESSAGES.agent.statusRunning, bgColor: 'bg-blue-500/10' },
+  pending: { icon: Clock, color: 'text-gray-400', label: MESSAGES.agent.statusPending, bgColor: 'bg-gray-500/10' },
 };
 
 export const RunDetail: React.FC<RunDetailProps> = ({ run, onContinue, onDelete, isLoading }) => {

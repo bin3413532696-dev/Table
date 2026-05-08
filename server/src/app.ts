@@ -33,6 +33,22 @@ export function createApp() {
     });
   });
 
+  app.addHook('onResponse', (request, reply, done) => {
+    app.log.info({
+      req: {
+        method: request.method,
+        url: request.url,
+        query: request.query,
+        body: request.body,
+      },
+      res: {
+        statusCode: reply.statusCode,
+      },
+      responseTime: reply.elapsedTime,
+    }, `${request.method} ${request.url} ${reply.statusCode}`);
+    done();
+  });
+
   app.setErrorHandler((error, _request, reply) => {
     app.log.error(error);
     if (!reply.sent) {

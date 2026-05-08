@@ -158,6 +158,7 @@ model Task {
   version   Int       @default(1)
   user      User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  @@index([userId, deletedAt])
   @@map("tasks")
 }
 
@@ -177,6 +178,7 @@ model FinanceRecord {
   version      Int       @default(1)
   user         User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  @@index([userId, deletedAt])
   @@map("finance_records")
 }
 
@@ -188,10 +190,12 @@ model KnowledgeNote {
   tagsJson  Json     @default("[]") @map("tags_json")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
   user      User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([userId])
   @@index([userId, updatedAt(sort: Desc)])
+  @@index([userId, deletedAt])
   @@map("knowledge_notes")
 }
 

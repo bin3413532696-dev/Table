@@ -27,7 +27,7 @@ export async function taskRoutes(app: FastifyInstance) {
     try {
       const payload = createTaskSchema.parse(request.body);
       const task = await createTaskRecord(payload);
-      return reply.code(201).send(task);
+      return reply.code(201).send({ data: task, source: 'postgres' });
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -40,7 +40,7 @@ export async function taskRoutes(app: FastifyInstance) {
       if (!task) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Task not found' });
       }
-      return task;
+      return { data: task, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -54,7 +54,7 @@ export async function taskRoutes(app: FastifyInstance) {
       if (!task) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Task not found' });
       }
-      return task;
+      return { data: task, source: 'postgres' };
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }

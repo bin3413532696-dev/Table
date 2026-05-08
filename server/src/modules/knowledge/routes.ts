@@ -25,12 +25,22 @@ import {
   getKnowledgeOverview,
 } from './service';
 
+const SOURCE = 'postgres' as const;
+
+function listResponse<T>(items: T[], total?: number) {
+  return { items, total: total ?? items.length, source: SOURCE };
+}
+
+function dataResponse<T>(data: T) {
+  return { data, source: SOURCE };
+}
+
 export async function knowledgeRoutes(app: FastifyInstance) {
   // 笔记列表
   app.get('/knowledge/notes', async (_request, reply) => {
     try {
       const items = await getNoteList();
-      return { items, total: items.length, source: 'postgres' };
+      return listResponse(items);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -41,7 +51,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     try {
       const payload = createNoteSchema.parse(request.body);
       const note = await createNoteRecord(payload);
-      return reply.code(201).send(note);
+      return reply.code(201).send(dataResponse(note));
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -55,7 +65,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
       if (!note) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Note not found' });
       }
-      return note;
+      return dataResponse(note);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -70,7 +80,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
       if (!note) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Note not found' });
       }
-      return note;
+      return dataResponse(note);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -95,7 +105,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     try {
       const query = noteSearchQuerySchema.parse(request.query);
       const items = await searchNoteRecords(query);
-      return { items, total: items.length, source: 'postgres' };
+      return listResponse(items);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -105,7 +115,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   app.get('/knowledge/tags', async (_request, reply) => {
     try {
       const tags = await getAllTags();
-      return { items: tags, total: tags.length, source: 'postgres' };
+      return listResponse(tags);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -115,7 +125,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   app.get('/knowledge/tags/preset', async (_request, reply) => {
     try {
       const items = await getPresetTagList();
-      return { items, total: items.length, source: 'postgres' };
+      return listResponse(items);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -126,7 +136,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     try {
       const payload = createPresetTagSchema.parse(request.body);
       const tag = await createPresetTagRecord(payload);
-      return reply.code(201).send(tag);
+      return reply.code(201).send(dataResponse(tag));
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -140,7 +150,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
       if (!tag) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Preset tag not found' });
       }
-      return tag;
+      return dataResponse(tag);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -155,7 +165,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
       if (!tag) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Preset tag not found' });
       }
-      return tag;
+      return dataResponse(tag);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }
@@ -179,7 +189,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   app.get('/knowledge/metadata', async (_request, reply) => {
     try {
       const data = await getKnowledgeOverview();
-      return { data, source: 'postgres' };
+      return dataResponse(data);
     } catch (error) {
       return sendInfrastructureError(reply, error);
     }

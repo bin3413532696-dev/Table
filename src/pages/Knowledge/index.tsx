@@ -15,6 +15,7 @@ import { TagSelector } from './components/TagSelector';
 import { NoteList } from './components/NoteList';
 import type { KnowledgeNote, KnowledgePresetTag } from './types';
 import * as api from './api';
+import { MESSAGES } from '../../core/messages';
 
 type ViewMode = 'list' | 'edit' | 'settings';
 
@@ -46,7 +47,7 @@ export default function KnowledgePage() {
       setPresetTags(presetTagsData);
       setAllTags(allTagsData);
     } catch (error) {
-      showFeedback('error', '加载数据失败');
+      showFeedback('error', MESSAGES.knowledge.loadDataFailed);
     } finally {
       setIsLoading(false);
     }
@@ -79,7 +80,7 @@ export default function KnowledgePage() {
 
   const handleSaveNote = async () => {
     if (!formData.title.trim()) {
-      showFeedback('error', '请输入笔记标题');
+      showFeedback('error', MESSAGES.knowledge.noteTitleRequired);
       return;
     }
 
@@ -89,18 +90,18 @@ export default function KnowledgePage() {
         const updated = await api.updateNote(selectedNote.id, formData);
         if (updated) {
           setNotes(notes.map((n) => (n.id === updated.id ? updated : n)));
-          showFeedback('success', '笔记已更新');
+          showFeedback('success', MESSAGES.knowledge.noteUpdated);
         }
       } else {
         const created = await api.createNote(formData);
         setNotes([created, ...notes]);
-        showFeedback('success', '笔记已创建');
+        showFeedback('success', MESSAGES.knowledge.noteCreated);
       }
       const tags = await api.getAllTags();
       setAllTags(tags);
       setViewMode('list');
     } catch (error) {
-      showFeedback('error', '保存失败');
+      showFeedback('error', MESSAGES.knowledge.saveNoteFailed);
     } finally {
       setIsSaving(false);
     }
@@ -112,14 +113,12 @@ export default function KnowledgePage() {
     if (!window.confirm('确定要删除这篇笔记吗？')) return;
 
     try {
-      const deleted = await api.deleteNote(selectedNote.id);
-      if (deleted) {
-        setNotes(notes.filter((n) => n.id !== selectedNote.id));
-        showFeedback('success', '笔记已删除');
-        setViewMode('list');
-      }
+      await api.deleteNote(selectedNote.id);
+      setNotes(notes.filter((n) => n.id !== selectedNote.id));
+      showFeedback('success', MESSAGES.knowledge.noteDeleted);
+      setViewMode('list');
     } catch (error) {
-      showFeedback('error', '删除失败');
+      showFeedback('error', MESSAGES.knowledge.deleteNoteFailed);
     }
   };
 
@@ -262,9 +261,11 @@ export default function KnowledgePage() {
                       type="button"
                       onClick={async () => {
                         if (window.confirm(`确定要删除预设标签 "${tag.name}" 吗？`)) {
-                          const deleted = await api.deletePresetTag(tag.id);
-                          if (deleted) {
+                          try {
+                            await api.deletePresetTag(tag.id);
                             setPresetTags(presetTags.filter((t) => t.id !== tag.id));
+                          } catch {
+                            showFeedback('error', MESSAGES.knowledge.deletePresetTagFailed);
                           }
                         }
                       }}
@@ -275,7 +276,7 @@ export default function KnowledgePage() {
                   </div>
                 ))}
                 {presetTags.length === 0 && (
-                  <p className="text-gray-500 text-sm">暂无预设标签，在编辑笔记时可以创建</p>
+                  <p className="text-gray-500 text-sm">{MESSAGES.knowledge.noPresetTags}</p>
                 )}
               </div>
             </div>

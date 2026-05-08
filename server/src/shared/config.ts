@@ -22,5 +22,15 @@ const envSchema = z.object({
 export type ServerConfig = z.infer<typeof envSchema>;
 
 export function loadServerConfig(): ServerConfig {
-  return envSchema.parse(process.env);
+  const config = envSchema.parse(process.env);
+
+  if (config.PROVIDER_SECRET_KEY === 'table-dev-provider-secret-key-change-me') {
+    console.error('[SECURITY] PROVIDER_SECRET_KEY is using the default value. Set a strong secret in production.');
+  }
+
+  if (config.ALLOW_DEFAULT_USER_FALLBACK && config.DEFAULT_USER_ID === '00000000-0000-0000-0000-000000000001') {
+    console.error('[SECURITY] DEFAULT_USER_ID is using the publicly known default UUID with fallback enabled. This is insecure for production.');
+  }
+
+  return config;
 }
