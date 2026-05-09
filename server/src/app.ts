@@ -82,9 +82,10 @@ export function createApp() {
     app.log.error(error);
 
     if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 409) {
+      const message = 'message' in error && typeof error.message === 'string' ? error.message : undefined;
       return reply.code(409).send({
         error: 'VERSION_CONFLICT',
-        message: error.message || 'Resource was modified by another request. Please refresh and try again.',
+        message: message || 'Resource was modified by another request. Please refresh and try again.',
       });
     }
 

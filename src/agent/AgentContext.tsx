@@ -4,9 +4,9 @@ import { API_CONFIG_CHANGED_EVENT, getPreferredAgentModel } from '../lib/apiConf
 import {
   type AgentRunDetailDto,
   confirmAgentToolExecution,
+  createAgentRun,
   fetchAgentRuntimeStatus,
   rejectAgentToolExecution,
-  streamAgentRun,
 } from '../lib/agentApi';
 import { MESSAGES } from '../core/messages';
 
@@ -325,19 +325,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      const run = await streamAgentRun({
+      const run = await createAgentRun({
         inputText: content,
         model: state.selectedModel,
         initialMessages: state.messages.map((message) => ({
           role: message.role,
           content: message.content,
         })),
-      }, {
-        onEvent: (event) => {
-          if (event.type === 'status' && event.status === 'running') {
-            updateAssistantMessage({ status: 'streaming' });
-          }
-        },
       });
 
       requestState.toolCalls = run.toolExecutions.map((execution) => ({

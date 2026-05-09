@@ -5,7 +5,7 @@ declare global {
   var __tablePrisma__: PrismaClient | undefined;
 }
 
-const prismaOptions = {
+const prismaOptions: { log: Array<'error' | 'warn'> } = {
   log: ['error', 'warn'],
 };
 

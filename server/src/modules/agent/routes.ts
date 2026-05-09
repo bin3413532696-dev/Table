@@ -75,17 +75,18 @@ export async function agentRoutes(app: FastifyInstance) {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
       });
 
       const sendEvent = (event: string, data: unknown) => {
         if (connectionClosed) {
           throw new Error('Client disconnected');
         }
-        reply.raw.write(`event: ${event}\n`);
-        reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
+        const eventData = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+        reply.raw.write(eventData);
       };
 
-      await streamAgentRunRecord(payload, (event) => {
+      const result = await streamAgentRunRecord(payload, (event) => {
         sendEvent(event.type, event);
       });
 
@@ -101,8 +102,7 @@ export async function agentRoutes(app: FastifyInstance) {
 
       if (!connectionClosed) {
         try {
-          reply.raw.write(`event: error\n`);
-          reply.raw.write(`data: ${JSON.stringify({
+          reply.raw.write(`event: error\ndata: ${JSON.stringify({
             message: error instanceof Error ? error.message : 'Unknown error',
           })}\n\n`);
           reply.raw.end();

@@ -600,10 +600,13 @@ async function streamProviderCompletion(
   runId: string,
   emit: StreamEventEmitter
 ): Promise<string> {
-  const response = await fetch(getProviderChatUrl(provider), {
+  const url = getProviderChatUrl(provider);
+  const body = buildStreamRequestBody(provider, messages, model);
+
+  const response = await fetch(url, {
     method: 'POST',
     headers: buildProviderHeaders(provider),
-    body: JSON.stringify(buildStreamRequestBody(provider, messages, model)),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -908,6 +911,7 @@ export async function executeAgentRunWithStream(
   const baseMessages = buildBaseMessages(input, model);
 
   const firstResponse = await streamProviderCompletion(provider, baseMessages, model, input.runId, emit);
+
   const firstParsed = parseToolCalls(firstResponse);
 
   if (firstParsed.toolCalls.length === 0) {
