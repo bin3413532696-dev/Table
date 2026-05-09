@@ -117,6 +117,7 @@ model UserSetting {
   notification_json    Json     @default("{}")
   securityPinHash      String?  @map("security_pin_hash")
   agentPreferencesJson Json     @default("{}") @map("agent_preferences_json")
+  providerConfigHash   String?  @map("provider_config_hash")
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   version              Int      @default(1)
@@ -135,6 +136,7 @@ model ApiProvider {
   model           String?
   headersJson     Json      @default("{}") @map("headers_json")
   isActive        Boolean   @default(false) @map("is_active")
+  source          String    @default("manual") @map("source")
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)

@@ -19,6 +19,7 @@ export type ProviderDto = {
   isActive: boolean;
   hasApiKey: boolean;
   apiKeyPreview: string;
+  source: 'bootstrap' | 'manual';
   createdAt: string;
   updatedAt: string;
   version: number;
@@ -53,6 +54,7 @@ function toProviderDto(provider: {
   model: string | null;
   headersJson: unknown;
   isActive: boolean;
+  source: string;
   createdAt: Date;
   updatedAt: Date;
   version: number;
@@ -69,6 +71,7 @@ function toProviderDto(provider: {
     isActive: provider.isActive,
     hasApiKey: hasProviderSecret(provider.apiKeyEncrypted),
     apiKeyPreview: maskProviderSecret(provider.apiKeyEncrypted),
+    source: provider.source as 'bootstrap' | 'manual',
     createdAt: provider.createdAt.toISOString(),
     updatedAt: provider.updatedAt.toISOString(),
     version: provider.version,
@@ -171,6 +174,7 @@ export async function createProviderForCurrentUser(input: CreateProviderInput) {
         model: normalizeOptionalString(input.model),
         headersJson: input.headers,
         isActive: shouldActivate,
+        source: input.source ?? 'manual',
       },
     });
   });

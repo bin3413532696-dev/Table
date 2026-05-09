@@ -15,6 +15,7 @@ export const createProviderSchema = z.object({
   model: z.string().trim().max(200).optional().default(''),
   headers: z.record(z.string(), z.string()).optional().default({}),
   isActive: z.boolean().optional().default(false),
+  source: z.enum(['bootstrap', 'manual']).optional().default('manual'),
 });
 
 export const updateProviderSchema = z.object({

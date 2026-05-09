@@ -1,7 +1,8 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db/client';
-import { createProviderForCurrentUser, listProvidersForCurrentUser } from '../modules/providers/service';
+import { createProviderForCurrentUser, listProvidersForCurrentUser, updateProviderForCurrentUser } from '../modules/providers/service';
 import {
   DEV_SESSION_COOKIE,
   type ServerUserContext,
@@ -15,6 +16,10 @@ import { loadServerConfig } from './config';
 const userIdSchema = z.string().uuid();
 const baselineReadyUsers = new Set<string>();
 const baselineInFlight = new Map<string, Promise<void>>();
+
+function computeProviderConfigHash(baseUrl: string, apiKey: string, model: string): string {
+  return createHash('sha256').update(`${baseUrl}|${apiKey}|${model}`).digest('hex').slice(0, 16);
+}
 
 export class AuthError extends Error {
   constructor(
@@ -77,6 +82,13 @@ async function ensureUserRecordExists(context: ServerUserContext) {
 }
 
 async function ensureUserBaseline(context: ServerUserContext) {
+  const config = loadServerConfig();
+  const currentEnvHash = computeProviderConfigHash(
+    config.DEFAULT_PROVIDER_BASE_URL,
+    config.DEFAULT_PROVIDER_API_KEY,
+    config.DEFAULT_PROVIDER_MODEL
+  );
+
   const existingSettings = await prisma.userSetting.findUnique({
     where: {
       userId: context.userId,
@@ -91,16 +103,37 @@ async function ensureUserBaseline(context: ServerUserContext) {
         profile_json: {},
         notification_json: {},
         agentPreferencesJson: {},
+        providerConfigHash: currentEnvHash,
       },
     });
   }
 
   const existingProviders = await listProvidersForCurrentUser();
+  const bootstrapProvider = existingProviders.find(p => p.source === 'bootstrap');
   const shouldBootstrapWorkspace =
     !existingSettings &&
     existingProviders.length === 0;
 
-  if (shouldBootstrapWorkspace) {
+  // 检测 .env 配置变更，自动同步 bootstrap Provider
+  if (bootstrapProvider && existingSettings) {
+    const storedHash = existingSettings.providerConfigHash;
+    if (storedHash !== currentEnvHash && config.DEFAULT_PROVIDER_BASE_URL.trim()) {
+      // 配置变更，需要同步更新 bootstrap Provider
+      await updateProviderForCurrentUser(bootstrapProvider.id, {
+        name: config.DEFAULT_PROVIDER_NAME,
+        apiFormat: config.DEFAULT_PROVIDER_FORMAT,
+        baseUrl: config.DEFAULT_PROVIDER_BASE_URL,
+        apiKey: config.DEFAULT_PROVIDER_API_KEY,
+        model: config.DEFAULT_PROVIDER_MODEL,
+      });
+
+      // 更新哈希
+      await prisma.userSetting.update({
+        where: { userId: context.userId },
+        data: { providerConfigHash: currentEnvHash },
+      });
+    }
+  } else if (shouldBootstrapWorkspace) {
     const config = loadServerConfig();
     if (config.DEFAULT_PROVIDER_BASE_URL.trim()) {
       await createProviderForCurrentUser({
@@ -111,11 +144,18 @@ async function ensureUserBaseline(context: ServerUserContext) {
         model: config.DEFAULT_PROVIDER_MODEL,
         headers: {},
         isActive: true,
+        source: 'bootstrap',
       });
     }
   }
 
   if (shouldBootstrapWorkspace) {
+    // 更新 bootstrap Provider 的哈希（如果刚创建）
+    await prisma.userSetting.update({
+      where: { userId: context.userId },
+      data: { providerConfigHash: currentEnvHash },
+    });
+
     const [taskCount, financeCount] = await Promise.all([
       prisma.task.count({
         where: {
