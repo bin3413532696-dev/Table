@@ -29,7 +29,7 @@ export async function updateFinanceRecordEntry(id: string, input: UpdateFinanceR
     return null;
   }
   const record = await updateFinanceRecord(id, input);
-  return toFinanceRecordDto(record);
+  return record ? toFinanceRecordDto(record) : null;
 }
 
 export async function deleteFinanceRecordEntry(id: string) {

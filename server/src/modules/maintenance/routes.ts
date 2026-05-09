@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { AuthError } from '../../shared/auth';
+import { resolveRequestUserContext, getDefaultUserId } from '../../shared/user-context';
 import { sendInfrastructureError } from '../../shared/http';
 import { exportBusinessSnapshot, importBusinessSnapshot, resetWorkspaceData } from './service';
 
@@ -33,7 +35,22 @@ export async function maintenanceRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/reset', { config: { rateLimit: { max: 3, timeWindow: '1 minute' } } }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/reset', {
+    config: {
+      rateLimit: {
+        max: 1,
+        timeWindow: '10 minutes',
+      },
+    },
+    preHandler: [
+      async (request: FastifyRequest, reply: FastifyReply) => {
+        const context = resolveRequestUserContext(request);
+        if (context.userId !== getDefaultUserId()) {
+          throw new AuthError('Only default user can reset workspace', 403, 'FORBIDDEN');
+        }
+      },
+    ],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const payload = resetScopeSchema.parse(request.body ?? {});
       const result = await resetWorkspaceData(payload.scope);

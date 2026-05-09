@@ -222,42 +222,54 @@ export async function updateAgentRun(id: string, input: UpdateAgentRunInput) {
 }
 
 export async function createToolExecution(runId: string, input: CreateToolExecutionInput) {
-  return prisma.$transaction(async (tx) => {
-    const sequence = await getNextToolExecutionSequence(runId, tx);
+  const maxRetries = 3;
 
-    const execution = await tx.toolExecution.create({
-      data: {
-        userId: getCurrentUserId(),
-        runId,
-        toolName: input.toolName,
-        argumentsJson: toJsonValue(input.arguments),
-        status: input.status,
-        requiresConfirmation: input.requiresConfirmation,
-        confirmationRequestedAt: input.confirmationRequestedAt,
-        confirmedAt: input.confirmedAt,
-        resultJson: input.result ? toJsonValue(input.result) : undefined,
-        errorMessage: input.errorMessage ?? undefined,
-        sequence,
-      },
-    });
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const sequence = await getNextToolExecutionSequence(runId, tx);
 
-    if (input.requiresConfirmation || input.status === 'waiting_confirmation') {
-      await tx.agentRun.update({
-        where: {
-          id: runId,
-        },
-        data: {
-          status: 'waiting_confirmation',
-          requiresConfirmation: true,
-          version: {
-            increment: 1,
+        const execution = await tx.toolExecution.create({
+          data: {
+            userId: getCurrentUserId(),
+            runId,
+            toolName: input.toolName,
+            argumentsJson: toJsonValue(input.arguments),
+            status: input.status,
+            requiresConfirmation: input.requiresConfirmation,
+            confirmationRequestedAt: input.confirmationRequestedAt,
+            confirmedAt: input.confirmedAt,
+            resultJson: input.result ? toJsonValue(input.result) : undefined,
+            errorMessage: input.errorMessage ?? undefined,
+            sequence,
           },
-        },
-      });
-    }
+        });
 
-    return execution;
-  });
+        if (input.requiresConfirmation || input.status === 'waiting_confirmation') {
+          await tx.agentRun.update({
+            where: {
+              id: runId,
+            },
+            data: {
+              status: 'waiting_confirmation',
+              requiresConfirmation: true,
+              version: {
+                increment: 1,
+              },
+            },
+          });
+        }
+
+        return execution;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'U2005' && attempt < maxRetries - 1) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('Failed to create tool execution after max retries');
 }
 
 export async function updateToolExecution(

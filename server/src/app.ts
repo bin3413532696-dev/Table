@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { authRoutes } from './modules/auth/routes';
 import { healthRoutes } from './modules/health/routes';
@@ -14,6 +15,13 @@ import { sendInfrastructureError } from './shared/http';
 export function createApp() {
   const app = Fastify({
     logger: true,
+  });
+
+  app.register(cors, {
+    origin: process.env.NODE_ENV === 'production'
+      ? false
+      : ['http://localhost:3266', 'http://127.0.0.1:3266'],
+    credentials: true,
   });
 
   app.register(rateLimit, {

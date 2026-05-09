@@ -39,8 +39,20 @@ export async function findFinanceRecordById(id: string) {
 }
 
 export async function updateFinanceRecord(id: string, input: UpdateFinanceRecordInput) {
+  const existing = await prisma.financeRecord.findFirst({
+    where: {
+      id,
+      userId: getCurrentUserId(),
+      deletedAt: null,
+    },
+  });
+
+  if (!existing) {
+    return null;
+  }
+
   return prisma.financeRecord.update({
-    where: { id, ...(input.version !== undefined ? { version: input.version } : {}) },
+    where: { id, version: existing.version },
     data: {
       ...(input.type !== undefined ? { type: input.type } : {}),
       ...(input.amount !== undefined ? { amount: input.amount } : {}),

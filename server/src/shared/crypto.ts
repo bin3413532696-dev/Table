@@ -43,24 +43,31 @@ export function decryptProviderSecret(value: string | null | undefined): string 
     return normalized;
   }
 
-  const [, ivBase64, authTagBase64, encryptedBase64] = normalized.split(':');
-  if (!ivBase64 || !authTagBase64 || !encryptedBase64) {
-    throw new Error('Invalid encrypted provider secret payload');
+  try {
+    const [, ivBase64, authTagBase64, encryptedBase64] = normalized.split(':');
+    if (!ivBase64 || !authTagBase64 || !encryptedBase64) {
+      console.warn('[CRYPTO] Invalid encrypted provider secret payload format');
+      return '';
+    }
+
+    const iv = Buffer.from(ivBase64, 'base64');
+    const authTag = Buffer.from(authTagBase64, 'base64');
+    const encrypted = Buffer.from(encryptedBase64, 'base64');
+
+    if (iv.length !== IV_LENGTH || authTag.length !== AUTH_TAG_LENGTH) {
+      console.warn('[CRYPTO] Invalid encrypted provider secret metadata length');
+      return '';
+    }
+
+    const decipher = createDecipheriv(ALGORITHM, getProviderKeyMaterial(), iv);
+    decipher.setAuthTag(authTag);
+
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decrypted.toString('utf8');
+  } catch (error) {
+    console.warn('[CRYPTO] Failed to decrypt provider secret - data may be encrypted with old key:', error instanceof Error ? error.message : 'Unknown error');
+    return '';
   }
-
-  const iv = Buffer.from(ivBase64, 'base64');
-  const authTag = Buffer.from(authTagBase64, 'base64');
-  const encrypted = Buffer.from(encryptedBase64, 'base64');
-
-  if (iv.length !== IV_LENGTH || authTag.length !== AUTH_TAG_LENGTH) {
-    throw new Error('Invalid encrypted provider secret metadata');
-  }
-
-  const decipher = createDecipheriv(ALGORITHM, getProviderKeyMaterial(), iv);
-  decipher.setAuthTag(authTag);
-
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-  return decrypted.toString('utf8');
 }
 
 export function maskProviderSecret(value: string | null | undefined): string {

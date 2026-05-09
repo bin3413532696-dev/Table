@@ -314,7 +314,14 @@ export async function authRoutes(app: FastifyInstance) {
     pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
   });
 
-  app.post('/pin/verify', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (request, reply) => {
+  app.post('/pin/verify', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '5 minutes',
+      },
+    },
+  }, async (request, reply) => {
     const context = getCurrentUserContext();
     const payload = verifyPinSchema.parse(request.body);
 
