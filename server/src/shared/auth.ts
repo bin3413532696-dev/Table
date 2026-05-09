@@ -110,16 +110,21 @@ async function ensureUserBaseline(context: ServerUserContext) {
 
   const existingProviders = await listProvidersForCurrentUser();
   const bootstrapProvider = existingProviders.find(p => p.source === 'bootstrap');
+  // 兼容旧数据：如果没有 bootstrap provider 但有一个 provider 且用户没有手动创建过，使用它
+  const legacyProvider = !bootstrapProvider && existingProviders.length === 1 ? existingProviders[0] : null;
+  // 如果没有任何 provider，需要创建一个（无论 settings 是否已存在）
+  const needsNewProvider = existingProviders.length === 0;
   const shouldBootstrapWorkspace =
     !existingSettings &&
     existingProviders.length === 0;
 
-  // 检测 .env 配置变更，自动同步 bootstrap Provider
-  if (bootstrapProvider && existingSettings) {
+  // 检测 .env 配置变更，自动同步 bootstrap Provider 或 legacy Provider
+  const providerToSync = bootstrapProvider || legacyProvider;
+  if (providerToSync && existingSettings) {
     const storedHash = existingSettings.providerConfigHash;
     if (storedHash !== currentEnvHash && config.DEFAULT_PROVIDER_BASE_URL.trim()) {
-      // 配置变更，需要同步更新 bootstrap Provider
-      await updateProviderForCurrentUser(bootstrapProvider.id, {
+      // 配置变更，需要同步更新 Provider
+      await updateProviderForCurrentUser(providerToSync.id, {
         name: config.DEFAULT_PROVIDER_NAME,
         apiFormat: config.DEFAULT_PROVIDER_FORMAT,
         baseUrl: config.DEFAULT_PROVIDER_BASE_URL,
@@ -146,6 +151,31 @@ async function ensureUserBaseline(context: ServerUserContext) {
         isActive: true,
         source: 'bootstrap',
       });
+    }
+  }
+
+  // 如果没有任何 provider，创建一个（用于已存在 settings 的旧用户）
+  if (needsNewProvider && !bootstrapProvider && !legacyProvider) {
+    const config = loadServerConfig();
+    if (config.DEFAULT_PROVIDER_BASE_URL.trim()) {
+      await createProviderForCurrentUser({
+        name: config.DEFAULT_PROVIDER_NAME,
+        apiFormat: config.DEFAULT_PROVIDER_FORMAT,
+        baseUrl: config.DEFAULT_PROVIDER_BASE_URL,
+        apiKey: config.DEFAULT_PROVIDER_API_KEY,
+        model: config.DEFAULT_PROVIDER_MODEL,
+        headers: {},
+        isActive: true,
+        source: 'bootstrap',
+      });
+
+      // 如果 settings 存在但没有 hash，更新它
+      if (existingSettings && !existingSettings.providerConfigHash) {
+        await prisma.userSetting.update({
+          where: { userId: context.userId },
+          data: { providerConfigHash: currentEnvHash },
+        });
+      }
     }
   }
 
