@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../db/client';
 import { provisionUser } from '../../shared/auth';
 import { hashPin as hashPinSecure, verifyPin as verifyPinSecure } from '../../shared/pin';
+import { signSessionToken } from '../../shared/session';
 import {
   DEV_SESSION_COOKIE,
   getCurrentUserContext,
@@ -244,10 +245,11 @@ export async function authRoutes(app: FastifyInstance) {
       });
     }
 
+    const token = signSessionToken(payload.userId, 86400);
     const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
     reply.header(
       'Set-Cookie',
-      `${DEV_SESSION_COOKIE}=${encodeURIComponent(payload.userId)}; Path=/; HttpOnly; SameSite=Lax${secureFlag}`
+      `${DEV_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secureFlag}`
     );
 
     return {
@@ -255,7 +257,7 @@ export async function authRoutes(app: FastifyInstance) {
         user: toAuthUser(user),
         auth: {
           userIdHeader: USER_ID_HEADER,
-          source: 'session' as const,
+          source: 'signed_session' as const,
           isDefaultUser: payload.userId === getDefaultUserId(),
           devSessionCookie: DEV_SESSION_COOKIE,
         },
@@ -335,6 +337,15 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     const isValid = verifyPinSecure(payload.pin, settings.securityPinHash);
+    if (isValid) {
+      const token = signSessionToken(context.userId, 86400);
+      const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+      reply.header(
+        'Set-Cookie',
+        `${DEV_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secureFlag}`
+      );
+    }
+
     return { valid: isValid };
   });
 

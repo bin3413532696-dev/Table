@@ -14,6 +14,7 @@ import {
 import { loadServerConfig } from './config';
 
 const userIdSchema = z.string().uuid();
+// Intentionally never cleaned: entries persist for server lifetime to avoid redundant baseline checks.
 const baselineReadyUsers = new Set<string>();
 const baselineInFlight = new Map<string, Promise<void>>();
 

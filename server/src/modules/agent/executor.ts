@@ -35,6 +35,7 @@ type ToolDefinition = {
 export type StreamEventEmitter = (event: AgentRunStreamEvent) => Promise<void> | void;
 
 const MAX_AGENT_EXECUTION_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS) || 5;
+const FETCH_TIMEOUT_MS = 120_000;
 
 export interface PendingConfirmationSnapshot {
   kind: 'pending_confirmation';
@@ -527,8 +528,15 @@ function getCachedResult(toolName: string, args: Record<string, unknown>): unkno
 }
 
 function setCachedResult(toolName: string, args: Record<string, unknown>, result: unknown): void {
+  const now = Date.now();
+  for (const [key, entry] of queryCache) {
+    if (entry.expiresAt <= now) {
+      queryCache.delete(key);
+    }
+  }
+
   const key = getCacheKey(toolName, args);
-  queryCache.set(key, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+  queryCache.set(key, { result, expiresAt: now + CACHE_TTL_MS });
 }
 
 async function executeToolCall(toolCall: ToolCall): Promise<ExecutedToolCall> {
@@ -567,12 +575,14 @@ function getToolDefinition(toolName: string) {
 async function requestProviderCompletion(
   provider: AgentProviderInput,
   messages: AgentConversationMessage[],
-  model: string
+  model: string,
+  signal?: AbortSignal
 ) {
   const response = await fetch(getProviderChatUrl(provider), {
     method: 'POST',
     headers: buildProviderHeaders(provider),
     body: JSON.stringify(buildProviderRequestBody(provider, messages, model)),
+    signal,
   });
 
   if (!response.ok) {
@@ -598,7 +608,8 @@ async function streamProviderCompletion(
   messages: AgentConversationMessage[],
   model: string,
   runId: string,
-  emit: StreamEventEmitter
+  emit: StreamEventEmitter,
+  signal?: AbortSignal
 ): Promise<string> {
   const url = getProviderChatUrl(provider);
   const body = buildStreamRequestBody(provider, messages, model);
@@ -607,6 +618,7 @@ async function streamProviderCompletion(
     method: 'POST',
     headers: buildProviderHeaders(provider),
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
@@ -623,28 +635,35 @@ async function streamProviderCompletion(
   let buffer = '';
   let fullText = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed === 'data: [DONE]') {
-        continue;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
       }
 
-      const chunk = extractStreamChunk(provider, trimmed);
-      if (chunk) {
-        fullText += chunk;
-        await emit({ type: 'text_chunk', runId, text: chunk });
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed === 'data: [DONE]') {
+          continue;
+        }
+
+        const chunk = extractStreamChunk(provider, trimmed);
+        if (chunk) {
+          fullText += chunk;
+          await emit({ type: 'text_chunk', runId, text: chunk });
+        }
       }
     }
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('Provider response timed out (120s)');
+    }
+    throw error;
   }
 
   if (buffer.trim()) {
@@ -723,6 +742,7 @@ async function continueExecutionLoop(input: {
   assistantText: string;
   executedToolCalls: ExecutedToolCall[];
   remainingToolCalls: ToolCall[];
+  signal?: AbortSignal;
 }): Promise<AgentExecutionOutcome> {
   let assistantText = input.assistantText;
   let executedToolCalls = [...input.executedToolCalls];
@@ -737,7 +757,8 @@ async function continueExecutionLoop(input: {
           ...(assistantText ? [{ role: 'assistant' as const, content: assistantText }] : []),
           { role: 'user', content: buildNoMoreToolPrompt(executedToolCalls) },
         ],
-        input.model
+        input.model,
+        input.signal
       );
 
       const parsed = parseToolCalls(response);
@@ -807,30 +828,38 @@ export async function executeAgentRun(input: CreateAgentRunInput): Promise<Agent
     throw new Error('缺少激活的 Provider 配置，暂时无法由后端执行智能体。');
   }
 
-  const model = input.model === 'default' ? (provider.model || 'default') : input.model;
-  const baseMessages = buildBaseMessages(input, model);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  const firstResponse = await requestProviderCompletion(provider, baseMessages, model);
-  const firstParsed = parseToolCalls(firstResponse);
+  try {
+    const model = input.model === 'default' ? (provider.model || 'default') : input.model;
+    const baseMessages = buildBaseMessages(input, model);
 
-  if (firstParsed.toolCalls.length === 0) {
-    return {
-      status: 'completed',
-      finalText: firstParsed.textContent || firstResponse,
-      toolCalls: [],
-    };
+    const firstResponse = await requestProviderCompletion(provider, baseMessages, model, controller.signal);
+    const firstParsed = parseToolCalls(firstResponse);
+
+    if (firstParsed.toolCalls.length === 0) {
+      return {
+        status: 'completed',
+        finalText: firstParsed.textContent || firstResponse,
+        toolCalls: [],
+      };
+    }
+
+    return continueExecutionLoop({
+      provider,
+      model,
+      baseMessages,
+      inputText: input.inputText,
+      initialMessages: input.initialMessages,
+      assistantText: firstParsed.textContent || '',
+      executedToolCalls: [],
+      remainingToolCalls: firstParsed.toolCalls,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return continueExecutionLoop({
-    provider,
-    model,
-    baseMessages,
-    inputText: input.inputText,
-    initialMessages: input.initialMessages,
-    assistantText: firstParsed.textContent || '',
-    executedToolCalls: [],
-    remainingToolCalls: firstParsed.toolCalls,
-  });
 }
 
 export async function confirmAgentRunToolExecution(input: {
@@ -854,48 +883,56 @@ export async function confirmAgentRunToolExecution(input: {
       snapshot: PendingConfirmationSnapshot;
     }
 > {
-  const confirmedToolCall = await executeToolCall(input.pendingToolCall);
-  const result = await continueExecutionLoop({
-    provider: input.provider,
-    model: input.snapshot.model,
-    baseMessages: buildBaseMessages(
-      {
-        inputText: input.snapshot.inputText,
-        model: input.snapshot.model,
-        provider: input.provider,
-        sessionId: undefined,
-        initialMessages: input.snapshot.initialMessages,
-      },
-      input.snapshot.model
-    ),
-    inputText: input.snapshot.inputText,
-    initialMessages: input.snapshot.initialMessages,
-    assistantText: input.snapshot.assistantText,
-    executedToolCalls: [
-      ...input.snapshot.executedToolCalls,
-      confirmedToolCall,
-    ],
-    remainingToolCalls: input.snapshot.remainingToolCalls,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  if (result.status === 'waiting_confirmation') {
+  try {
+    const confirmedToolCall = await executeToolCall(input.pendingToolCall);
+    const result = await continueExecutionLoop({
+      provider: input.provider,
+      model: input.snapshot.model,
+      baseMessages: buildBaseMessages(
+        {
+          inputText: input.snapshot.inputText,
+          model: input.snapshot.model,
+          provider: input.provider,
+          sessionId: undefined,
+          initialMessages: input.snapshot.initialMessages,
+        },
+        input.snapshot.model
+      ),
+      inputText: input.snapshot.inputText,
+      initialMessages: input.snapshot.initialMessages,
+      assistantText: input.snapshot.assistantText,
+      executedToolCalls: [
+        ...input.snapshot.executedToolCalls,
+        confirmedToolCall,
+      ],
+      remainingToolCalls: input.snapshot.remainingToolCalls,
+      signal: controller.signal,
+    });
+
+    if (result.status === 'waiting_confirmation') {
+      return {
+        status: 'waiting_confirmation',
+        confirmedToolCall,
+        interimText: result.interimText,
+        executedToolCalls: result.executedToolCalls,
+        pendingToolCall: result.pendingToolCall,
+        confirmationMessage: result.confirmationMessage,
+        snapshot: result.snapshot,
+      };
+    }
+
     return {
-      status: 'waiting_confirmation',
+      status: 'completed',
       confirmedToolCall,
-      interimText: result.interimText,
-      executedToolCalls: result.executedToolCalls,
-      pendingToolCall: result.pendingToolCall,
-      confirmationMessage: result.confirmationMessage,
-      snapshot: result.snapshot,
+      finalText: result.finalText,
+      toolCalls: result.toolCalls,
     };
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return {
-    status: 'completed',
-    confirmedToolCall,
-    finalText: result.finalText,
-    toolCalls: result.toolCalls,
-  };
 }
 
 export async function executeAgentRunWithStream(
@@ -910,30 +947,38 @@ export async function executeAgentRunWithStream(
   const model = input.model === 'default' ? (provider.model || 'default') : input.model;
   const baseMessages = buildBaseMessages(input, model);
 
-  const firstResponse = await streamProviderCompletion(provider, baseMessages, model, input.runId, emit);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
-  const firstParsed = parseToolCalls(firstResponse);
+  try {
+    const firstResponse = await streamProviderCompletion(provider, baseMessages, model, input.runId, emit, controller.signal);
 
-  if (firstParsed.toolCalls.length === 0) {
-    return {
-      status: 'completed',
-      finalText: firstParsed.textContent || firstResponse,
-      toolCalls: [],
-    };
+    const firstParsed = parseToolCalls(firstResponse);
+
+    if (firstParsed.toolCalls.length === 0) {
+      return {
+        status: 'completed',
+        finalText: firstParsed.textContent || firstResponse,
+        toolCalls: [],
+      };
+    }
+
+    return continueExecutionLoopWithStream({
+      provider,
+      model,
+      baseMessages,
+      inputText: input.inputText,
+      initialMessages: input.initialMessages,
+      assistantText: firstParsed.textContent || '',
+      executedToolCalls: [],
+      remainingToolCalls: firstParsed.toolCalls,
+      runId: input.runId,
+      emit,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return continueExecutionLoopWithStream({
-    provider,
-    model,
-    baseMessages,
-    inputText: input.inputText,
-    initialMessages: input.initialMessages,
-    assistantText: firstParsed.textContent || '',
-    executedToolCalls: [],
-    remainingToolCalls: firstParsed.toolCalls,
-    runId: input.runId,
-    emit,
-  });
 }
 
 async function continueExecutionLoopWithStream(input: {
@@ -947,6 +992,7 @@ async function continueExecutionLoopWithStream(input: {
   remainingToolCalls: ToolCall[];
   runId: string;
   emit: StreamEventEmitter;
+  signal?: AbortSignal;
 }): Promise<AgentExecutionOutcome> {
   let assistantText = input.assistantText;
   let executedToolCalls = [...input.executedToolCalls];
@@ -963,7 +1009,8 @@ async function continueExecutionLoopWithStream(input: {
         ],
         input.model,
         input.runId,
-        input.emit
+        input.emit,
+        input.signal
       );
 
       const parsed = parseToolCalls(response);

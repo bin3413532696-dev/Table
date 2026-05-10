@@ -6,20 +6,20 @@ export const taskIdParamSchema = z.object({
 });
 
 export const createTaskSchema = z.object({
-  title: z.string().trim().min(1),
+  title: z.string().trim().min(1).max(200),
   completed: z.boolean().optional(),
   priority: taskPrioritySchema.default('medium'),
-  dueDate: z.string().trim().optional(),
-  notes: z.string().trim().optional(),
+  dueDate: z.string().trim().max(30).optional(),
+  notes: z.string().trim().max(5000).optional(),
 });
 
 export const updateTaskSchema = z.object({
-  title: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).max(200).optional(),
   priority: taskPrioritySchema.optional(),
-  dueDate: z.string().trim().nullable().optional(),
-  notes: z.string().trim().nullable().optional(),
+  dueDate: z.string().trim().max(30).nullable().optional(),
+  notes: z.string().trim().max(5000).nullable().optional(),
   completed: z.boolean().optional(),
-  version: z.number().int().optional(),
+  version: z.number().int().min(1).optional(),
 }).refine((value) => Object.keys(value).filter((k) => k !== 'version').length > 0, {
   message: 'At least one field must be provided',
 });

@@ -87,7 +87,7 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<Kn
   if (!existing) return null;
 
   const note = await prisma.knowledgeNote.update({
-    where: { id },
+    where: { id, userId },
     data: {
       ...(input.title !== undefined ? { title: input.title.trim() } : {}),
       ...(input.content !== undefined ? { content: input.content } : {}),
@@ -108,7 +108,7 @@ export async function deleteNote(id: string): Promise<boolean> {
   if (!existing) return false;
 
   await prisma.knowledgeNote.update({
-    where: { id },
+    where: { id, userId },
     data: { deletedAt: new Date() },
   });
 
@@ -288,7 +288,7 @@ export async function updatePresetTag(id: string, input: UpdatePresetTagInput): 
   if (!existing) return null;
 
   const tag = await prisma.knowledgePresetTag.update({
-    where: { id },
+    where: { id, userId },
     data: {
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
       ...(input.color !== undefined ? { color: input.color } : {}),
@@ -309,7 +309,7 @@ export async function deletePresetTag(id: string): Promise<boolean> {
   if (!existing) return false;
 
   await prisma.knowledgePresetTag.delete({
-    where: { id },
+    where: { id, userId },
   });
 
   return true;

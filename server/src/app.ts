@@ -27,7 +27,6 @@ export function createApp() {
   app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute',
-    allowList: ['127.0.0.1', '::1'],
   });
 
   app.addHook('onRequest', (request, reply, done) => {

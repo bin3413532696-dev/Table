@@ -6,17 +6,32 @@ import { sendInfrastructureError } from '../../shared/http';
 import { exportBusinessSnapshot, importBusinessSnapshot, resetWorkspaceData } from './service';
 
 const importSnapshotSchema = z.object({
-  version: z.number().optional(),
+  version: z.number().int().min(1).optional(),
   tasks: z.array(z.unknown()).max(10000).optional(),
   finance: z.array(z.unknown()).max(10000).optional(),
+  knowledge: z.object({
+    notes: z.array(z.unknown()).max(10000).optional(),
+    presetTags: z.array(z.unknown()).max(1000).optional(),
+  }).optional(),
 });
 
 const resetScopeSchema = z.object({
   scope: z.enum(['all', 'tasks', 'finance', 'knowledge']).default('all'),
 });
 
+const defaultUserOnly = {
+  preHandler: [
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const context = resolveRequestUserContext(request);
+      if (context.userId !== getDefaultUserId()) {
+        throw new AuthError('Only default user can access maintenance operations', 403, 'FORBIDDEN');
+      }
+    },
+  ],
+};
+
 export async function maintenanceRoutes(app: FastifyInstance) {
-  app.get('/business-snapshot', async (_request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/business-snapshot', defaultUserOnly, async (_request: FastifyRequest, reply: FastifyReply) => {
     try {
       const result = await exportBusinessSnapshot();
       return reply.code(200).send(result);
@@ -25,7 +40,15 @@ export async function maintenanceRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/business-snapshot', async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/business-snapshot', {
+    config: {
+      rateLimit: {
+        max: 1,
+        timeWindow: '1 minute',
+      },
+    },
+    ...defaultUserOnly,
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const payload = importSnapshotSchema.parse(request.body);
       const result = await importBusinessSnapshot(payload);
@@ -39,17 +62,10 @@ export async function maintenanceRoutes(app: FastifyInstance) {
     config: {
       rateLimit: {
         max: 1,
-        timeWindow: '10 minutes',
+        timeWindow: '1 minute',
       },
     },
-    preHandler: [
-      async (request: FastifyRequest, reply: FastifyReply) => {
-        const context = resolveRequestUserContext(request);
-        if (context.userId !== getDefaultUserId()) {
-          throw new AuthError('Only default user can reset workspace', 403, 'FORBIDDEN');
-        }
-      },
-    ],
+    ...defaultUserOnly,
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const payload = resetScopeSchema.parse(request.body ?? {});

@@ -52,7 +52,7 @@ export async function updateFinanceRecord(id: string, input: UpdateFinanceRecord
   }
 
   return prisma.financeRecord.update({
-    where: { id, version: existing.version },
+    where: { id, userId: getCurrentUserId(), version: existing.version },
     data: {
       ...(input.type !== undefined ? { type: input.type } : {}),
       ...(input.amount !== undefined ? { amount: input.amount } : {}),
@@ -71,7 +71,7 @@ export async function updateFinanceRecord(id: string, input: UpdateFinanceRecord
 
 export async function softDeleteFinanceRecord(id: string) {
   return prisma.financeRecord.update({
-    where: { id },
+    where: { id, userId: getCurrentUserId() },
     data: {
       deletedAt: new Date(),
       version: {

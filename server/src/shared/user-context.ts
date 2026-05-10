@@ -1,13 +1,14 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { FastifyRequest } from 'fastify';
 import { loadServerConfig } from './config';
+import { verifySessionToken, isSignedToken } from './session';
 
 export const USER_ID_HEADER = 'x-user-id';
 export const DEV_SESSION_COOKIE = 'table_dev_session_user_id';
 
 export type ServerUserContext = {
   userId: string;
-  source: 'default' | 'header' | 'session' | 'missing';
+  source: 'default' | 'header' | 'session' | 'signed_session' | 'missing';
 };
 
 const userContextStorage = new AsyncLocalStorage<ServerUserContext>();
@@ -45,24 +46,32 @@ function readCookieValue(request: FastifyRequest, cookieName: string): string | 
 }
 
 export function resolveRequestUserContext(request: FastifyRequest): ServerUserContext {
+  const config = loadServerConfig();
+
+  // 1. 检查签名 Cookie（最高优先级）
+  const cookieValue = readCookieValue(request, DEV_SESSION_COOKIE);
+  if (cookieValue && isSignedToken(cookieValue)) {
+    const verifiedUserId = verifySessionToken(cookieValue);
+    if (verifiedUserId) {
+      return { userId: verifiedUserId, source: 'signed_session' };
+    }
+    // 签名无效或过期，继续尝试其他方式
+  }
+
+  // 2. 检查 x-user-id 头（受 TRUST_USER_ID_HEADER 控制）
   const headerValue = request.headers[USER_ID_HEADER];
   const hasHeader = typeof headerValue === 'string' && headerValue.trim().length > 0;
-  const sessionUserId = hasHeader ? null : readCookieValue(request, DEV_SESSION_COOKIE);
-  const hasSession = typeof sessionUserId === 'string' && sessionUserId.trim().length > 0;
-  const userId = hasHeader
-    ? headerValue.trim()
-    : hasSession
-      ? sessionUserId.trim()
-      : getDefaultUserId();
+  if (hasHeader && config.TRUST_USER_ID_HEADER) {
+    return { userId: headerValue.trim(), source: 'header' };
+  }
 
-  return {
-    userId,
-    source: hasHeader
-      ? 'header'
-      : hasSession
-        ? 'session'
-        : 'missing',
-  };
+  // 3. 检查裸 UUID Cookie（未设置 PIN 时的兼容路径）
+  if (cookieValue && !isSignedToken(cookieValue)) {
+    return { userId: cookieValue.trim(), source: 'session' };
+  }
+
+  // 4. 回退到默认用户
+  return { userId: getDefaultUserId(), source: 'missing' };
 }
 
 export function runWithUserContext<T>(context: ServerUserContext, callback: () => T) {

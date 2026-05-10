@@ -73,10 +73,7 @@ export function setCurrentUserId(userId: string) {
 
 export function buildAuthenticatedHeaders(headers?: HeadersInit): Headers {
   const next = new Headers(headers);
-  const currentUserId = getCurrentUserId();
-  if (currentUserId && currentUserId.trim()) {
-    next.set(USER_ID_HEADER, currentUserId);
-  }
+  // 认证通过签名 Cookie 完成，不再需要 x-user-id 头
   return next;
 }
 

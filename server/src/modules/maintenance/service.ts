@@ -2,6 +2,73 @@ import { prisma } from '../../db/client';
 import { getCurrentUserId } from '../../shared/user-context';
 import { toBusinessSnapshotDto } from './dto';
 
+type ImportedNote = {
+  title?: string;
+  content?: string;
+  tags?: string[];
+  createdAt?: number;
+  updatedAt?: number;
+};
+
+type ImportedPresetTag = {
+  name?: string;
+  color?: string;
+  sortOrder?: number;
+};
+
+type ImportedKnowledge = {
+  notes?: ImportedNote[];
+  presetTags?: ImportedPresetTag[];
+};
+
+function normalizeImportedNotes(value: unknown): ImportedNote[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is ImportedNote => {
+    if (!item || typeof item !== 'object') {
+      return false;
+    }
+
+    const record = item as ImportedNote;
+    return (
+      typeof record.title === 'string' &&
+      record.title.trim().length > 0
+    );
+  });
+}
+
+function normalizeImportedPresetTags(value: unknown): ImportedPresetTag[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is ImportedPresetTag => {
+    if (!item || typeof item !== 'object') {
+      return false;
+    }
+
+    const record = item as ImportedPresetTag;
+    return (
+      typeof record.name === 'string' &&
+      record.name.trim().length > 0
+    );
+  });
+}
+
+function normalizeImportedKnowledge(value: unknown): { notes: ImportedNote[]; presetTags: ImportedPresetTag[] } {
+  if (!value || typeof value !== 'object') {
+    return { notes: [], presetTags: [] };
+  }
+
+  const knowledge = value as ImportedKnowledge;
+  return {
+    notes: normalizeImportedNotes(knowledge.notes),
+    presetTags: normalizeImportedPresetTags(knowledge.presetTags),
+  };
+}
+
 type ImportedTask = {
   title?: string;
   completed?: boolean;
@@ -92,7 +159,7 @@ function toTimestampDate(value?: number): Date {
 export async function exportBusinessSnapshot() {
   const userId = getCurrentUserId();
 
-  const [tasks, finance] = await Promise.all([
+  const [tasks, finance, notes, presetTags] = await Promise.all([
     prisma.task.findMany({
       where: {
         userId,
@@ -111,11 +178,30 @@ export async function exportBusinessSnapshot() {
         updatedAt: 'desc',
       },
     }),
+    prisma.knowledgeNote.findMany({
+      where: {
+        userId,
+        deletedAt: null,
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+    }),
+    prisma.knowledgePresetTag.findMany({
+      where: {
+        userId,
+      },
+      orderBy: {
+        sortOrder: 'asc',
+      },
+    }),
   ]);
 
   return toBusinessSnapshotDto({
     tasks,
     finance,
+    notes,
+    presetTags,
   });
 }
 
@@ -127,6 +213,14 @@ export async function importBusinessSnapshot(payload: unknown) {
 
   const tasks = normalizeImportedTasks(source.tasks);
   const finance = normalizeImportedFinance(source.finance);
+  const knowledge = normalizeImportedKnowledge(source.knowledge);
+
+  if (tasks.length === 0 && finance.length === 0
+      && knowledge.notes.length === 0 && knowledge.presetTags.length === 0) {
+    throw new Error('Cannot import empty snapshot');
+  }
+
+  const backup = await exportBusinessSnapshot();
 
   await prisma.$transaction(async (tx) => {
     await tx.task.deleteMany({
@@ -139,6 +233,14 @@ export async function importBusinessSnapshot(payload: unknown) {
       where: {
         userId,
       },
+    });
+
+    await tx.knowledgeNote.deleteMany({
+      where: { userId },
+    });
+
+    await tx.knowledgePresetTag.deleteMany({
+      where: { userId },
     });
 
     if (tasks.length > 0) {
@@ -174,13 +276,45 @@ export async function importBusinessSnapshot(payload: unknown) {
         })),
       });
     }
+
+    if (knowledge.notes.length > 0) {
+      const createdAt = Date.now();
+      await tx.knowledgeNote.createMany({
+        data: knowledge.notes.map((note, index) => ({
+          userId,
+          title: note.title!.trim(),
+          content: typeof note.content === 'string' ? note.content : '',
+          tagsJson: Array.isArray(note.tags)
+            ? note.tags.filter((tag): tag is string => typeof tag === 'string')
+            : [],
+          createdAt: toTimestampDate(note.createdAt ?? createdAt + index),
+          updatedAt: toTimestampDate(note.updatedAt ?? createdAt + index),
+        })),
+      });
+    }
+
+    if (knowledge.presetTags.length > 0) {
+      await tx.knowledgePresetTag.createMany({
+        data: knowledge.presetTags.map((tag, index) => ({
+          userId,
+          name: tag.name!.trim(),
+          color: typeof tag.color === 'string' && tag.color.trim().length > 0 ? tag.color.trim() : '#6B7280',
+          sortOrder: typeof tag.sortOrder === 'number' ? tag.sortOrder : index,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })),
+      });
+    }
   });
 
   return {
     success: true,
     importedAt: new Date().toISOString(),
+    backup,
     tasks: tasks.length,
     finance: finance.length,
+    notes: knowledge.notes.length,
+    presetTags: knowledge.presetTags.length,
   };
 }
 

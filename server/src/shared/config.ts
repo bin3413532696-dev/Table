@@ -8,6 +8,7 @@ const envSchema = z.object({
   SERVER_PORT: z.coerce.number().int().positive().default(8787),
   DATABASE_URL: z.string().default('postgresql://postgres:postgres@127.0.0.1:5432/table_dev'),
   ALLOW_DEFAULT_USER_FALLBACK: z.coerce.boolean().default(false),
+  TRUST_USER_ID_HEADER: z.coerce.boolean().default(false),
   DEFAULT_USER_ID: z.string().uuid().default('00000000-0000-0000-0000-000000000001'),
   PROVIDER_SECRET_KEY: z.string().min(16).default('table-dev-provider-secret-key-change-me'),
   DEFAULT_PROVIDER_NAME: z.string().default('GLM-5 Provider'),

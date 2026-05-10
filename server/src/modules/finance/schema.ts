@@ -7,12 +7,12 @@ export const financeIdParamSchema = z.object({
 
 export const createFinanceRecordSchema = z.object({
   type: financeTypeSchema,
-  amount: z.number().nonnegative(),
-  category: z.string().trim().min(1),
-  description: z.string().trim().min(1),
-  date: z.string().trim().min(1).optional(),
-  recordDate: z.string().trim().min(1).optional(),
-  model: z.string().trim().nullable().optional(),
+  amount: z.number().nonnegative().max(999999999.99),
+  category: z.string().trim().min(1).max(100),
+  description: z.string().trim().min(1).max(500),
+  date: z.string().trim().min(1).max(30).optional(),
+  recordDate: z.string().trim().min(1).max(30).optional(),
+  model: z.string().trim().max(100).nullable().optional(),
 }).refine((value) => Boolean(value.date || value.recordDate), {
   message: 'date or recordDate is required',
   path: ['date'],
@@ -20,13 +20,13 @@ export const createFinanceRecordSchema = z.object({
 
 export const updateFinanceRecordSchema = z.object({
   type: financeTypeSchema.optional(),
-  amount: z.number().nonnegative().optional(),
-  category: z.string().trim().min(1).optional(),
-  description: z.string().trim().min(1).optional(),
-  date: z.string().trim().optional(),
-  recordDate: z.string().trim().optional(),
-  model: z.string().trim().nullable().optional(),
-  version: z.number().int().optional(),
+  amount: z.number().nonnegative().max(999999999.99).optional(),
+  category: z.string().trim().min(1).max(100).optional(),
+  description: z.string().trim().min(1).max(500).optional(),
+  date: z.string().trim().min(1).max(30).optional(),
+  recordDate: z.string().trim().min(1).max(30).optional(),
+  model: z.string().trim().max(100).nullable().optional(),
+  version: z.number().int().min(1).optional(),
 }).refine((value) => Object.keys(value).filter((k) => k !== 'version').length > 0, {
   message: 'At least one field must be provided',
 });

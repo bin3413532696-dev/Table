@@ -207,8 +207,10 @@ server/
 │   │   ├── tasks/        # 任务管理模块
 │   │   └── ...
 │   ├── shared/           # 共享工具
-│   │   ├── auth.ts       # 认证中间件
-│   │   ├── config.ts     # 配置加载
+│   │   ├── auth.ts       # 认证中间件与基线初始化
+│   │   ├── config.ts     # 配置加载（环境变量校验）
+│   │   ├── session.ts    # HMAC-SHA256 签名令牌（签发/验证）
+│   │   ├── user-context.ts # 用户上下文解析（AsyncLocalStorage）
 │   │   └── http.ts       # HTTP 工具函数
 │   ├── db/               # 数据库客户端
 │   ├── app.ts            # Fastify 应用配置
@@ -267,27 +269,35 @@ Prisma Client → PostgreSQL
 ```typescript
 // app.ts - 全局认证钩子
 app.addHook('onRequest', (request, reply, done) => {
-if (request.url.startsWith('/api/health')) {
+  if (request.url.startsWith('/api/health')) {
     done();  // 健康检查免认证
     return;
-}
-// 其他请求需要认证
-runAuthenticatedRequest(request, () => {
+  }
+  // 其他请求需要认证
+  runAuthenticatedRequest(request, () => {
     authenticateRequest(request, reply, { ensureBaseline: true })
-    .then(() => done())
-    .catch(done);
-});
+      .then(() => done())
+      .catch(done);
+  });
 });
 ```
 
-**认证流程**：
-1. 客户端请求时携带 Token（通过 HTTP Header）
-2. `onRequest` 钩子拦截所有请求
-3. `authenticateRequest` 验证 Token 有效性
-4. 验证通过后，将用户信息存入 `user-context`
-5. Repository 层通过 `getCurrentUserId()` 获取当前用户
+**用户身份识别流程**（`resolveRequestUserContext`）：
+
+1. 检查签名 Cookie（最高优先级）— 验证 HMAC-SHA256 签名与过期时间
+2. 检查 `x-user-id` 头 — 受 `TRUST_USER_ID_HEADER` 配置控制（默认 `false`）
+3. 检查裸 UUID Cookie — 未设置 PIN 时的兼容路径
+4. 回退到默认用户
+
+**PIN 验证与令牌签发**：
+
+- 用户提交 PIN → 后端用 scrypt 哈希验证
+- 验证通过后签发 HMAC-SHA256 签名 Cookie，格式为 `<userId>.<expiresTimestamp>.<hmacSignature>`
+- Cookie 有效期 24 小时，过期后需重新验证 PIN
+- 前端 `fetchWithAuth` 不再发送 `x-user-id` 头，改为依赖签名 Cookie
 
 **为什么这样设计？**
+- **防冒充**：签名 Cookie 不可篡改，`x-user-id` 头默认不受信任
 - **统一认证**：所有请求经过统一的认证中间件
 - **权限隔离**：每个 Repository 自动过滤当前用户的数据
 - **安全性**：防止越权访问其他用户的数据

@@ -39,7 +39,7 @@ export async function findTaskById(id: string) {
 
 export async function updateTask(id: string, input: UpdateTaskInput) {
   return prisma.task.update({
-    where: { id, ...(input.version !== undefined ? { version: input.version } : {}) },
+    where: { id, userId: getCurrentUserId(), ...(input.version !== undefined ? { version: input.version } : {}) },
     data: {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.priority !== undefined ? { priority: input.priority } : {}),
@@ -57,7 +57,7 @@ export async function updateTask(id: string, input: UpdateTaskInput) {
 
 export async function softDeleteTask(id: string) {
   return prisma.task.update({
-    where: { id },
+    where: { id, userId: getCurrentUserId() },
     data: {
       deletedAt: new Date(),
       version: {
