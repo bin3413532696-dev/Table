@@ -284,8 +284,8 @@ export default function Tools() {
     <div className="p-4 md:p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
       {/* 页面头部 */}
       <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="page-header">
-        <div className="page-header-icon bg-neutral-800 dark:bg-neutral-700">
-          <Wrench className="w-5 h-5 text-white" />
+        <div className="page-header-icon">
+          <Wrench className="w-5 h-5" />
         </div>
         <div>
           <h1 className="page-header-title">工具箱</h1>

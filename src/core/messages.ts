@@ -34,8 +34,8 @@ export const MESSAGES = {
     activateProviderFailed: '激活 Provider 失败',
     deleteProviderFailed: '删除 Provider 失败',
     saveProviderFailed: '保存 Provider 失败',
-    importBusinessSuccess: '业务数据导入成功，页面即将刷新...',
-    importKnowledgeSuccess: '知识库导入成功，页面即将刷新...',
+    importBusinessSuccess: '业务数据导入成功',
+    importKnowledgeSuccess: '知识库导入成功',
     importSettingsSuccess: '本地设置导入成功，页面即将刷新...',
   },
   agent: {

@@ -19,6 +19,22 @@ type BusinessSnapshot = {
   exportedAt: string;
   tasks: Task[];
   finance: FinanceRecord[];
+  knowledge?: {
+    notes?: Array<{
+      id: string;
+      title: string;
+      content: string;
+      tags: string[];
+      createdAt: number;
+      updatedAt: number;
+    }>;
+    presetTags?: Array<{
+      id: string;
+      name: string;
+      color: string;
+      sortOrder: number;
+    }>;
+  };
 };
 
 type ApiErrorResponse = {
@@ -532,18 +548,28 @@ export const dataManager = {
   },
 
   async getStats() {
-    const [finance, tasks] = await Promise.all([
-      financeStore.getAll(),
-      taskStore.getAll(),
+    const [finance, tasks, notes, presetTags] = await Promise.all([
+      financeDB.getAll(),
+      taskDB.getAll(),
+      requestApi<ApiListResponse<{ id: string; title: string; content: string; tags: string[]; createdAt: number; updatedAt: number }>>('/api/knowledge/notes'),
+      requestApi<ApiListResponse<{ id: string; name: string; color: string; sortOrder: number }>>('/api/knowledge/tags/preset'),
     ]);
-    const knowledgeMeta = await requestApi<{ data: { noteCount: number; presetTagCount: number } }>('/api/knowledge/metadata');
+
+    const statsSnapshot = {
+      finance,
+      tasks,
+      knowledge: {
+        notes: notes.items,
+        presetTags: presetTags.items,
+      },
+    };
 
     return {
       finance: finance.length,
       tasks: tasks.length,
-      knowledgeNotes: knowledgeMeta.data?.noteCount || 0,
-      knowledgePresetTags: knowledgeMeta.data?.presetTagCount || 0,
-      totalSize: JSON.stringify({ finance, tasks }).length,
+      knowledgeNotes: notes.items.length,
+      knowledgePresetTags: presetTags.items.length,
+      totalSize: JSON.stringify(statsSnapshot).length,
     };
   },
 

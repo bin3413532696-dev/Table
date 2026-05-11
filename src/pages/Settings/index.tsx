@@ -544,8 +544,13 @@ function DataManager() {
     totalSize: 0,
   });
 
+  const refreshStats = async () => {
+    const nextStats = await dataManager.getStats();
+    setStats(nextStats);
+  };
+
   useEffect(() => {
-    dataManager.getStats().then(setStats);
+    void refreshStats();
   }, []);
 
   const showStatus = (type: 'success' | 'error', message: string) => {
@@ -584,7 +589,8 @@ function DataManager() {
 
   const createImportHandler = (
     importer: (content: string) => Promise<boolean>,
-    successMessage: string
+    successMessage: string,
+    options?: { reloadAfterSuccess?: boolean; refreshStatsAfterSuccess?: boolean }
   ) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -593,8 +599,13 @@ function DataManager() {
       const content = event.target?.result as string;
       const success = await importer(content);
       if (success) {
+        if (options?.refreshStatsAfterSuccess) {
+          await refreshStats();
+        }
         showStatus('success', successMessage);
-        setTimeout(() => window.location.reload(), 1200);
+        if (options?.reloadAfterSuccess) {
+          setTimeout(() => window.location.reload(), 1200);
+        }
       } else {
         showStatus('error', MESSAGES.settings.importFailed);
       }
@@ -613,7 +624,12 @@ function DataManager() {
         dataManager.clearLocalSettings();
       }
       setShowClearConfirm(false);
-      window.location.reload();
+      if (clearMode === 'local') {
+        window.location.reload();
+        return;
+      }
+      await refreshStats();
+      showStatus('success', clearMode === 'all' ? '数据已重置' : '知识库已清空');
     } catch {
       setShowClearConfirm(false);
       showStatus('error', MESSAGES.settings.clearFailed);
@@ -672,7 +688,14 @@ function DataManager() {
             <div className="text-sm font-medium text-text-primary">导入业务数据</div>
             <div className="text-xs text-text-muted">覆盖 PostgreSQL 中的任务与财务测试数据</div>
           </div>
-          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importBusinessData, MESSAGES.settings.importBusinessSuccess)} className="hidden" />
+          <input
+            type="file"
+            accept=".json"
+            onChange={createImportHandler(dataManager.importBusinessData, MESSAGES.settings.importBusinessSuccess, {
+              refreshStatsAfterSuccess: true,
+            })}
+            className="hidden"
+          />
         </label>
       </div>
 
@@ -696,7 +719,14 @@ function DataManager() {
             <div className="text-sm font-medium text-text-primary">导入知识库</div>
             <div className="text-xs text-text-muted">覆盖当前知识库并同步到服务端知识库</div>
           </div>
-          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importKnowledgeData, MESSAGES.settings.importKnowledgeSuccess)} className="hidden" />
+          <input
+            type="file"
+            accept=".json"
+            onChange={createImportHandler(dataManager.importKnowledgeData, MESSAGES.settings.importKnowledgeSuccess, {
+              refreshStatsAfterSuccess: true,
+            })}
+            className="hidden"
+          />
         </label>
       </div>
 
@@ -720,7 +750,14 @@ function DataManager() {
             <div className="text-sm font-medium text-text-primary">导入本地设置</div>
             <div className="text-xs text-text-muted">仅恢复当前浏览器的本地设置项</div>
           </div>
-          <input type="file" accept=".json" onChange={createImportHandler(dataManager.importLocalSettings, MESSAGES.settings.importSettingsSuccess)} className="hidden" />
+          <input
+            type="file"
+            accept=".json"
+            onChange={createImportHandler(dataManager.importLocalSettings, MESSAGES.settings.importSettingsSuccess, {
+              reloadAfterSuccess: true,
+            })}
+            className="hidden"
+          />
         </label>
       </div>
 
