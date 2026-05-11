@@ -97,6 +97,55 @@ ${TOOL_FORMAT}
 3. 用简体中文回复，简洁直接
 4. 结果基于工具返回，勿编造`;
 
+/**
+ * 验证 Provider baseUrl，防止 SSRF 和 API Key 外泄
+ * - 仅允许 HTTPS 协议
+ * - 阻止内网 IP 和云元数据地址
+ */
+function validateProviderUrl(baseUrl: string): void {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw new Error(`Provider baseUrl 格式无效: ${baseUrl}`);
+  }
+
+  // 仅允许 HTTPS 协议
+  if (url.protocol !== 'https:') {
+    throw new Error(`Provider baseUrl 必须使用 HTTPS 协议，当前为: ${url.protocol}`);
+  }
+
+  const hostname = url.hostname.toLowerCase();
+
+  // 阻止 localhost
+  if (hostname === 'localhost' || hostname === 'localhost.localdomain') {
+    throw new Error('Provider baseUrl 不允许指向 localhost');
+  }
+
+  // 阻止云元数据地址（AWS/GCP/Azure）
+  if (hostname === '169.254.169.254') {
+    throw new Error('Provider baseUrl 不允许指向云元数据地址');
+  }
+
+  // 阻止内网 IP 段
+  const privateIpPatterns = [
+    /^10\.\d+\.\d+\.\d+$/,                          // 10.0.0.0/8
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/,      // 172.16.0.0/12
+    /^192\.168\.\d+\.\d+$/,                          // 192.168.0.0/16
+    /^127\.\d+\.\d+\.\d+$/,                          // 127.0.0.0/8 (loopback)
+    /^0\.0\.0\.0$/,                                  // 0.0.0.0
+    /^::1$/,                                         // IPv6 loopback
+    /^fc00:\/\//i,                                   // IPv6 private
+    /^fe80:\/\//i,                                   // IPv6 link-local
+  ];
+
+  for (const pattern of privateIpPatterns) {
+    if (pattern.test(hostname)) {
+      throw new Error(`Provider baseUrl 不允许指向内网地址: ${hostname}`);
+    }
+  }
+}
+
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/+$/, '');
 }
@@ -110,6 +159,9 @@ function buildProviderHeaders(provider: AgentProviderInput): Record<string, stri
 }
 
 function getProviderChatUrl(provider: AgentProviderInput): string {
+  // 验证 baseUrl 防止 SSRF
+  validateProviderUrl(provider.baseUrl);
+
   const baseUrl = normalizeBaseUrl(provider.baseUrl);
 
   switch (provider.apiFormat) {

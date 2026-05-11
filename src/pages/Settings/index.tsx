@@ -9,6 +9,7 @@ import { Button, Toggle } from '../../components/ui';
 import {
   activateApiConfig,
   ApiProvider,
+  clearProviderCache,
   deleteApiConfig,
   ensureBootstrappedApiConfig,
   getApiConfigs,
@@ -175,6 +176,8 @@ function ProfileSettings() {
     try {
       await switchAuthSession(normalized);
       setCurrentUserId(normalized);
+      // 清空 Provider 缓存，防止旧用户数据泄露
+      clearProviderCache();
       await reload();
       await refreshUserScopedData();
       await reloadUsers();
@@ -196,6 +199,8 @@ function ProfileSettings() {
       await clearAuthSession();
       setDevUserId(DEFAULT_USER_ID);
       setCurrentUserId(DEFAULT_USER_ID);
+      // 清空 Provider 缓存，防止旧用户数据泄露
+      clearProviderCache();
       await reload();
       await refreshUserScopedData();
       await reloadUsers();

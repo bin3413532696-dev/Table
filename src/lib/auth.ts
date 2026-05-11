@@ -1,6 +1,8 @@
 export const USER_ID_STORAGE_KEY = 'auth_user_id';
 export const USER_ID_HEADER = 'x-user-id';
 export const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
+export const CSRF_COOKIE_NAME = 'table_dev_csrf_token';
+export const CSRF_HEADER_NAME = 'x-csrf-token';
 
 export type AuthMeResponse = {
   data: {
@@ -71,9 +73,34 @@ export function setCurrentUserId(userId: string) {
   window.localStorage.setItem(USER_ID_STORAGE_KEY, normalized);
 }
 
+/**
+ * 从 Cookie 中读取 CSRF Token
+ */
+function getCsrfTokenFromCookie(): string | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const cookies = document.cookie.split(';');
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === CSRF_COOKIE_NAME) {
+      return value;
+    }
+  }
+  return null;
+}
+
 export function buildAuthenticatedHeaders(headers?: HeadersInit): Headers {
   const next = new Headers(headers);
   // 认证通过签名 Cookie 完成，不再需要 x-user-id 头
+
+  // 添加 CSRF Token 到请求头（用于非 GET 请求的验证）
+  const csrfToken = getCsrfTokenFromCookie();
+  if (csrfToken) {
+    next.set(CSRF_HEADER_NAME, csrfToken);
+  }
+
   return next;
 }
 

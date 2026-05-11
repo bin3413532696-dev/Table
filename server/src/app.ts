@@ -9,7 +9,7 @@ import { knowledgeRoutes } from './modules/knowledge/routes';
 import { maintenanceRoutes } from './modules/maintenance/routes';
 import { agentRoutes } from './modules/agent/routes';
 import { providerRoutes } from './modules/providers/routes';
-import { authenticateRequest, runAuthenticatedRequest } from './shared/auth';
+import { authenticateRequest, runAuthenticatedRequest, validateCsrfToken, CSRF_COOKIE_NAME, generateCsrfToken } from './shared/auth';
 import { sendInfrastructureError } from './shared/http';
 
 export function createApp() {
@@ -27,6 +27,32 @@ export function createApp() {
   app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute',
+  });
+
+  // CSRF 验证钩子：非 GET 请求需要验证 Token
+  app.addHook('onRequest', (request, reply, done) => {
+    // 跳过健康检查端点
+    if (request.url.startsWith('/api/health')) {
+      done();
+      return;
+    }
+
+    // GET 请求不需要 CSRF 验证（SameSite=Lax 已保护）
+    if (request.method === 'GET') {
+      done();
+      return;
+    }
+
+    // 验证 CSRF Token
+    if (!validateCsrfToken(request)) {
+      reply.code(403).send({
+        error: 'FORBIDDEN',
+        message: 'CSRF token validation failed',
+      });
+      return;
+    }
+
+    done();
   });
 
   app.addHook('onRequest', (request, reply, done) => {

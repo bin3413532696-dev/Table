@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../db/client';
-import { provisionUser } from '../../shared/auth';
+import { provisionUser, generateCsrfToken, CSRF_COOKIE_NAME, getCsrfTokenFromRequest } from '../../shared/auth';
 import { hashPin as hashPinSecure, verifyPin as verifyPinSecure } from '../../shared/pin';
 import { signSessionToken } from '../../shared/session';
 import {
@@ -299,12 +299,23 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   // PIN 管理
-  app.get('/pin', async () => {
+  app.get('/pin', async (request, reply) => {
     const context = getCurrentUserContext();
     const settings = await prisma.userSetting.findUnique({
       where: { userId: context.userId },
       select: { securityPinHash: true },
     });
+
+    // 确保 CSRF Token Cookie 存在（前端需要读取它）
+    if (!getCsrfTokenFromRequest(request)) {
+      const csrfToken = generateCsrfToken();
+      const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+      reply.header(
+        'Set-Cookie',
+        `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/; SameSite=Lax${secureFlag}`
+      );
+    }
+
     return { enabled: Boolean(settings?.securityPinHash) };
   });
 
@@ -339,10 +350,19 @@ export async function authRoutes(app: FastifyInstance) {
     const isValid = verifyPinSecure(payload.pin, settings.securityPinHash);
     if (isValid) {
       const token = signSessionToken(context.userId, 86400);
+      const csrfToken = generateCsrfToken();
       const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+
+      // 设置 Session Cookie（HttpOnly）
       reply.header(
         'Set-Cookie',
         `${DEV_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secureFlag}`
+      );
+
+      // 设置 CSRF Token Cookie（非 HttpOnly，前端可读取）
+      reply.header(
+        'Set-Cookie',
+        `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/; SameSite=Lax${secureFlag}`
       );
     }
 

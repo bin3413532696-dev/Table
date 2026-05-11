@@ -28,6 +28,14 @@ function cloneProviders(providers: ApiProvider[]): ApiProvider[] {
   }));
 }
 
+/**
+ * 清空 Provider 缓存（用户会话变更时调用）
+ */
+export function clearProviderCache(): void {
+  providerCache = [];
+  providersLoaded = false;
+}
+
 export function notifyApiConfigChanged(): void {
   if (typeof window === 'undefined') {
     return;

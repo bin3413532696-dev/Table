@@ -8,7 +8,7 @@ export const DEV_SESSION_COOKIE = 'table_dev_session_user_id';
 
 export type ServerUserContext = {
   userId: string;
-  source: 'default' | 'header' | 'session' | 'signed_session' | 'missing';
+  source: 'default' | 'header' | 'signed_session' | 'missing';
 };
 
 const userContextStorage = new AsyncLocalStorage<ServerUserContext>();
@@ -65,12 +65,7 @@ export function resolveRequestUserContext(request: FastifyRequest): ServerUserCo
     return { userId: headerValue.trim(), source: 'header' };
   }
 
-  // 3. 检查裸 UUID Cookie（未设置 PIN 时的兼容路径）
-  if (cookieValue && !isSignedToken(cookieValue)) {
-    return { userId: cookieValue.trim(), source: 'session' };
-  }
-
-  // 4. 回退到默认用户
+  // 3. 回退到默认用户
   return { userId: getDefaultUserId(), source: 'missing' };
 }
 

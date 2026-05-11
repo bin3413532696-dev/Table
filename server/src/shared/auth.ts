@@ -1,10 +1,9 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db/client';
 import { createProviderForCurrentUser, listProvidersForCurrentUser, updateProviderForCurrentUser } from '../modules/providers/service';
 import {
-  DEV_SESSION_COOKIE,
   type ServerUserContext,
   getDefaultUserId,
   resolveRequestUserContext,
@@ -18,8 +17,72 @@ const userIdSchema = z.string().uuid();
 const baselineReadyUsers = new Set<string>();
 const baselineInFlight = new Map<string, Promise<void>>();
 
+// CSRF Token 配置
+export const CSRF_COOKIE_NAME = 'table_dev_csrf_token';
+export const CSRF_HEADER_NAME = 'x-csrf-token';
+
+/**
+ * 生成 CSRF Token（32 字节随机）
+ */
+export function generateCsrfToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
+/**
+ * 验证 CSRF Token：请求头中的 Token 必须匹配 Cookie 中的
+ */
+export function validateCsrfToken(request: FastifyRequest): boolean {
+  // 从 Cookie 头中解析 CSRF Token
+  const cookieHeader = request.headers.cookie;
+  if (!cookieHeader) {
+    return false;
+  }
+
+  const cookies = cookieHeader.split(';');
+  let cookieToken: string | null = null;
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === CSRF_COOKIE_NAME && value) {
+      cookieToken = value;
+      break;
+    }
+  }
+
+  const headerToken = request.headers[CSRF_HEADER_NAME];
+  if (typeof headerToken !== 'string' || !headerToken) {
+    return false;
+  }
+
+  if (!cookieToken) {
+    return false;
+  }
+
+  return cookieToken === headerToken;
+}
+
+/**
+ * 从请求 Cookie 中读取 CSRF Token
+ */
+export function getCsrfTokenFromRequest(request: FastifyRequest): string | null {
+  const cookieHeader = request.headers.cookie;
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const cookies = cookieHeader.split(';');
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === CSRF_COOKIE_NAME && value) {
+      return value;
+    }
+  }
+  return null;
+}
+
 function computeProviderConfigHash(baseUrl: string, apiKey: string, model: string): string {
-  return createHash('sha256').update(`${baseUrl}|${apiKey}|${model}`).digest('hex').slice(0, 16);
+  // 先对 apiKey 单独哈希，防止通过配置哈希反推 apiKey
+  const hashedApiKey = createHash('sha256').update(apiKey).digest('hex');
+  return createHash('sha256').update(`${baseUrl}|${hashedApiKey}|${model}`).digest('hex').slice(0, 16);
 }
 
 export class AuthError extends Error {
@@ -44,9 +107,6 @@ function ensureValidUserContext(context: ServerUserContext) {
 
   const parsed = userIdSchema.safeParse(context.userId);
   if (!parsed.success) {
-    if (context.source === 'session') {
-      throw new AuthError(`Invalid ${DEV_SESSION_COOKIE} cookie`, 401, 'UNAUTHORIZED');
-    }
     throw new AuthError(`Invalid ${USER_ID_HEADER} header`, 401, 'UNAUTHORIZED');
   }
 }

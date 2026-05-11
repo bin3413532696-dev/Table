@@ -106,19 +106,6 @@ function isValidId(id: string): boolean {
   return typeof id === 'string' && id.length >= 10 && /^[a-z0-9-]+$/i.test(id);
 }
 
-export async function hashPin(pin: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(pin);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-export async function verifyPin(pin: string, hashedPin: string): Promise<boolean> {
-  const hashedInput = await hashPin(pin);
-  return hashedInput === hashedPin;
-}
-
 type CollectionType = 'finance' | 'tasks';
 type Listener = (collection: CollectionType) => void;
 
