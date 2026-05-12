@@ -39,20 +39,13 @@ export async function findFinanceRecordById(id: string) {
 }
 
 export async function updateFinanceRecord(id: string, input: UpdateFinanceRecordInput) {
-  const existing = await prisma.financeRecord.findFirst({
+  return prisma.financeRecord.updateManyAndReturn({
     where: {
       id,
       userId: getCurrentUserId(),
       deletedAt: null,
+      version: input.version,
     },
-  });
-
-  if (!existing) {
-    return null;
-  }
-
-  return prisma.financeRecord.update({
-    where: { id, userId: getCurrentUserId(), version: existing.version },
     data: {
       ...(input.type !== undefined ? { type: input.type } : {}),
       ...(input.amount !== undefined ? { amount: input.amount } : {}),
@@ -66,7 +59,7 @@ export async function updateFinanceRecord(id: string, input: UpdateFinanceRecord
         increment: 1,
       },
     },
-  });
+  }).then((records) => records[0] ?? null);
 }
 
 export async function softDeleteFinanceRecord(id: string) {

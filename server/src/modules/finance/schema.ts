@@ -35,7 +35,7 @@ export const updateFinanceRecordSchema = z.object({
   date: dateStringSchema.optional(),
   recordDate: dateStringSchema.optional(),
   model: z.string().trim().max(100).nullable().optional(),
-  version: z.number().int().min(1).optional(),
+  version: z.number().int().min(1),
 }).refine((value) => Object.keys(value).filter((k) => k !== 'version').length > 0, {
   message: 'At least one field must be provided',
 });

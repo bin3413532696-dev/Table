@@ -5,6 +5,7 @@ import { isValidFinanceRecord, isValidTask } from '../core/validation';
 import { FinanceRecord, Task } from '../core/types';
 import { fetchAuthMe, fetchWithAuth, updateAuthMe } from '../lib/auth';
 import { syncEngine } from '../sync';
+import { MESSAGES } from '../core/messages';
 
 export type { FinanceRecord, Task };
 
@@ -65,10 +66,32 @@ async function parseApiError(response: Response, context: string): Promise<AppEr
     );
   }
 
+  if (response.status === 409) {
+    return AppError.fromCode(
+      ErrorCode.VERSION_CONFLICT,
+      payload?.message || context
+    );
+  }
+
   return AppError.fromCode(
     ErrorCode.NETWORK_ERROR,
     payload?.message || `${context}: HTTP ${response.status}`
   );
+}
+
+export function getErrorMessage(
+  error: unknown,
+  fallback: string = MESSAGES.common.unknownError
+): string {
+  if (error instanceof AppError) {
+    return error.message;
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return fallback;
 }
 
 async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
@@ -211,7 +234,7 @@ export const financeDB = {
     return created;
   },
 
-  async update(id: string, updates: Partial<FinanceRecord>): Promise<void> {
+  async update(id: string, updates: Partial<FinanceRecord> & { version: number }): Promise<void> {
     const payload: Record<string, unknown> = {};
     if (updates.type !== undefined) payload.type = updates.type;
     if (updates.amount !== undefined) payload.amount = Number(updates.amount);
@@ -325,7 +348,7 @@ export const taskDB = {
     return created;
   },
 
-  async update(id: string, updates: Partial<Task>): Promise<void> {
+  async update(id: string, updates: Partial<Task> & { version: number }): Promise<void> {
     const payload: Record<string, unknown> = {};
     if (updates.title !== undefined) payload.title = updates.title;
     if (updates.completed !== undefined) payload.completed = updates.completed;
@@ -612,9 +635,10 @@ export function createUseDB(React: typeof import('react')) {
   return function useDB<T>(
     fetcher: () => Promise<T>,
     dependencies: CollectionType[]
-  ): { data: T | null; loading: boolean } {
+  ): { data: T | null; loading: boolean; error: string | null } {
     const [data, setData] = React.useState<T | null>(null);
     const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState<string | null>(null);
     const fetcherRef = React.useRef(fetcher);
     const depsRef = React.useRef(dependencies);
 
@@ -631,11 +655,17 @@ export function createUseDB(React: typeof import('react')) {
 
       const load = async () => {
         setLoading(true);
+        setError(null);
         try {
           const result = await fetcherRef.current();
-          if (!ignore) setData(result);
+          if (!ignore) {
+            setData(result);
+          }
         } catch (error) {
           console.error('useDB fetch error:', error);
+          if (!ignore) {
+            setError(getErrorMessage(error, MESSAGES.common.loadFailed));
+          }
         } finally {
           if (!ignore) setLoading(false);
         }
@@ -655,6 +685,6 @@ export function createUseDB(React: typeof import('react')) {
       };
     }, []);
 
-    return { data, loading };
+    return { data, loading, error };
   };
 }

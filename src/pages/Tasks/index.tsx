@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, Circle, Plus, Trash2, Calendar, Clock, ListTodo, CheckCheck, AlertCircle, Search, SortAsc, AlertTriangle, CheckSquare, X, Flag, Edit2, Target, TrendingUp } from 'lucide-react';
-import { taskDB, Task, createUseDB } from '../../db';
+import { taskDB, Task, createUseDB, getErrorMessage } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
 import { Button, EmptyState } from '../../components/ui';
 import { TaskItem, PriorityButtonGroup } from './components';
+import { MESSAGES } from '../../core/messages';
 
 type FilterType = 'all' | 'pending' | 'completed';
 type SortType = 'created' | 'priority' | 'dueDate' | 'title';
@@ -15,7 +16,7 @@ const MAX_TITLE_LENGTH = 100;
 const useDB = createUseDB(React);
 
 const Tasks: React.FC = () => {
-  const { data: tasksData, loading } = useDB(() => taskDB.getAll(), ['tasks']);
+  const { data: tasksData, loading, error: loadError } = useDB(() => taskDB.getAll(), ['tasks']);
   const tasks = tasksData ?? [];
 
   const [newTask, setNewTask] = useState('');
@@ -33,6 +34,7 @@ const Tasks: React.FC = () => {
   const [showBatchActions, setShowBatchActions] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [batchFeedback, setBatchFeedback] = useState<string>('');
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -84,28 +86,50 @@ const Tasks: React.FC = () => {
   const addTask = useCallback(async () => {
     const trimmedTitle = newTask.trim().slice(0, MAX_TITLE_LENGTH);
     if (!trimmedTitle) return;
-    await taskDB.add({
-      title: trimmedTitle,
-      completed: false,
-      priority: newTaskPriority,
-      dueDate: newTaskDueDate || undefined,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    setNewTask('');
-    setNewTaskPriority('medium');
-    setNewTaskDueDate('');
+    try {
+      setFeedback(null);
+      await taskDB.add({
+        title: trimmedTitle,
+        completed: false,
+        priority: newTaskPriority,
+        dueDate: newTaskDueDate || undefined,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      setNewTask('');
+      setNewTaskPriority('medium');
+      setNewTaskDueDate('');
+    } catch (error) {
+      setFeedback(getErrorMessage(error, MESSAGES.tasks.saveFailed));
+    }
   }, [newTask, newTaskPriority, newTaskDueDate]);
 
   const toggleTask = useCallback(async (id: string) => {
-    await taskDB.toggle(id);
-    setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
-  }, []);
+    try {
+      setFeedback(null);
+      const task = tasks.find((item) => item.id === id);
+      if (!task || task.version === undefined) {
+        throw new Error(MESSAGES.common.versionConflict);
+      }
+      await taskDB.update(id, {
+        completed: !task.completed,
+        version: task.version,
+      });
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    } catch (error) {
+      setFeedback(getErrorMessage(error, MESSAGES.tasks.saveFailed));
+    }
+  }, [tasks]);
 
   const deleteTask = useCallback(async (id: string) => {
-    await taskDB.delete(id);
-    setShowDeleteConfirm(null);
-    setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    try {
+      setFeedback(null);
+      await taskDB.delete(id);
+      setShowDeleteConfirm(null);
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    } catch (error) {
+      setFeedback(getErrorMessage(error, MESSAGES.tasks.deleteFailed));
+    }
   }, []);
 
   const handleBatchDelete = useCallback(async () => {
@@ -147,13 +171,23 @@ const Tasks: React.FC = () => {
   const saveEdit = useCallback(async () => {
     const trimmedTitle = editTitle.trim().slice(0, MAX_TITLE_LENGTH);
     if (!trimmedTitle || !editingId) return;
-    await taskDB.update(editingId, {
-      title: trimmedTitle,
-      priority: editPriority,
-      dueDate: editDueDate || undefined,
-    });
-    setEditingId(null);
-  }, [editTitle, editPriority, editDueDate, editingId]);
+    try {
+      setFeedback(null);
+      const version = tasks.find((task) => task.id === editingId)?.version;
+      if (version === undefined) {
+        throw new Error(MESSAGES.common.versionConflict);
+      }
+      await taskDB.update(editingId, {
+        title: trimmedTitle,
+        priority: editPriority,
+        dueDate: editDueDate || undefined,
+        version,
+      });
+      setEditingId(null);
+    } catch (error) {
+      setFeedback(getErrorMessage(error, MESSAGES.tasks.saveFailed));
+    }
+  }, [editTitle, editPriority, editDueDate, editingId, tasks]);
 
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds(prev => {
@@ -274,6 +308,12 @@ const Tasks: React.FC = () => {
       {batchFeedback && (
         <div className="mb-4 rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
           {batchFeedback}
+        </div>
+      )}
+
+      {(loadError || feedback) && (
+        <div className="mb-4 rounded-lg border border-error/20 bg-error/10 px-4 py-3 text-sm text-error">
+          {feedback || loadError}
         </div>
       )}
 

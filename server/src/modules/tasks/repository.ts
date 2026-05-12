@@ -38,8 +38,13 @@ export async function findTaskById(id: string) {
 }
 
 export async function updateTask(id: string, input: UpdateTaskInput) {
-  return prisma.task.update({
-    where: { id, userId: getCurrentUserId(), ...(input.version !== undefined ? { version: input.version } : {}) },
+  return prisma.task.updateManyAndReturn({
+    where: {
+      id,
+      userId: getCurrentUserId(),
+      deletedAt: null,
+      version: input.version,
+    },
     data: {
       ...(input.title !== undefined ? { title: input.title } : {}),
       ...(input.priority !== undefined ? { priority: input.priority } : {}),
@@ -52,7 +57,7 @@ export async function updateTask(id: string, input: UpdateTaskInput) {
         increment: 1,
       },
     },
-  });
+  }).then((tasks) => tasks[0] ?? null);
 }
 
 export async function softDeleteTask(id: string) {

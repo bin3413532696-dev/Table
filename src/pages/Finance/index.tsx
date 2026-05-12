@@ -8,11 +8,12 @@ import {
   BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart as RechartsPie, Pie, Cell, Legend
 } from 'recharts';
-import { financeDB, FinanceRecord, createUseDB } from '../../db';
+import { financeDB, FinanceRecord, createUseDB, getErrorMessage } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
 import { Button, EmptyState } from '../../components/ui';
 import { RecordItem, RecordForm, StatsCards } from './components';
+import { MESSAGES } from '../../core/messages';
 
 const DEFAULT_CATEGORIES = {
   income: ['API调用收入', '服务收入', '其他收入'],
@@ -29,7 +30,7 @@ const useDB = createUseDB(React);
 const MAX_DESCRIPTION_LENGTH = 100;
 
 export default function Finance() {
-  const { data: recordsData, loading } = useDB(() => financeDB.getAll(), ['finance']);
+  const { data: recordsData, loading, error: loadError } = useDB(() => financeDB.getAll(), ['finance']);
   const records = recordsData ?? [];
 
   const [showForm, setShowForm] = useState(false);
@@ -53,6 +54,7 @@ export default function Finance() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBatchActions, setShowBatchActions] = useState(false);
   const [batchFeedback, setBatchFeedback] = useState('');
+  const [feedback, setFeedback] = useState<{ type: 'error'; message: string } | null>(null);
 
   const categories = useMemo(() => {
     const incomeCats = new Set(DEFAULT_CATEGORIES.income);
@@ -148,23 +150,38 @@ export default function Finance() {
     else if (formData.description.length > MAX_DESCRIPTION_LENGTH) errors.description = `描述不能超过 ${MAX_DESCRIPTION_LENGTH} 字符`;
     if (Object.keys(errors).length > 0) { setFormErrors(errors); return; }
     setFormErrors({});
-    if (editingId) {
-      await financeDB.update(editingId, formData);
-      setEditingId(null);
-    } else {
-      await financeDB.add({
-        type: formData.type || 'expense',
-        amount: Number(formData.amount),
-        description: formData.description || '',
-        category: formData.category || (formData.type === 'income' ? '其他收入' : '其他支出'),
-        date: formData.date || new Date().toISOString().split('T')[0],
-        model: formData.model,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
+    try {
+      setFeedback(null);
+      if (editingId) {
+        const version = records.find((record) => record.id === editingId)?.version;
+        if (version === undefined) {
+          throw new Error(MESSAGES.common.versionConflict);
+        }
+        await financeDB.update(editingId, {
+          ...formData,
+          version,
+        });
+        setEditingId(null);
+      } else {
+        await financeDB.add({
+          type: formData.type || 'expense',
+          amount: Number(formData.amount),
+          description: formData.description || '',
+          category: formData.category || (formData.type === 'income' ? '其他收入' : '其他支出'),
+          date: formData.date || new Date().toISOString().split('T')[0],
+          model: formData.model,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        });
+      }
+      setShowForm(false);
+      setFormData({ type: 'expense', amount: 0, description: '', category: '', date: new Date().toISOString().split('T')[0], model: '' });
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: getErrorMessage(error, MESSAGES.finance.saveFailed),
       });
     }
-    setShowForm(false);
-    setFormData({ type: 'expense', amount: 0, description: '', category: '', date: new Date().toISOString().split('T')[0], model: '' });
   };
 
   const handleEdit = (record: FinanceRecord) => {
@@ -174,9 +191,17 @@ export default function Finance() {
   };
 
   const handleDelete = async (id: string) => {
-    await financeDB.delete(id);
-    setShowDeleteConfirm(null);
-    setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    try {
+      setFeedback(null);
+      await financeDB.delete(id);
+      setShowDeleteConfirm(null);
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    } catch (error) {
+      setFeedback({
+        type: 'error',
+        message: getErrorMessage(error, MESSAGES.finance.deleteFailed),
+      });
+    }
   };
 
   const handleBatchDelete = async () => {
@@ -274,6 +299,12 @@ export default function Finance() {
       {batchFeedback && (
         <div className="mb-4 rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
           {batchFeedback}
+        </div>
+      )}
+
+      {(loadError || feedback) && (
+        <div className="mb-4 rounded-lg border border-error/20 bg-error/10 px-4 py-3 text-sm text-error">
+          {feedback?.message || loadError}
         </div>
       )}
 
