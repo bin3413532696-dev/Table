@@ -8,13 +8,15 @@
 
 | 层次 | 技术 | 选择理由 |
 |------|------|----------|
-| 前端框架 | React + TypeScript | 类型安全、生态成熟、社区活跃 |
-| 前端构建 | Webpack | 灵活的代码分割、资源管理 |
-| 后端框架 | Fastify | 高性能、低开销、内置JSON支持 |
-| ORM | Prisma | 类型安全的数据库访问、自动迁移 |
-| 数据库 | PostgreSQL | 支持全文搜索、事务、JSON字段 |
+| 前端框架 | React 18 + TypeScript | 类型安全、生态成熟、社区活跃 |
+| 前端构建 | Webpack 5 | 灵活的代码分割、资源管理 |
+| 后端框架 | Fastify 5 | 高性能、低开销、内置 JSON 支持 |
+| ORM | Prisma 6 | 类型安全的数据库访问、自动迁移 |
+| 数据库 | PostgreSQL | 支持全文搜索、事务、JSON 字段 |
 | 状态管理 | 自定义 Store + EventEmitter | 轻量级、可控性强 |
 | 表单验证 | Zod | 类型安全的运行时验证 |
+| 富文本编辑 | TipTap | 可扩展的 ProseMirror 封装 |
+| UI 动画 | Framer Motion | 声明式动画、手势支持 |
 
 ---
 
@@ -35,8 +37,8 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                      前端 (Browser)                         │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────────┐   │
-│  │ React   │  │ Store   │  │ API     │  │ SyncEngine  │   │
-│  │ 组件    │  │ 状态管理│  │ 接口层  │  │ 数据同步    │   │
+│  │ React   │  │ Store   │  │ db/     │  │ SyncEngine  │   │
+│  │ 组件    │  │ 内存缓存│  │ API客户端│  │ 知识库同步  │   │
 │  └────┬────┘  └────┬────┘  └────┬────┘  └──────┬──────┘   │
 └───────┼────────────┼────────────┼───────────────┼──────────┘
         │            │            │               │
@@ -44,7 +46,7 @@
 ┌─────────────────────────────────────────────────┼──────────┐
 │              Webpack Dev Server                 │          │
 │           (端口: 3266)                          │          │
-│              /api/* → Proxy                     │          │
+│              /api/* → Proxy → :8787             │          │
 └──────────────────────────┬──────────────────────┼──────────┘
                            ▼                      │
 ┌─────────────────────────────────────────────────┼──────────┐
@@ -75,120 +77,152 @@
 
 ```
 src/
-├── components/          # UI 组件
-│   ├── Agent/           # AI 助手组件
-│   ├── Layout/          # 布局组件 (Sidebar + Header)
-│   └── ui/              # 基础 UI 组件 (Button, Card, etc.)
-├── contexts/            # React Context (主题、用户)
-├── core/                # 核心基础设施
-│   ├── errors/          # 统一错误处理
-│   ├── events/          # 事件总线
-│   ├── types/           # 共享类型定义
-│   └── validation/      # 验证工具
-├── lib/                 # 工具函数和 API 封装
-├── pages/               # 页面组件
-│   ├── Dashboard/       # 仪表盘
-│   ├── Knowledge/       # 知识库
-│   ├── Tasks/           # 任务管理
-│   ├── Finance/         # 财务管理
-│   └── Settings/        # 设置
-├── store/               # 状态管理
-├── sync/                # 数据同步引擎
-└── App.tsx              # 根组件
+├── agent/                # 智能体前端状态管理
+│   ├── AgentContext.tsx   # React Context + useReducer
+│   ├── types.ts          # AgentMessage, AgentState, ToolCall 等
+│   └── toolMetadata.ts   # 工具显示元数据
+├── components/           # UI 组件
+│   ├── Agent/            # AI 助手（AgentTrigger 浮窗按钮 + AgentPanel 面板）
+│   ├── Layout/           # 布局（Sidebar 256px + Header）
+│   └── ui/               # 基础组件（Button, Card, Toggle, EmptyState, VirtualList）
+├── contexts/             # React Context
+│   ├── ThemeContext.tsx   # 主题（light/dark），持久化到 localStorage
+│   └── UserContext.tsx    # 当前用户与认证状态
+├── core/                 # 核心基础设施
+│   ├── errors/           # AppError 类 + ErrorHandler 单例 + ErrorCode 枚举
+│   ├── events/           # EventEmitter 全局事件总线 + EventTopics 定义
+│   ├── types/            # BaseEntity, FinanceRecord, Task 等共享类型
+│   ├── validation/       # 运行时验证器（isValidAmount, isValidTask 等）
+│   └── messages.ts       # 用户-facing 中文消息字典
+├── db/                   # 数据访问层（关键桥梁）
+│   └── index.ts          # financeDB / taskDB / dataManager / createUseDB hook
+├── lib/                  # 工具函数和 API 封装
+│   ├── auth.ts           # fetchWithAuth（Cookie 认证）、PIN 管理、用户切换
+│   ├── apiConfig.ts      # AI Provider CRUD、providerCache、活跃配置选择
+│   ├── agentApi.ts       # Agent Run API（含 SSE 流式解析）
+│   └── dataSync.ts       # 同步生命周期封装
+├── pages/                # 页面组件（全部 lazy-loaded）
+│   ├── Dashboard/        # 仪表盘（任务/财务统计卡片）
+│   ├── Knowledge/        # 知识库（TipTap 编辑器、标签管理、直接调 API）
+│   ├── Tasks/            # 任务管理（搜索、过滤、批量操作、内联编辑）
+│   ├── Finance/          # 财务管理（Recharts 图表、CSV 导出、批量操作）
+│   ├── Tools/            # 工具箱（计算器、取色器、JSON 格式化，纯客户端）
+│   ├── Settings/         # 设置（Profile/Security/Data/API Config 四个 Tab）
+│   └── AgentHistory/     # 智能体运行历史
+├── store/                # 内存状态缓存
+│   ├── base/Store.ts     # BaseStore<T> 抽象基类（CRUD + 事件发射）
+│   └── impl/             # FinanceStore / TaskStore 单例（localStorage 已禁用）
+├── sync/                 # 数据同步引擎
+│   ├── SyncEngine.ts     # 单例，1500ms 防抖，仅处理 knowledge 类型
+│   └── config.ts         # 同步常量与类型
+├── App.tsx               # 根组件（HashRouter + PIN 锁屏 + AgentTrigger）
+└── index.tsx             # 入口（Provider 嵌套：ErrorBoundary > Theme > User > Agent > App）
 ```
 
-### 核心设计模式
+### 核心数据流
 
-**1. 状态管理：基于事件的 Store 模式**
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   BaseStore (抽象基类)                   │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  CRUD 操作                                         │  │
-│  │  ├─ create()                                       │  │
-│  │  ├─ update()                                       │  │
-│  │  ├─ delete()                                       │  │
-│  │  └─ getAll()                                       │  │
-│  ├───────────────────────────────────────────────────┤  │
-│  │  生命周期                                          │  │
-│  │  ├─ loadFromStorage()  → 从 localStorage 加载      │  │
-│  │  ├─ saveToStorage()    → 保存到 localStorage       │  │
-│  │  └─ persist()          → 持久化 + 触发事件          │  │
-│  └───────────────────────────────────────────────────┘  │
-└──────────────────────────┬──────────────────────────────┘
-                           │ 触发事件
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                  EventEmitter (事件总线)                 │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  EventTopics.FINANCE_CHANGED                       │  │
-│  │  EventTopics.TASKS_CHANGED                         │  │
-│  │  EventTopics.KNOWLEDGE_CHANGED                     │  │
-│  └───────────────────────────────────────────────────┘  │
-└──────────────────────────┬──────────────────────────────┘
-                           │ 事件订阅者响应
-                           ▼
-┌─────────────────────────────────────────────────────────┐
-│                   组件重新渲染                           │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  useEffect(() => {                                │  │
-│  │    eventEmitter.on(EventTopics.TASKS_CHANGED, () │  │
-│  │      => setTasks(store.getAll()))                │  │
-│  │  })                                               │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-```
-
-**为什么这样设计？**
-- **解耦性**：Store 不直接依赖组件，通过事件通信
-- **可测试性**：Store 可以独立测试，不依赖 React 环境
-- **灵活性**：多个组件可以订阅同一个事件
-- **本地持久化**：数据自动保存到 localStorage，刷新不丢失
-
-**2. 数据同步：SyncEngine**
+**任务/财务的完整数据流**（服务端权威）：
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   SyncEngine (同步引擎)                  │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  同步策略                                          │  │
-│  │  ├─ 增量同步: 只同步变更的数据                      │  │
-│  │  ├─ 冲突检测: 版本号比对 (version field)           │  │
-│  │  └─ 重试机制: 网络失败时自动重试                    │  │
-│  ├───────────────────────────────────────────────────┤  │
-│  │  触发时机                                          │  │
-│  │  ├─ 页面加载时: 拉取服务端最新数据                  │  │
-│  │  ├─ 数据变更时: 推送变更到服务端                    │  │
-│  │  └─ 定时同步: 周期性检查更新                        │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+用户操作 → financeDB.add() → fetchWithAuth(POST /api/finance)
+                                    ↓
+                              后端处理 + PostgreSQL
+                                    ↓
+                              返回 {data, source}
+                                    ↓
+                         hydrateFinanceCache() → 更新内存 Store
+                                    ↓
+                         eventEmitter.emit(FINANCE_CHANGED)
+                                    ↓
+                         useDB hook 重新 fetch → 组件重渲染
 ```
 
-**为什么需要 SyncEngine？**
-- **离线支持**：用户可以离线操作，联网后自动同步
-- **数据一致性**：确保客户端和服务端数据同步
-- **冲突解决**：处理并发修改冲突
+关键点：
+- **Store 是纯内存缓存**，localStorage 持久化已禁用（storageKey 含 `_cache_disabled`）
+- **所有写操作直走服务端 API**，成功后 hydrate 到 Store 并发射事件
+- **`createUseDB` hook** 是页面与数据层的桥梁：mount 时 fetch，收到 change 事件时重新 fetch
 
-**3. 路由和代码分割**
+**知识库的数据流**（独立路径）：
 
-```typescript
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Knowledge = lazy(() => import('./pages/Knowledge'));
-// ...
-
-<Suspense fallback={<Loading />}>
-  <Routes>
-    <Route path="dashboard" element={<Dashboard />} />
-    <Route path="knowledge" element={<Knowledge />} />
-  </Routes>
-</Suspense>
+```
+Knowledge 页面 → 直接 fetchWithAuth(/api/knowledge/notes)
+                      ↓
+              页面内部 useState 管理，不经过 Store 层
+                      ↓
+              SyncEngine 负责 1500ms 防抖拉取 + localStorage 缓存
 ```
 
-**为什么这样设计？**
-- **首屏加载优化**：只加载当前页面需要的代码
-- **按需加载**：用户访问某个页面时才加载对应的组件
-- **减小打包体积**：避免一次性加载所有代码
+### 认证与 PIN 锁
+
+```
+App.tsx mount
+    ↓
+fetchPinStatus() → PIN 是否已设置？
+    ↓ 是
+PinLock 组件 → 用户输入 6 位 PIN
+    ↓
+verifyPinApi() → 后端 scrypt 验证
+    ↓ 成功
+后端签发 HMAC-SHA256 签名 Cookie（24h 有效）
+    ↓
+前端 fetchWithAuth 自动携带 Cookie（credentials: 'same-origin'）
+```
+
+- 未设置 PIN 时，使用裸 UUID Cookie 兼容路径
+- `x-user-id` 头不再由前端发送（`buildAuthenticatedHeaders` 已清空）
+- 用户切换通过 `switchAuthSession()` 端点，同样签发签名 Cookie
+
+### 智能体前端架构
+
+```
+AgentContext (useReducer)
+    │
+    ├── sendMessage(content)
+    │       ↓
+    │   createAgentRun(inputText) → POST /api/agent/runs
+    │       ↓
+    │   applyRunResultToAssistantMessage() → dispatch ADD_MESSAGE
+    │
+    ├── 工具确认流程
+    │       ↓
+    │   status === 'waiting_confirmation'
+    │       ↓
+    │   存储 ConfirmationRequest → UI 显示确认按钮
+    │       ↓
+    │   confirmAction() → POST /api/agent/runs/:id/tools/:execId/confirm
+    │   rejectAction() → POST /api/agent/runs/:id/tools/:execId/reject
+    │
+    └── 连接状态
+            ↓
+        checkConnection() → GET /api/agent/health（30s 轮询）
+            ↓
+        监听 API_CONFIG_CHANGED_EVENT 重新检查
+```
+
+历史消息裁剪：`MAX_HISTORY_MESSAGES = 50`，`MAX_CONTEXT_CHARS = 50000`
+
+### 路由表
+
+| 路径 | 页面 | 数据源 |
+|------|------|--------|
+| `/dashboard` | Dashboard | `useDB` → taskDB + financeDB |
+| `/knowledge` | Knowledge | 直接 `fetchWithAuth` |
+| `/tasks` | Tasks | `useDB` → taskDB |
+| `/finance` | Finance | `useDB` → financeDB |
+| `/tools` | Tools | 纯客户端，无 API |
+| `/settings` | Settings | fetchWithAuth + dataManager |
+| `/agent-history` | AgentHistory | GET /api/agent/runs |
+
+使用 `HashRouter`（URL 格式 `/#/dashboard`），所有页面 `React.lazy()` 按需加载。
+
+### Webpack 代码分割
+
+| 缓存组 | 内容 | 优先级 |
+|--------|------|--------|
+| `react-vendor` | React 核心 | 30 |
+| `chart-vendor` | Recharts + D3 | 25 |
+| `animation-vendor` | Framer Motion | 20 |
+| `vendor` | 其他 node_modules | 10 |
 
 ---
 
@@ -200,33 +234,39 @@ const Knowledge = lazy(() => import('./pages/Knowledge'));
 server/
 ├── src/
 │   ├── modules/          # 业务模块 (按功能划分)
-│   │   ├── agent/        # AI 助手模块
-│   │   ├── auth/         # 认证模块
-│   │   ├── finance/      # 财务管理模块
-│   │   ├── knowledge/    # 知识库模块
-│   │   ├── tasks/        # 任务管理模块
-│   │   └── ...
+│   │   ├── agent/        # 智能体运行时
+│   │   ├── auth/         # 认证（PIN 验证、会话切换、用户管理）
+│   │   ├── finance/      # 财务管理
+│   │   ├── health/       # 健康检查
+│   │   ├── knowledge/    # 知识库（笔记 + 预设标签）
+│   │   ├── maintenance/  # 维护操作（快照导入/导出/重置）
+│   │   ├── providers/    # AI Provider 配置管理
+│   │   └── tasks/        # 任务管理
 │   ├── shared/           # 共享工具
-│   │   ├── auth.ts       # 认证中间件与基线初始化
-│   │   ├── config.ts     # 配置加载（环境变量校验）
-│   │   ├── session.ts    # HMAC-SHA256 签名令牌（签发/验证）
-│   │   ├── user-context.ts # 用户上下文解析（AsyncLocalStorage）
-│   │   └── http.ts       # HTTP 工具函数
-│   ├── db/               # 数据库客户端
-│   ├── app.ts            # Fastify 应用配置
-│   └── index.ts          # 应用入口
-└── prisma/               # Prisma 配置和迁移
+│   │   ├── auth.ts       # 认证中间件、基线初始化、baselineReadyUsers
+│   │   ├── config.ts     # Zod 校验的环境变量配置
+│   │   ├── session.ts    # HMAC-SHA256 签名令牌（signSessionToken / verifySessionToken）
+│   │   ├── user-context.ts # AsyncLocalStorage 用户上下文（resolveRequestUserContext）
+│   │   └── http.ts       # sendInfrastructureError 等 HTTP 工具
+│   ├── db/
+│   │   └── client.ts     # Prisma 全局单例（连接池 20、timeout 10s）
+│   ├── app.ts            # Fastify 应用（CORS、速率限制、全局钩子、错误处理）
+│   └── index.ts          # 入口（启动、优雅关闭、全局异常处理）
+└── prisma/
+    ├── schema.prisma     # 数据模型定义
+    ├── seed.js           # 种子数据
+    └── migrations/       # SQL 迁移文件
 ```
 
 ### 每个模块的内部结构（以 tasks 为例）
 
 ```
 modules/tasks/
-├── routes.ts      # 路由定义 (API 端点)
-├── service.ts     # 业务逻辑层
-├── repository.ts  # 数据访问层 (Prisma)
-├── schema.ts      # 请求/响应 Schema (Zod)
-└── dto.ts         # 数据传输对象转换
+├── routes.ts      # 路由定义 (API 端点 + Zod 参数校验)
+├── service.ts     # 业务逻辑层（所有权检查、版本冲突检测）
+├── repository.ts  # 数据访问层 (Prisma CRUD，WHERE 含 userId)
+├── schema.ts      # 请求/响应 Schema (Zod，含 .max() 长度限制)
+└── dto.ts         # 实体到响应格式转换
 ```
 
 **架构分层说明**：
@@ -234,9 +274,9 @@ modules/tasks/
 | 层次 | 职责 | 文件 |
 |------|------|------|
 | **路由层** | 处理 HTTP 请求/响应、参数校验 | `routes.ts` |
-| **服务层** | 业务逻辑、事务管理 | `service.ts` |
-| **仓储层** | 数据库 CRUD 操作 | `repository.ts` |
-| **Schema层** | 输入/输出数据验证 | `schema.ts` |
+| **服务层** | 业务逻辑、所有权检查、事务管理 | `service.ts` |
+| **仓储层** | 数据库 CRUD（WHERE 含 userId） | `repository.ts` |
+| **Schema层** | 输入/输出数据验证（含长度/范围约束） | `schema.ts` |
 | **DTO层** | 实体到响应格式转换 | `dto.ts` |
 
 **请求处理流程**：
@@ -245,143 +285,325 @@ modules/tasks/
 HTTP Request
     │
     ▼
-routes.ts (路由匹配 + 参数校验)
+app.ts onRequest 钩子 → authenticateRequest → resolveRequestUserContext
     │
     ▼
-service.ts (业务逻辑处理)
+routes.ts (路由匹配 + Zod schema 校验)
     │
     ▼
-repository.ts (数据库操作)
+service.ts (业务逻辑：所有权检查、版本冲突检测)
+    │
+    ▼
+repository.ts (Prisma 操作，WHERE 含 userId + version)
     │
     ▼
 Prisma Client → PostgreSQL
 ```
 
-**为什么这样分层？**
+### 各模块 API 端点一览
 
-1. **单一职责原则**：每个文件只负责一件事
-2. **可测试性**：各层可以独立测试（如 mock repository 测试 service）
-3. **可维护性**：修改某一层不影响其他层
-4. **扩展性**：可以轻松替换数据库或添加新模块
+#### 认证模块 (`/api/auth`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/me` | 获取当前用户信息 |
+| GET | `/users` | 列出所有用户 |
+| PATCH | `/me` | 更新当前用户 |
+| POST | `/users` | 创建用户 |
+| POST | `/session/switch` | 切换会话（签发签名 Cookie） |
+| POST | `/session/clear` | 清除会话 |
+| GET | `/pin/status` | PIN 是否已设置 |
+| POST | `/pin/verify` | 验证 PIN（签发签名 Cookie） |
+| POST | `/pin/set` | 设置 PIN |
+| POST | `/pin/clear` | 清除 PIN |
+
+#### 任务模块 (`/api/tasks`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | 列出任务（排除软删除） |
+| POST | `/` | 创建任务 |
+| GET | `/:id` | 获取任务详情 |
+| PATCH | `/:id` | 更新任务（乐观锁 version） |
+| DELETE | `/:id` | 软删除任务 |
+
+#### 财务模块 (`/api/finance`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | 列出财务记录 |
+| POST | `/` | 创建财务记录 |
+| GET | `/stats` | 财务统计 |
+| GET | `/model-stats` | 按模型统计 |
+| GET | `/:id` | 获取详情 |
+| PATCH | `/:id` | 更新（乐观锁） |
+| DELETE | `/:id` | 软删除 |
+
+#### 知识库模块 (`/api/knowledge`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/notes` | 搜索笔记（全文搜索 + 标签过滤） |
+| POST | `/notes` | 创建笔记 |
+| GET | `/notes/:id` | 获取详情 |
+| PATCH | `/notes/:id` | 更新笔记 |
+| DELETE | `/notes/:id` | 删除笔记 |
+| GET | `/tags` | 获取所有标签 |
+| GET | `/tags/preset` | 列出预设标签 |
+| POST | `/tags/preset` | 创建预设标签 |
+| PATCH | `/tags/preset/:id` | 更新预设标签 |
+| DELETE | `/tags/preset/:id` | 删除预设标签 |
+
+#### Provider 模块 (`/api/providers`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | 列出所有 Provider |
+| POST | `/` | 创建 Provider（API Key AES 加密存储） |
+| GET | `/:id` | 获取详情 |
+| PATCH | `/:id` | 更新 |
+| DELETE | `/:id` | 软删除 |
+
+#### 智能体模块 (`/api/agent`)
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/health` | 运行时状态（Provider 连接、可用模型） |
+| GET | `/runs` | 列出运行记录 |
+| POST | `/runs` | 创建非流式运行 |
+| POST | `/runs/stream` | 创建 SSE 流式运行 |
+| GET | `/runs/:id` | 获取运行详情 |
+| POST | `/runs/:id/messages` | 追加消息 |
+| POST | `/runs/:id/tools` | 列出工具执行 |
+| POST | `/runs/:id/tools/:toolExecId/confirm` | 确认工具执行 |
+| POST | `/runs/:id/tools/:toolExecId/reject` | 拒绝工具执行 |
+
+#### 维护模块 (`/api/maintenance`)
+
+| 方法 | 路径 | 说明 | 权限 |
+|------|------|------|------|
+| GET | `/business-snapshot` | 导出业务快照 | defaultUserOnly |
+| POST | `/business-snapshot` | 导入业务快照（自动备份） | defaultUserOnly + 1min 速率限制 |
+| POST | `/reset` | 重置工作台数据 | defaultUserOnly + 1min 速率限制 |
 
 ### 认证机制
 
-```typescript
-// app.ts - 全局认证钩子
-app.addHook('onRequest', (request, reply, done) => {
-  if (request.url.startsWith('/api/health')) {
-    done();  // 健康检查免认证
-    return;
-  }
-  // 其他请求需要认证
-  runAuthenticatedRequest(request, () => {
-    authenticateRequest(request, reply, { ensureBaseline: true })
-      .then(() => done())
-      .catch(done);
-  });
-});
-```
-
 **用户身份识别流程**（`resolveRequestUserContext`）：
 
-1. 检查签名 Cookie（最高优先级）— 验证 HMAC-SHA256 签名与过期时间
-2. 检查 `x-user-id` 头 — 受 `TRUST_USER_ID_HEADER` 配置控制（默认 `false`）
-3. 检查裸 UUID Cookie — 未设置 PIN 时的兼容路径
-4. 回退到默认用户
+```
+请求到达
+    ↓
+1. 检查签名 Cookie（table_dev_session_user_id）
+   ├─ 格式：<userId>.<expiresTimestamp>.<hmacSignature>
+   ├─ 验证：HMAC-SHA256 + 时效检查
+   └─ 通过 → 返回 { userId, source: 'signed_session' }
+    ↓ 未通过
+2. 检查 x-user-id 头
+   ├─ 受 TRUST_USER_ID_HEADER 控制（默认 false）
+   └─ 通过 → 返回 { userId, source: 'header' }
+    ↓ 未通过
+3. 检查裸 UUID Cookie
+   └─ 存在 → 返回 { userId, source: 'session' }（未设 PIN 的兼容路径）
+    ↓ 不存在
+4. 回退默认用户
+   └─ 返回 { userId: DEFAULT_USER_ID, source: 'missing' }
+```
 
 **PIN 验证与令牌签发**：
 
 - 用户提交 PIN → 后端用 scrypt 哈希验证
-- 验证通过后签发 HMAC-SHA256 签名 Cookie，格式为 `<userId>.<expiresTimestamp>.<hmacSignature>`
-- Cookie 有效期 24 小时，过期后需重新验证 PIN
-- 前端 `fetchWithAuth` 不再发送 `x-user-id` 头，改为依赖签名 Cookie
+- 验证通过后签发 HMAC-SHA256 签名 Cookie，有效期 24 小时
+- 签名密钥复用 `PROVIDER_SECRET_KEY`（SHA-256 派生）
+- 前端 `fetchWithAuth` 不发送 `x-user-id` 头，依赖 Cookie 认证
 
 **为什么这样设计？**
 - **防冒充**：签名 Cookie 不可篡改，`x-user-id` 头默认不受信任
-- **统一认证**：所有请求经过统一的认证中间件
-- **权限隔离**：每个 Repository 自动过滤当前用户的数据
-- **安全性**：防止越权访问其他用户的数据
+- **统一认证**：所有请求经过 `onRequest` 钩子统一处理
+- **权限隔离**：Repository WHERE 条件含 `userId`，自动过滤当前用户数据
+- **兼容性**：未设 PIN 时裸 UUID Cookie 仍可工作
+
+### 智能体执行器架构
+
+```
+executeAgentRun / executeAgentRunWithStream
+    │
+    ├── AbortController（120s 超时）
+    │
+    ├── requestProviderCompletion / streamProviderCompletion
+    │       ↓ fetch → LLM Provider API
+    │       ↓ signal 传入 fetch options
+    │
+    ├── parseToolCalls(response)
+    │       ↓ 解析 LLM 返回的工具调用
+    │
+    └── continueExecutionLoop / continueExecutionLoopWithStream
+            │
+            ├── 工具是否需要确认（requiresConfirmation）？
+            │   ├─ 是 → 返回 waiting_confirmation + PendingConfirmationSnapshot
+            │   └─ 否 → 并行执行所有查询类工具（executeToolCallsParallel）
+            │
+            ├── 查询类工具结果缓存（queryCache，5s TTL，写入时清理过期条目）
+            │
+            └── 最多 MAX_AGENT_EXECUTION_ITERATIONS=5 轮迭代
+```
+
+**工具注册表**（`toolRegistry`）：
+
+| 工具名 | 类型 | 说明 |
+|--------|------|------|
+| `query_tasks` | 查询 | 搜索任务 |
+| `get_task_stats` | 查询 | 任务统计 |
+| `create_task` | 写操作（需确认） | 创建任务 |
+| `update_task` | 写操作（需确认） | 更新任务 |
+| `delete_task` | 写操作（需确认） | 删除任务 |
+| `query_finance` | 查询 | 搜索财务记录 |
+| `get_finance_stats` | 查询 | 财务统计 |
+| `create_finance_record` | 写操作（需确认） | 创建财务记录 |
+| `search_knowledge` | 查询 | 搜索知识笔记 |
+
+### 全局中间件与钩子
+
+**`app.ts` 配置**：
+
+| 配置 | 说明 |
+|------|------|
+| CORS | 开发环境允许 `localhost:3266`，生产环境关闭 |
+| 速率限制 | 全局 100 次/分钟，无 localhost 白名单 |
+| onRequest 钩子 | 全局认证（健康检查和 Agent 健康检查免认证） |
+| onResponse 钩子 | 请求日志（敏感字段脱敏：apiKey, pin, token 等） |
+| 错误处理器 | 409 版本冲突特殊处理，其他统一 sendInfrastructureError |
+
+**`index.ts` 启动与关闭**：
+
+| 处理器 | 说明 |
+|--------|------|
+| SIGTERM / SIGINT | 优雅关闭：`app.close()` → `prisma.$disconnect()` |
+| unhandledRejection | 记录日志 → 优雅关闭 |
+| uncaughtException | 记录日志 → 优雅关闭 |
 
 ---
 
-## 构建和部署架构
+## 数据模型
 
-### 前端构建
+### 实体关系图
 
-**Webpack 配置要点**：
+```
+User (1) ──────────── (N) AgentRun
+  │                         │
+  ├─── (1:1) UserSetting    ├─── (N) AgentMessage [CASCADE]
+  ├─── (N) ApiProvider      ├─── (N) ToolExecution [CASCADE]
+  ├─── (N) Task             └─── (N) AgentRunStateSnapshot [CASCADE]
+  ├─── (N) FinanceRecord
+  ├─── (N) KnowledgeNote
+  └─── (N) KnowledgePresetTag
+```
+
+### 核心模型字段
+
+| 模型 | 关键字段 | 软删除 | 特殊机制 |
+|------|----------|--------|----------|
+| **User** | id, name, status(active/disabled) | 否 | 默认用户 UUID 硬编码 |
+| **Task** | title(≤200), priority(low/medium/high), dueDate, notes(≤5000), version | deletedAt | 乐观锁 version |
+| **FinanceRecord** | type(income/expense), amount(≤999999999.99), category(≤100), recordDate, version | deletedAt | 乐观锁 version |
+| **KnowledgeNote** | title(≤200), content(≤50000), tagsJson(JSON数组) | deletedAt | 全文搜索 GIN 索引 |
+| **KnowledgePresetTag** | name(≤50), color(≤7), sortOrder(0-9999) | 否 | — |
+| **ApiProvider** | name, apiFormat, baseUrl, apiKeyEncrypted(AES), model, isActive | deletedAt | API Key AES-256-GCM 加密 |
+| **AgentRun** | status(pending/running/waiting_confirmation/completed/failed/cancelled) | 否 | 状态快照 |
+| **AgentMessage** | role(system/user/assistant/tool), content, sequence | 否 | 有序消息链 |
+| **ToolExecution** | toolName, status, requiresConfirmation | 否 | 确认门控 |
+
+### 数据库迁移历史
+
+| 迁移 | 说明 |
+|------|------|
+| `20260504_initial_foundation` | 核心表：users, user_settings, api_providers, tasks, finance_records |
+| `20260504_knowledge_authority` | knowledge_bases 表 |
+| `20260504_knowledge_structured_storage` | 知识图谱表：entities, documents, relations, assertions |
+| `20260505_agent_runtime_foundation` | 智能体运行时：agent_runs, agent_messages, tool_executions, snapshots |
+| `20260505_knowledge_ontology_tables` | 本体：classes 和 relations |
+| `20260505_projection_outbox` | 事件溯源 outbox 表 |
+| `20260505_search_fts_indexes` | 全文搜索 GIN 索引 |
+
+> **注意**：`knowledge_bases`、`knowledge_entities` 等表存在于迁移中但未建模于 `schema.prisma`，存在 schema 漂移。
+
+---
+
+## 环境变量配置
+
+| 变量 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `SERVER_HOST` | string | `127.0.0.1` | 服务绑定地址 |
+| `SERVER_PORT` | number | `8787` | 服务端口 |
+| `DATABASE_URL` | string | `postgresql://postgres:postgres@127.0.0.1:5432/table_dev` | 数据库连接串 |
+| `ALLOW_DEFAULT_USER_FALLBACK` | boolean | `false` | 允许回退到默认用户 |
+| `TRUST_USER_ID_HEADER` | boolean | `false` | 信任 x-user-id 头（默认关闭） |
+| `DEFAULT_USER_ID` | uuid | `00000000-0000-0000-0000-000000000001` | 默认用户 UUID |
+| `PROVIDER_SECRET_KEY` | string | `table-dev-provider-secret-key-change-me` | API Key 加密密钥 + 签名密钥（≥16字符） |
+| `DEFAULT_PROVIDER_NAME` | string | `GLM-5 Provider` | 默认 AI Provider 名称 |
+| `DEFAULT_PROVIDER_FORMAT` | enum | `openai` | 默认格式：openai/anthropic/gemini/custom |
+| `DEFAULT_PROVIDER_BASE_URL` | string | `''` | 默认 Provider API 地址 |
+| `DEFAULT_PROVIDER_API_KEY` | string | `''` | 默认 Provider API Key |
+| `DEFAULT_PROVIDER_MODEL` | string | `''` | 默认模型名称 |
+| `PROJECTION_OUTBOX_POLL_MS` | number | `1500` | Outbox 轮询间隔 |
+| `PROJECTION_OUTBOX_BATCH_SIZE` | number | `20` | Outbox 批次大小（≤100） |
+
+---
+
+## 构建和部署
+
+### NPM 脚本
+
+| 脚本 | 命令 | 说明 |
+|------|------|------|
+| `dev` | `webpack serve` | 前端开发服务器（端口 3266） |
+| `build` | `webpack --mode production` | 前端生产构建 |
+| `typecheck` | `tsc --noEmit` | 前端类型检查 |
+| `server:dev` | `node server/dev-server.js` | 后端开发服务器 |
+| `server:build` | `tsc -p tsconfig.server.json` | 后端 TypeScript 编译 |
+| `server:typecheck` | `tsc -p tsconfig.server.json --noEmit` | 后端类型检查 |
+| `server:seed` | `node server/scripts/seed.js` | 数据库种子数据 |
+| `agent:e2e` | `node scripts/e2e/agent-e2e-cdp.mjs` | Agent E2E 测试 |
+| `knowledge:e2e` | `node scripts/e2e/knowledge-notes-e2e-cdp.mjs` | 知识库 E2E 测试 |
+
+### Webpack 配置要点
 
 | 配置项 | 说明 |
 |--------|------|
-| **入口** | `src/index.tsx` |
-| **输出** | `dist/` 目录 |
-| **代码分割** | 按 Vendor 拆分（React、图表库、动画库） |
-| **开发服务器** | 端口 3266，代理 `/api/*` 到后端 |
-| **Babel** | 支持 React、TypeScript、ES2020 |
+| 入口 | `src/index.tsx` |
+| 输出 | `dist/`，生产环境 content hash |
+| Babel | @babel/preset-react（automatic runtime）+ preset-env + preset-typescript |
+| CSS | style-loader + css-loader + postcss-loader（Tailwind） |
+| 开发代理 | `/api/*` → `http://127.0.0.1:8787` |
+| 模块黑名单 | sharp、onnxruntime-node/web 设为 false |
+| 路由 | HashRouter，historyApiFallback |
 
-**构建命令**：
+### Prisma 工作流
+
 ```bash
-npm run dev      # 开发模式 (webpack serve)
-npm run build    # 生产模式 (webpack --mode production)
-```
-
-### 后端构建
-
-**TypeScript 配置要点**：
-
-| 配置项 | 说明 |
-|--------|------|
-| **目标** | ES2020 |
-| **模块** | CommonJS |
-| **输出** | `dist-server/` 目录 |
-| **类型** | 包含 Node.js 类型 |
-
-**构建命令**：
-```bash
-npm run server:build    # TypeScript 编译
-npm run server:dev      # 开发服务器 (带热重载)
-```
-
-### 数据库迁移
-
-**Prisma 工作流**：
-```bash
-npx prisma migrate dev   # 创建并应用迁移
 npx prisma generate      # 生成 Prisma Client
-npx prisma studio        # 可视化数据库管理
+npx prisma migrate deploy # 应用迁移
+npx prisma studio         # 可视化数据库管理
 ```
 
 ---
 
-## 为什么要这样设计架构？
-
-### 核心设计原则总结
+## 核心设计原则
 
 | 原则 | 在项目中的体现 |
 |------|----------------|
 | **单一职责** | 每个文件/模块只负责一个功能 |
-| **关注点分离** | 前端/后端分离、UI/业务逻辑分离 |
-| **依赖倒置** | 高层模块不依赖底层模块（如 Store 不依赖具体存储实现） |
-| **开闭原则** | 对扩展开放，对修改关闭（如添加新模块只需新增目录） |
-| **DRY** | 重复代码抽取到 shared 目录 |
-
-### 架构优势
-
-1. **可扩展性**：新增功能只需添加新模块，不影响现有代码
-2. **可维护性**：代码结构清晰，易于定位问题
-3. **可测试性**：各层独立，便于单元测试和集成测试
-4. **团队协作**：多人开发时，模块边界清晰，减少冲突
-5. **部署灵活**：前后端可独立部署，支持水平扩展
+| **关注点分离** | 前端/后端分离、UI/业务逻辑分离、路由/服务/仓储分层 |
+| **服务端权威** | 所有写操作走 API，Store 仅作内存缓存，SyncEngine 服务端拉取 |
+| **乐观锁** | Task/Finance 更新使用 version 字段防并发冲突 |
+| **安全纵深** | 签名 Cookie + preHandler 权限检查 + Repository userId 过滤 + Zod 输入校验 |
+| **优雅降级** | 未设 PIN 时裸 UUID Cookie 兼容、Provider 无响应 120s 超时 |
 
 ---
 
-## 总结
+## 已知问题与注意事项
 
-这个项目采用了 **经典的分层架构**，结合了 **事件驱动** 和 **Repository 模式**，是一个非常标准的现代 Web 应用架构设计。
-
-**核心架构理念**：
-- **前端**：React + 自定义 Store + 事件总线，实现高效的状态管理和组件通信
-- **后端**：Fastify + Prisma + 模块化设计，实现高性能 API 和类型安全的数据访问
-- **数据同步**：双向同步 + 冲突检测，确保数据一致性
-- **构建部署**：Webpack + TypeScript，支持开发热重载和生产优化
-
-这种架构设计使得项目具有良好的 **可扩展性**、**可维护性** 和 **可测试性**，是构建中大型 Web 应用的标准实践。
+1. **Schema 漂移**：`knowledge_bases`、`knowledge_entities` 等表存在于迁移中但未建模于 `schema.prisma`，seed 脚本引用了不存在的模型
+2. **流式端点**：`POST /api/agent/runs/stream` 当前无法通过 curl 返回数据，可能是 SSE 格式兼容问题
+3. **零测试覆盖**：项目无自动化测试文件，所有变更依赖手动验证
+4. **SyncEngine 有限**：仅处理 knowledge 类型同步，finance/task 无后台同步（每次操作直走 API）
+5. **单用户设计**：当前面向单用户本地使用，多用户场景下 `baselineReadyUsers` 等内存结构需重新评估
