@@ -65,10 +65,14 @@ export function TagSelector({
 
   const handleCreatePreset = async (color: string) => {
     if (onCreatePresetTag && newTagName.trim()) {
-      await onCreatePresetTag(newTagName.trim(), color);
-      handleAddTag(newTagName.trim());
-      setNewTagName('');
-      setShowColorPicker(false);
+      try {
+        await onCreatePresetTag(newTagName.trim(), color);
+        handleAddTag(newTagName.trim());
+        setNewTagName('');
+        setShowColorPicker(false);
+      } catch {
+        // keep current input so the user can retry after the page shows feedback
+      }
     }
   };
 

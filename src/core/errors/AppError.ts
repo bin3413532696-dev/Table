@@ -24,6 +24,7 @@ export enum ErrorCode {
   ENTITY_NOT_FOUND = 'ENTITY_NOT_FOUND',
   DUPLICATE_ENTITY = 'DUPLICATE_ENTITY',
   OPERATION_CANCELLED = 'OPERATION_CANCELLED',
+  VERSION_CONFLICT = 'VERSION_CONFLICT',
 }
 
 /**
@@ -41,6 +42,7 @@ const ERROR_MESSAGES: Record<ErrorCode, string> = {
   [ErrorCode.ENTITY_NOT_FOUND]: '实体不存在',
   [ErrorCode.DUPLICATE_ENTITY]: '实体已存在',
   [ErrorCode.OPERATION_CANCELLED]: '操作已取消',
+  [ErrorCode.VERSION_CONFLICT]: '数据已被其他请求修改，请刷新后重试',
 };
 
 /**

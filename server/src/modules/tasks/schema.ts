@@ -19,7 +19,7 @@ export const updateTaskSchema = z.object({
   dueDate: z.string().trim().max(30).nullable().optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
   completed: z.boolean().optional(),
-  version: z.number().int().min(1).optional(),
+  version: z.number().int().min(1),
 }).refine((value) => Object.keys(value).filter((k) => k !== 'version').length > 0, {
   message: 'At least one field must be provided',
 });

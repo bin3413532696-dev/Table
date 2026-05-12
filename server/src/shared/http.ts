@@ -15,6 +15,14 @@ export function sendInfrastructureError(reply: FastifyReply, error: unknown) {
     return sendValidationError(reply, error);
   }
 
+  if (error && typeof error === 'object' && 'statusCode' in error && error.statusCode === 409) {
+    const message = 'message' in error && typeof error.message === 'string' ? error.message : 'Resource was modified by another request. Please refresh and try again.';
+    return reply.code(409).send({
+      error: 'VERSION_CONFLICT',
+      message,
+    });
+  }
+
   if (error instanceof AuthError) {
     return reply.code(error.statusCode).send({
       error: error.code,

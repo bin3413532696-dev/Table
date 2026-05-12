@@ -7,6 +7,7 @@ import {
   updateFinanceRecord,
 } from './repository';
 import { toFinanceRecordDto } from './dto';
+import { ensureMutationResult } from '../../shared/conflict';
 
 export async function getFinanceList() {
   const records = await listFinanceRecords();
@@ -25,11 +26,13 @@ export async function getFinanceRecordDetail(id: string) {
 
 export async function updateFinanceRecordEntry(id: string, input: UpdateFinanceRecordInput) {
   const existing = await findFinanceRecordById(id);
-  if (!existing) {
-    return null;
-  }
   const record = await updateFinanceRecord(id, input);
-  return record ? toFinanceRecordDto(record) : null;
+  const ensured = ensureMutationResult(
+    existing,
+    record,
+    'Finance record was modified by another request. Please refresh and try again.'
+  );
+  return ensured ? toFinanceRecordDto(ensured) : null;
 }
 
 export async function deleteFinanceRecordEntry(id: string) {

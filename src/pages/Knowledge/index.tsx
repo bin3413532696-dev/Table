@@ -123,8 +123,13 @@ export default function KnowledgePage() {
   };
 
   const handleCreatePresetTag = async (name: string, color: string) => {
-    const created = await api.createPresetTag({ name, color });
-    setPresetTags([...presetTags, created]);
+    try {
+      const created = await api.createPresetTag({ name, color });
+      setPresetTags([...presetTags, created]);
+    } catch (error) {
+      showFeedback('error', error instanceof Error ? error.message : MESSAGES.knowledge.createPresetTagFailed);
+      throw error;
+    }
   };
 
   if (isLoading) {

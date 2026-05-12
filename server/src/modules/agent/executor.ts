@@ -500,7 +500,12 @@ async function updateTaskTool(args: Record<string, unknown>) {
       ? { priority: args.priority }
       : {}),
     ...(typeof args.dueDate === 'string' ? { dueDate: args.dueDate } : {}),
+    version: existing.version,
   });
+
+  if (!updated) {
+    throw new Error(`任务已被其他请求修改: ${args.id}`);
+  }
 
   return toTaskDto(updated);
 }
