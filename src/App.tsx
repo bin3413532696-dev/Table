@@ -9,6 +9,15 @@ import { fetchPinStatus } from './lib/auth';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Knowledge = lazy(() => import('./pages/Knowledge'));
+const Writing = lazy(() => import('./pages/Writing'));
+const WritingProjectLayout = lazy(() => import('./pages/Writing/ProjectLayout'));
+const WritingOverviewPage = lazy(() => import('./pages/Writing/pages/OverviewPage'));
+const WritingCanonPage = lazy(() => import('./pages/Writing/pages/CanonPage'));
+const WritingReviewPage = lazy(() => import('./pages/Writing/pages/ReviewPage'));
+const WritingBiblePage = lazy(() => import('./pages/Writing/pages/BiblePage'));
+const WritingWorkflowsPage = lazy(() => import('./pages/Writing/pages/WorkflowsPage'));
+const WritingHistoryPage = lazy(() => import('./pages/Writing/pages/HistoryPage'));
+const WritingSettingsPage = lazy(() => import('./pages/Writing/pages/SettingsPage'));
 const Tasks = lazy(() => import('./pages/Tasks'));
 const Tools = lazy(() => import('./pages/Tools'));
 const Finance = lazy(() => import('./pages/Finance'));
@@ -84,6 +93,16 @@ function App() {
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="knowledge" element={<Knowledge />} />
+              <Route path="writing" element={<Writing />} />
+              <Route path="writing/projects/:projectId" element={<WritingProjectLayout />}>
+                <Route index element={<WritingOverviewPage />} />
+                <Route path="canon" element={<WritingCanonPage />} />
+                <Route path="review" element={<WritingReviewPage />} />
+                <Route path="bible" element={<WritingBiblePage />} />
+                <Route path="workflows" element={<WritingWorkflowsPage />} />
+                <Route path="history" element={<WritingHistoryPage />} />
+                <Route path="settings" element={<WritingSettingsPage />} />
+              </Route>
               <Route path="tasks" element={<Tasks />} />
               <Route path="tools" element={<Tools />} />
               <Route path="finance" element={<Finance />} />
