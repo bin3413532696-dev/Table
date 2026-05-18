@@ -1,46 +1,62 @@
-import { StateGraph, END, interrupt } from '@langchain/langgraph';
+import { StateGraph, END, Command, interrupt } from '@langchain/langgraph';
 import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
-import type { AgentState, ToolCall, ExecutedToolCall } from './state';
+import type { AgentState, ToolCall, ExecutedToolCall, TimelineEvent } from './state';
 import { AgentStateAnnotation, MAX_ITERATIONS } from './state';
 import { createChatModel } from './chatModel';
 import { parseToolCalls, getCachedResult, setCachedResult } from './parser';
 import { SYSTEM_PROMPT, buildToolResultPrompt } from './prompts';
 import { allTools, requiresConfirmation } from './tools';
+import { getCheckpointer } from './postgres-checkpointer';
+import { MessageManager } from './message-manager';
 
-/**
- * 执行单个工具
- */
+function now() {
+  return Date.now();
+}
+
+function isoNow() {
+  return new Date().toISOString();
+}
+
+function appendTimeline(state: AgentState, event: TimelineEvent): TimelineEvent[] {
+  return [...state.timeline, event];
+}
+
 async function executeToolCallInternal(toolCall: ToolCall): Promise<ExecutedToolCall> {
-  const tool = allTools.find(t => t.name === toolCall.name);
+  const tool = allTools.find((t) => t.name === toolCall.name);
   if (!tool) {
-    return { ...toolCall, result: null, success: false, error: `不支持的工具: ${toolCall.name}` };
+    return {
+      ...toolCall,
+      result: null,
+      success: false,
+      error: `不支持的工具: ${toolCall.name}`,
+      status: 'failed',
+      createdAt: now(),
+    };
   }
 
   try {
-    // LangChain tool.invoke 需要特定类型的参数，但我们动态执行需要绕过类型检查
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (tool as any).invoke(toolCall.arguments);
-    return { ...toolCall, result, success: true };
+    return {
+      ...toolCall,
+      result,
+      success: true,
+      status: 'completed',
+      createdAt: now(),
+    };
   } catch (error) {
     return {
       ...toolCall,
       result: null,
       success: false,
       error: error instanceof Error ? error.message : '工具执行失败',
+      status: 'failed',
+      createdAt: now(),
     };
   }
 }
 
-/**
- * LangGraph Agent 执行图
- */
-
-// ============ 节点函数 ============
-
-/**
- * 初始化节点
- */
-async function initNode(state: AgentState): Promise<Partial<AgentState>> {
+async function initNode(): Promise<Partial<AgentState>> {
   return {
     messages: [],
     executedToolCalls: [],
@@ -52,57 +68,69 @@ async function initNode(state: AgentState): Promise<Partial<AgentState>> {
     confirmedToolCall: null,
     error: null,
     assistantTextChunks: [],
+    timeline: [],
+    finalText: '',
   };
 }
 
-/**
- * 构建消息节点
- */
 async function buildMessagesNode(state: AgentState): Promise<Partial<AgentState>> {
+  const timestamp = now();
   const messages: AgentState['messages'] = [
-    { role: 'system' as const, content: state.systemPrompt || SYSTEM_PROMPT },
+    { role: 'system', content: state.systemPrompt || SYSTEM_PROMPT, createdAt: timestamp },
     ...state.initialMessages
-      .filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
-      .map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
-    { role: 'user' as const, content: state.inputText },
+      .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+      .map((m) => ({
+        role: m.role as 'user' | 'assistant' | 'system',
+        content: m.content,
+        createdAt: timestamp,
+      })),
+    { role: 'user', content: state.inputText, createdAt: timestamp },
   ];
 
-  // 如果有已执行的工具结果，添加工具结果消息
   if (state.executedToolCalls.length > 0) {
     messages.push({
-      role: 'user' as const,
+      role: 'user',
       content: buildToolResultPrompt(state.executedToolCalls),
+      createdAt: timestamp,
     });
   }
 
   return { messages };
 }
 
-/**
- * 调用模型节点
- */
 async function callModelNode(state: AgentState): Promise<Partial<AgentState>> {
   const chatModel = createChatModel(state.provider, state.model);
-
-  const lcMessages = state.messages.map(m => {
+  let lcMessages = state.messages.map((m) => {
     if (m.role === 'system') return new SystemMessage(m.content);
     if (m.role === 'assistant') return new AIMessage(m.content);
     return new HumanMessage(m.content);
   });
 
+  const messageManager = MessageManager.fromProviderConfig(state.provider, state.model);
+  lcMessages = (await messageManager.trim(lcMessages)) as typeof lcMessages;
+
+  const startTs = isoNow();
   const response = await chatModel.invoke(lcMessages);
-  const responseContent = typeof response.content === 'string'
-    ? response.content
-    : JSON.stringify(response.content);
+  const responseContent =
+    typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
 
   return {
-    messages: [...state.messages, { role: 'assistant' as const, content: responseContent }],
+    messages: [
+      ...state.messages,
+      { role: 'assistant', content: responseContent, createdAt: now() },
+    ],
+    timeline: appendTimeline(state, {
+      type: 'llm_start',
+      timestamp: startTs,
+      data: { model: state.model },
+    }).concat({
+      type: 'llm_end',
+      timestamp: isoNow(),
+      data: { model: state.model },
+    }),
   };
 }
 
-/**
- * 解析工具节点
- */
 async function parseToolsNode(state: AgentState): Promise<Partial<AgentState>> {
   const lastMessage = state.messages[state.messages.length - 1];
   if (!lastMessage || lastMessage.role !== 'assistant') {
@@ -110,19 +138,18 @@ async function parseToolsNode(state: AgentState): Promise<Partial<AgentState>> {
   }
 
   const { textContent, toolCalls } = parseToolCalls(lastMessage.content);
-
   return {
     pendingToolCalls: toolCalls,
     messages: [
       ...state.messages.slice(0, -1),
-      { role: 'assistant' as const, content: textContent },
+      {
+        ...lastMessage,
+        content: textContent,
+      },
     ],
   };
 }
 
-/**
- * 检查确认节点
- */
 async function checkConfirmationNode(state: AgentState): Promise<Partial<AgentState>> {
   if (state.confirmedToolCall) {
     return { requiresConfirmation: false };
@@ -132,6 +159,7 @@ async function checkConfirmationNode(state: AgentState): Promise<Partial<AgentSt
     if (requiresConfirmation(toolCall.name)) {
       return {
         requiresConfirmation: true,
+        status: 'waiting_confirmation',
         pendingToolExecution: {
           id: toolCall.id,
           toolName: toolCall.name,
@@ -145,12 +173,12 @@ async function checkConfirmationNode(state: AgentState): Promise<Partial<AgentSt
   return { requiresConfirmation: false };
 }
 
-/**
- * 执行工具节点
- */
 async function executeToolsNode(state: AgentState): Promise<Partial<AgentState>> {
-  const results: ExecutedToolCall[] = [];
+  const accumulated = [...state.executedToolCalls];
   const pendingConfirmTools: ToolCall[] = [];
+  let nextStatus: AgentState['status'] | undefined;
+  let nextError: string | null | undefined;
+  let timeline = [...state.timeline];
 
   for (const toolCall of state.pendingToolCalls) {
     if (requiresConfirmation(toolCall.name)) {
@@ -158,85 +186,157 @@ async function executeToolsNode(state: AgentState): Promise<Partial<AgentState>>
       continue;
     }
 
+    const startTs = isoNow();
+    timeline.push({
+      type: 'tool_start',
+      timestamp: startTs,
+      data: { toolName: toolCall.name, arguments: toolCall.arguments },
+    });
+
     const cached = getCachedResult(toolCall.name, toolCall.arguments);
     if (cached !== null) {
-      results.push({ ...toolCall, result: cached, success: true });
+      accumulated.push({
+        ...toolCall,
+        result: cached,
+        success: true,
+        status: 'completed',
+        createdAt: now(),
+      });
+      timeline.push({
+        type: 'tool_end',
+        timestamp: isoNow(),
+        data: { toolName: toolCall.name, success: true, cached: true },
+      });
       continue;
     }
 
     const executed = await executeToolCallInternal(toolCall);
     if (executed.success) {
       setCachedResult(toolCall.name, toolCall.arguments, executed.result);
+    } else if (!nextError) {
+      nextStatus = 'failed';
+      nextError = executed.error ?? '工具执行失败';
     }
-    results.push(executed);
+    accumulated.push(executed);
+    timeline.push({
+      type: 'tool_end',
+      timestamp: isoNow(),
+      data: { toolName: toolCall.name, success: executed.success },
+    });
   }
 
   return {
-    executedToolCalls: results,
+    executedToolCalls: accumulated,
     pendingToolCalls: pendingConfirmTools,
     iterationCount: state.iterationCount + 1,
+    ...(nextStatus ? { status: nextStatus } : {}),
+    ...(nextError !== undefined ? { error: nextError } : {}),
+    timeline,
   };
 }
 
-/**
- * 请求确认节点
- */
-async function requestConfirmationNode(state: AgentState): Promise<Partial<AgentState>> {
+async function requestConfirmationNode(state: AgentState): Promise<Partial<AgentState> | Command> {
   if (!state.pendingToolExecution) {
-    return { status: 'completed' as AgentState['status'] };
+    return { status: 'completed' };
   }
 
-  const decision = interrupt({
+  const approved = interrupt<{
+    toolName: string;
+    arguments: Record<string, unknown>;
+    confirmationMessage: string;
+  }, boolean>({
     toolName: state.pendingToolExecution.toolName,
     arguments: state.pendingToolExecution.arguments,
     confirmationMessage: state.pendingToolExecution.confirmationMessage,
   });
 
-  if (decision === 'confirmed') {
-    return { status: 'running' as AgentState['status'], requiresConfirmation: false };
+  if (!approved) {
+    return {
+      status: 'cancelled',
+      requiresConfirmation: false,
+      pendingToolExecution: null,
+      pendingToolCalls: [],
+      timeline: appendTimeline(state, {
+        type: 'interrupted',
+        timestamp: isoNow(),
+        data: { reason: 'rejected', toolName: state.pendingToolExecution.toolName },
+      }),
+    };
   }
 
-  return {
-    status: 'cancelled' as AgentState['status'],
-    requiresConfirmation: false,
-    pendingToolExecution: null,
-  };
+  return new Command({
+    goto: 'execute_confirmed_tool',
+    update: {
+      confirmedToolCall: {
+        id: state.pendingToolExecution.id,
+        name: state.pendingToolExecution.toolName,
+        arguments: state.pendingToolExecution.arguments,
+      },
+      requiresConfirmation: false,
+      status: 'running',
+      timeline: appendTimeline(state, {
+        type: 'confirmation',
+        timestamp: isoNow(),
+        data: {
+          toolName: state.pendingToolExecution.toolName,
+          arguments: state.pendingToolExecution.arguments,
+        },
+      }),
+    },
+  });
 }
 
-/**
- * 执行确认工具节点
- */
 async function executeConfirmedToolNode(state: AgentState): Promise<Partial<AgentState>> {
   if (!state.confirmedToolCall) {
     return {};
   }
 
-  const executed = await executeToolCallInternal(state.confirmedToolCall);
+  const toolCall = state.confirmedToolCall;
+  const timeline = appendTimeline(state, {
+    type: 'tool_start',
+    timestamp: isoNow(),
+    data: { toolName: toolCall.name, arguments: toolCall.arguments, confirmed: true },
+  });
+
+  const cached = getCachedResult(toolCall.name, toolCall.arguments);
+  let executed: ExecutedToolCall;
+  if (cached !== null) {
+    executed = {
+      ...toolCall,
+      result: cached,
+      success: true,
+      status: 'completed',
+      createdAt: now(),
+    };
+  } else {
+    executed = await executeToolCallInternal(toolCall);
+    if (executed.success) {
+      setCachedResult(toolCall.name, toolCall.arguments, executed.result);
+    }
+  }
 
   return {
-    executedToolCalls: [executed],
+    executedToolCalls: [...state.executedToolCalls, executed],
     confirmedToolCall: null,
     pendingToolExecution: null,
-    ...(executed.error ? { error: executed.error, status: 'failed' as AgentState['status'] } : {}),
+    pendingToolCalls: [],
+    ...(executed.error ? { error: executed.error, status: 'failed' as const } : {}),
+    timeline: timeline.concat({
+      type: 'tool_end',
+      timestamp: isoNow(),
+      data: { toolName: toolCall.name, success: executed.success, confirmed: true },
+    }),
   };
 }
 
-/**
- * 完成节点
- */
 async function finalizeNode(state: AgentState): Promise<Partial<AgentState>> {
-  const lastMessage = state.messages[state.messages.length - 1];
+  const lastAssistant = [...state.messages].reverse().find((m) => m.role === 'assistant');
   return {
-    finalText: lastMessage?.content || '',
-    status: state.error ? 'failed' as AgentState['status'] : 'completed' as AgentState['status'],
+    finalText: lastAssistant?.content || '',
+    status: state.status === 'cancelled' ? 'cancelled' : state.error ? 'failed' : 'completed',
   };
 }
 
-// ============ 条件路由函数 ============
-
-/**
- * 解析后路由
- */
 function afterParseRouter(state: AgentState): string {
   if (state.status === 'cancelled' || state.status === 'failed') return 'finalize';
   if (state.iterationCount >= MAX_ITERATIONS) return 'finalize';
@@ -244,34 +344,17 @@ function afterParseRouter(state: AgentState): string {
   return 'check_confirmation';
 }
 
-/**
- * 确认检查后路由
- */
 function afterCheckConfirmationRouter(state: AgentState): string {
   if (state.requiresConfirmation) return 'request_confirmation';
   if (state.pendingToolCalls.length > 0) return 'execute_tools';
   return 'finalize';
 }
 
-/**
- * 执行工具后路由
- */
 function afterExecuteRouter(state: AgentState): string {
   if (state.status === 'cancelled' || state.status === 'failed') return 'finalize';
   if (state.iterationCount >= MAX_ITERATIONS) return 'finalize';
   return 'build_messages';
 }
-
-/**
- * 确认请求后路由
- */
-function afterConfirmationRequestRouter(state: AgentState): string {
-  if (state.confirmedToolCall) return 'execute_confirmed_tool';
-  if (state.status === 'cancelled') return 'finalize';
-  return 'build_messages';
-}
-
-// ============ 构建 Graph ============
 
 const workflow = new StateGraph(AgentStateAnnotation)
   .addNode('init', initNode)
@@ -280,39 +363,34 @@ const workflow = new StateGraph(AgentStateAnnotation)
   .addNode('parse_tools', parseToolsNode)
   .addNode('check_confirmation', checkConfirmationNode)
   .addNode('execute_tools', executeToolsNode)
-  .addNode('request_confirmation', requestConfirmationNode)
+  .addNode('request_confirmation', requestConfirmationNode, {
+    ends: ['execute_confirmed_tool'],
+  })
   .addNode('execute_confirmed_tool', executeConfirmedToolNode)
   .addNode('finalize', finalizeNode)
-
   .addEdge('__start__', 'init')
   .addEdge('init', 'build_messages')
   .addEdge('build_messages', 'call_model')
   .addEdge('call_model', 'parse_tools')
-
   .addConditionalEdges('parse_tools', afterParseRouter)
   .addConditionalEdges('check_confirmation', afterCheckConfirmationRouter)
   .addConditionalEdges('execute_tools', afterExecuteRouter)
-  .addConditionalEdges('request_confirmation', afterConfirmationRequestRouter)
   .addConditionalEdges('execute_confirmed_tool', afterExecuteRouter)
-
   .addEdge('finalize', END);
 
-export const agentGraph = workflow.compile();
+export const agentGraph = workflow.compile({
+  checkpointer: getCheckpointer(),
+});
 
-/**
- * 执行 Agent
- */
-export async function executeAgentGraph(
-  input: {
-    inputText: string;
-    initialMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
-    provider: AgentState['provider'];
-    model: string;
-    runId: string;
-    userId: string;
-    systemPrompt?: string;
-  }
-): Promise<AgentState> {
+export async function executeAgentGraph(input: {
+  inputText: string;
+  initialMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
+  provider: AgentState['provider'];
+  model: string;
+  runId: string;
+  userId: string;
+  systemPrompt?: string;
+}): Promise<AgentState> {
   const initialState: Partial<AgentState> = {
     inputText: input.inputText,
     initialMessages: input.initialMessages,
@@ -323,24 +401,13 @@ export async function executeAgentGraph(
     systemPrompt: input.systemPrompt || SYSTEM_PROMPT,
   };
 
-  const result = await agentGraph.invoke(initialState, {
+  return agentGraph.invoke(initialState, {
     configurable: { thread_id: input.runId },
   });
-
-  return result;
 }
 
-/**
- * 继续执行（用户确认后）
- */
-export async function continueAgentGraph(
-  runId: string,
-  confirmedToolCall: ToolCall
-): Promise<AgentState> {
-  const result = await agentGraph.invoke(
-    { confirmedToolCall },
-    { configurable: { thread_id: runId } }
-  );
-
-  return result;
+export async function continueAgentGraph(runId: string, approved: boolean): Promise<AgentState> {
+  return agentGraph.invoke(new Command({ resume: approved }), {
+    configurable: { thread_id: runId },
+  });
 }

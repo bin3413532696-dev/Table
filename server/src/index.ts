@@ -1,10 +1,19 @@
 import { createApp } from './app';
 import { loadServerConfig } from './shared/config';
 import { prisma } from './db/client';
+import { closeCheckpointer, initCheckpointer } from './modules/agent/langgraph/postgres-checkpointer';
 
 async function bootstrap() {
   const config = loadServerConfig();
   const app = createApp();
+
+  // 初始化 LangGraph Checkpointer（创建必要表）
+  try {
+    await initCheckpointer();
+    app.log.info('LangGraph checkpointer initialized');
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed to initialize checkpointer');
+  }
 
   try {
     await app.listen({ host: config.SERVER_HOST, port: config.SERVER_PORT });
@@ -23,6 +32,7 @@ async function bootstrap() {
     app.log.info(`Received ${signal}, shutting down gracefully...`);
     try {
       await app.close();
+      await closeCheckpointer();
       await prisma.$disconnect();
       app.log.info('Server shut down successfully');
       process.exit(0);

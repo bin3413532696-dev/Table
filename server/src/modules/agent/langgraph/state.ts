@@ -1,10 +1,5 @@
 import { Annotation } from '@langchain/langgraph';
 
-/**
- * Agent 状态定义
- * 使用 LangGraph Annotation 定义状态结构和 reducer
- */
-
 export type RunStatus = 'running' | 'waiting_confirmation' | 'completed' | 'failed' | 'cancelled';
 
 export type ProviderConfig = {
@@ -20,6 +15,7 @@ export type ProviderConfig = {
 export type ConversationMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  createdAt?: number;
 };
 
 export type ToolCall = {
@@ -32,6 +28,8 @@ export type ExecutedToolCall = ToolCall & {
   result: unknown;
   success: boolean;
   error?: string;
+  status?: 'completed' | 'failed' | 'waiting_confirmation';
+  createdAt?: number;
 };
 
 export type PendingToolExecution = {
@@ -41,8 +39,13 @@ export type PendingToolExecution = {
   confirmationMessage: string;
 };
 
+export type TimelineEvent = {
+  type: 'llm_start' | 'llm_end' | 'tool_start' | 'tool_end' | 'confirmation' | 'interrupted';
+  timestamp: string;
+  data: Record<string, unknown>;
+};
+
 export const AgentStateAnnotation = Annotation.Root({
-  // 输入
   inputText: Annotation<string>,
   initialMessages: Annotation<Array<{
     role: 'user' | 'assistant' | 'system';
@@ -50,53 +53,70 @@ export const AgentStateAnnotation = Annotation.Root({
     metadata?: Record<string, unknown>;
   }>>,
 
-  // Provider 配置
   provider: Annotation<ProviderConfig>,
   model: Annotation<string>,
   systemPrompt: Annotation<string>,
 
-  // 消息序列（使用默认 reducer，每次覆盖）
-  messages: Annotation<ConversationMessage[]>,
+  messages: Annotation<ConversationMessage[]>({
+    default: () => [],
+    reducer: (_, y) => y ?? [],
+  }),
 
-  // 工具执行状态
   executedToolCalls: Annotation<ExecutedToolCall[]>({
     default: () => [],
     reducer: (_, y) => y ?? [],
   }),
 
-  // 待执行工具（使用默认 reducer）
-  pendingToolCalls: Annotation<ToolCall[]>,
+  pendingToolCalls: Annotation<ToolCall[]>({
+    default: () => [],
+    reducer: (_, y) => y ?? [],
+  }),
 
-  // 用户确认相关
-  requiresConfirmation: Annotation<boolean>,
-  pendingToolExecution: Annotation<PendingToolExecution | null>,
-  confirmedToolCall: Annotation<ToolCall | null>,
+  requiresConfirmation: Annotation<boolean>({
+    default: () => false,
+    reducer: (_, y) => y,
+  }),
+  pendingToolExecution: Annotation<PendingToolExecution | null>({
+    default: () => null,
+    reducer: (_, y) => y,
+  }),
+  confirmedToolCall: Annotation<ToolCall | null>({
+    default: () => null,
+    reducer: (_, y) => y,
+  }),
 
-  // 输出
-  finalText: Annotation<string>,
+  finalText: Annotation<string>({
+    default: () => '',
+    reducer: (_, y) => y,
+  }),
 
-  // 元数据
   runId: Annotation<string>,
   userId: Annotation<string>,
-  iterationCount: Annotation<number>,
-  status: Annotation<RunStatus>,
-  error: Annotation<string | null>,
+  iterationCount: Annotation<number>({
+    default: () => 0,
+    reducer: (_, y) => y,
+  }),
+  status: Annotation<RunStatus>({
+    default: () => 'running',
+    reducer: (_, y) => y,
+  }),
+  error: Annotation<string | null>({
+    default: () => null,
+    reducer: (_, y) => y,
+  }),
 
-  // 流式控制
   assistantTextChunks: Annotation<string[]>({
     default: () => [],
-    reducer: (_, y) => y,
+    reducer: (_, y) => y ?? [],
+  }),
+
+  timeline: Annotation<TimelineEvent[]>({
+    default: () => [],
+    reducer: (x, y) => [...(x ?? []), ...(y ?? [])],
   }),
 });
 
 export type AgentState = typeof AgentStateAnnotation.State;
 
-/**
- * 最大迭代次数
- */
 export const MAX_ITERATIONS = Number(process.env.MAX_AGENT_ITERATIONS) || 5;
-
-/**
- * 工具缓存 TTL（毫秒）
- */
 export const CACHE_TTL_MS = 5000;

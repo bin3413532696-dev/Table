@@ -13,6 +13,7 @@ import {
 import type { AgentRunDetailDto } from '../../../lib/agentApi';
 import { MessageList } from './MessageList';
 import { Button } from '../../../components/ui';
+import { MESSAGES } from '../../../core/messages';
 
 interface RunDetailProps {
   run: AgentRunDetailDto;
@@ -20,8 +21,6 @@ interface RunDetailProps {
   onDelete: () => void;
   isLoading: boolean;
 }
-
-import { MESSAGES } from '../../../core/messages';
 
 const statusConfig: Record<string, { icon: React.ElementType; color: string; label: string; bgColor: string }> = {
   completed: { icon: CheckCircle, color: 'text-green-500', label: MESSAGES.agent.statusCompleted, bgColor: 'bg-green-500/10' },
@@ -42,7 +41,6 @@ export const RunDetail: React.FC<RunDetailProps> = ({ run, onContinue, onDelete,
       animate={{ opacity: 1 }}
       className="h-full flex flex-col"
     >
-      {/* 顶部状态栏 */}
       <div className="flex-shrink-0 p-4 border-b border-border bg-bg-primary">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -51,9 +49,7 @@ export const RunDetail: React.FC<RunDetailProps> = ({ run, onContinue, onDelete,
             </div>
             <div>
               <h3 className="text-lg font-medium text-text-primary">对话详情</h3>
-              <p className="text-xs text-text-secondary">
-                {run.id.slice(0, 8)}...
-              </p>
+              <p className="text-xs text-text-secondary">{run.id.slice(0, 8)}...</p>
             </div>
           </div>
 
@@ -73,19 +69,17 @@ export const RunDetail: React.FC<RunDetailProps> = ({ run, onContinue, onDelete,
           </div>
         </div>
 
-        {run.errorMessage && (
+        {run.error && (
           <div className="mt-3 p-2 rounded bg-red-500/10 text-red-500 text-sm">
-            {run.errorMessage}
+            {run.error}
           </div>
         )}
       </div>
 
-      {/* 消息列表 */}
       <div className="flex-1 overflow-y-auto p-4">
-        <MessageList messages={run.messages} toolExecutions={run.toolExecutions} />
+        <MessageList messages={run.messages} toolExecutions={run.executedToolCalls} />
       </div>
 
-      {/* 底部操作栏 */}
       <div className="flex-shrink-0 p-4 border-t border-border bg-bg-primary">
         <div className="flex items-center gap-3">
           <Button

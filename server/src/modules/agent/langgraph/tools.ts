@@ -7,12 +7,50 @@ import { toFinanceRecordDto } from '../../finance/dto';
 import { searchNotes } from '../../knowledge/repository';
 import { createTask, findTaskById, updateTask, softDeleteTask } from '../../tasks/repository';
 
-/**
- * 工具定义 - 使用 LangChain Tool 接口
- * 所有工具保留 requiresConfirmation 元数据
- */
+const taskPriorityEnum = z.enum(['low', 'medium', 'high']);
 
-// ============ 查询类工具（无需确认） ============
+function normalizeTaskPriority(value: unknown): 'low' | 'medium' | 'high' | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const priorityMap: Record<string, 'low' | 'medium' | 'high'> = {
+    low: 'low',
+    medium: 'medium',
+    high: 'high',
+    l: 'low',
+    m: 'medium',
+    h: 'high',
+    '低': 'low',
+    '低优先级': 'low',
+    '低优先': 'low',
+    '中': 'medium',
+    '中等': 'medium',
+    '中优先级': 'medium',
+    '中优先': 'medium',
+    '普通': 'medium',
+    '默认': 'medium',
+    '高': 'high',
+    '高优先级': 'high',
+    '高优先': 'high',
+    '重要': 'high',
+    '紧急': 'high',
+  };
+
+  return priorityMap[normalized];
+}
+
+const taskPriorityInputSchema = z.preprocess((value) => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+  return normalizeTaskPriority(value) ?? value;
+}, taskPriorityEnum.optional());
 
 export const queryTasksTool = tool(
   async ({ completed, priority, limit }) => {
@@ -25,10 +63,10 @@ export const queryTasksTool = tool(
   },
   {
     name: 'query_tasks',
-    description: '查询任务列表，可按完成状态和优先级筛选',
+    description: '查询任务列表，可按完成状态和优先级筛选。',
     schema: z.object({
       completed: z.boolean().optional().describe('是否已完成'),
-      priority: z.enum(['low', 'medium', 'high']).optional().describe('优先级'),
+      priority: taskPriorityInputSchema.describe('优先级，支持 low/medium/high 或 高/中/低'),
       limit: z.number().max(100).default(20).describe('返回数量限制'),
     }),
   }
@@ -51,7 +89,7 @@ export const getTaskStatsTool = tool(
   },
   {
     name: 'get_task_stats',
-    description: '获取任务统计数据',
+    description: '获取任务统计数据。',
     schema: z.object({}),
   }
 );
@@ -62,27 +100,25 @@ export const queryFinanceTool = tool(
     let filtered = records;
 
     if (type && type !== 'all') {
-      filtered = filtered.filter((r) => r.type === type);
+      filtered = filtered.filter((record) => record.type === type);
     }
     if (category) {
-      filtered = filtered.filter((r) => r.category === category);
+      filtered = filtered.filter((record) => record.category === category);
     }
     if (startDate) {
       const start = new Date(startDate);
-      filtered = filtered.filter((r) => r.recordDate >= start);
+      filtered = filtered.filter((record) => record.recordDate >= start);
     }
     if (endDate) {
       const end = new Date(endDate);
-      filtered = filtered.filter((r) => r.recordDate <= end);
+      filtered = filtered.filter((record) => record.recordDate <= end);
     }
 
-    return filtered
-      .slice(0, limit || 50)
-      .map(toFinanceRecordDto);
+    return filtered.slice(0, limit || 50).map(toFinanceRecordDto);
   },
   {
     name: 'query_finance',
-    description: '查询财务记录，可按类型、分类、日期范围筛选',
+    description: '查询财务记录，可按类型、分类、日期范围筛选。',
     schema: z.object({
       type: z.enum(['income', 'expense', 'all']).optional().default('all').describe('记录类型'),
       category: z.string().max(50).optional().describe('分类'),
@@ -96,8 +132,13 @@ export const queryFinanceTool = tool(
 export const getFinanceStatsTool = tool(
   async () => {
     const records = await listFinanceRecords();
-    const income = records.filter((r) => r.type === 'income').reduce((sum, r) => sum + Number(r.amount), 0);
-    const expense = records.filter((r) => r.type === 'expense').reduce((sum, r) => sum + Number(r.amount), 0);
+    const income = records
+      .filter((record) => record.type === 'income')
+      .reduce((sum, record) => sum + Number(record.amount), 0);
+    const expense = records
+      .filter((record) => record.type === 'expense')
+      .reduce((sum, record) => sum + Number(record.amount), 0);
+
     return {
       totalRecords: records.length,
       totalIncome: income,
@@ -107,7 +148,7 @@ export const getFinanceStatsTool = tool(
   },
   {
     name: 'get_finance_stats',
-    description: '获取财务统计数据',
+    description: '获取财务统计数据。',
     schema: z.object({}),
   }
 );
@@ -123,7 +164,7 @@ export const searchKnowledgeTool = tool(
   },
   {
     name: 'search_knowledge',
-    description: '搜索知识库笔记',
+    description: '搜索知识库笔记。',
     schema: z.object({
       query: z.string().max(200).optional().describe('搜索关键词'),
       tags: z.array(z.string().max(50)).max(10).optional().describe('标签筛选'),
@@ -131,8 +172,6 @@ export const searchKnowledgeTool = tool(
     }),
   }
 );
-
-// ============ 写操作工具（需用户确认） ============
 
 export const createTaskTool = tool(
   async ({ title, description, priority, dueDate }) => {
@@ -146,11 +185,11 @@ export const createTaskTool = tool(
   },
   {
     name: 'create_task',
-    description: '创建新任务（需用户确认）',
+    description: '创建新任务，需要用户确认。',
     schema: z.object({
       title: z.string().trim().min(1).max(200).describe('任务标题'),
       description: z.string().trim().max(500).optional().describe('任务描述'),
-      priority: z.enum(['low', 'medium', 'high']).optional().describe('优先级'),
+      priority: taskPriorityInputSchema.describe('优先级，支持 low/medium/high 或 高/中/低'),
       dueDate: z.string().trim().max(30).optional().describe('截止日期'),
     }),
   }
@@ -163,19 +202,19 @@ export const addFinanceRecordTool = tool(
       amount,
       description: description.trim(),
       category: category.trim(),
-      date: date,
+      date,
     });
     return toFinanceRecordDto(record);
   },
   {
     name: 'add_finance_record',
-    description: '新增财务记录（需用户确认）',
+    description: '新增财务记录，需要用户确认。',
     schema: z.object({
       type: z.enum(['income', 'expense']).describe('记录类型'),
       amount: z.number().min(0).max(999999999.99).describe('金额'),
       description: z.string().trim().min(1).max(500).describe('描述'),
       category: z.string().trim().min(1).max(50).describe('分类'),
-      date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).describe('日期（YYYY-MM-DD）'),
+      date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).describe('日期，格式 YYYY-MM-DD'),
     }),
   }
 );
@@ -184,7 +223,7 @@ export const updateTaskTool = tool(
   async ({ id, title, completed, priority, dueDate }) => {
     const existing = await findTaskById(id);
     if (!existing) {
-      throw new Error(`未找到任务: ${id}`);
+      throw new Error(`未找到任务 ${id}`);
     }
 
     const updated = await updateTask(id, {
@@ -203,12 +242,12 @@ export const updateTaskTool = tool(
   },
   {
     name: 'update_task',
-    description: '更新任务（需用户确认）',
+    description: '更新任务，需要用户确认。',
     schema: z.object({
-      id: z.string().uuid().describe('任务ID'),
+      id: z.string().uuid().describe('任务 ID'),
       title: z.string().trim().min(1).max(200).optional().describe('新标题'),
       completed: z.boolean().optional().describe('完成状态'),
-      priority: z.enum(['low', 'medium', 'high']).optional().describe('优先级'),
+      priority: taskPriorityInputSchema.describe('优先级，支持 low/medium/high 或 高/中/低'),
       dueDate: z.string().trim().max(30).optional().describe('截止日期'),
     }),
   }
@@ -218,7 +257,7 @@ export const deleteTaskTool = tool(
   async ({ id }) => {
     const existing = await findTaskById(id);
     if (!existing) {
-      throw new Error(`未找到任务: ${id}`);
+      throw new Error(`未找到任务 ${id}`);
     }
 
     const deleted = await softDeleteTask(id);
@@ -229,18 +268,13 @@ export const deleteTaskTool = tool(
   },
   {
     name: 'delete_task',
-    description: '删除任务（需用户确认）',
+    description: '删除任务，需要用户确认。',
     schema: z.object({
-      id: z.string().uuid().describe('任务ID'),
+      id: z.string().uuid().describe('任务 ID'),
     }),
   }
 );
 
-// ============ 工具注册表 ============
-
-/**
- * 工具元数据 - 包含是否需要用户确认
- */
 export interface ToolMetadata {
   requiresConfirmation: boolean;
 }
@@ -257,9 +291,6 @@ export const toolMetadata: Record<string, ToolMetadata> = {
   delete_task: { requiresConfirmation: true },
 };
 
-/**
- * 获取所有工具列表
- */
 export const allTools = [
   queryTasksTool,
   getTaskStatsTool,
@@ -272,9 +303,6 @@ export const allTools = [
   deleteTaskTool,
 ];
 
-/**
- * 检查工具是否需要确认
- */
 export function requiresConfirmation(toolName: string): boolean {
   return toolMetadata[toolName]?.requiresConfirmation ?? false;
 }

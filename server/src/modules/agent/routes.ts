@@ -1,20 +1,15 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { sendInfrastructureError } from '../../shared/http';
 import {
-  appendAgentMessageSchema,
   agentRunIdParamSchema,
-  confirmToolExecutionSchema,
   createAgentRunSchema,
-  createToolExecutionSchema,
   listAgentRunsQuerySchema,
   toolExecutionIdParamSchema,
   updateAgentRunSchema,
 } from './schema';
 import {
-  appendAgentRunMessage,
   confirmAgentRunTool,
   createAgentRunRecord,
-  createAgentToolExecution,
   getAgentRuntimeStatus,
   getAgentRunDetail,
   getAgentRunList,
@@ -30,7 +25,7 @@ export async function agentRoutes(app: FastifyInstance) {
     return {
       ok: runtime.connected,
       module: 'agent',
-      stage: 'phase4-foundation',
+      stage: 'checkpointer-v1',
       runtime,
     };
   });
@@ -42,7 +37,7 @@ export async function agentRoutes(app: FastifyInstance) {
       return {
         items: result.items,
         total: result.total,
-        source: 'postgres',
+        source: 'checkpoint',
       };
     } catch (error) {
       return sendInfrastructureError(reply, error);
@@ -82,16 +77,15 @@ export async function agentRoutes(app: FastifyInstance) {
         if (connectionClosed) {
           throw new Error('Client disconnected');
         }
-        const eventData = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-        reply.raw.write(eventData);
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
       };
 
       const result = await streamAgentRunRecord(payload, (event) => {
-        sendEvent(event.type, event);
+        sendEvent((event as { type: string }).type, event);
       });
 
       if (!connectionClosed) {
-        sendEvent('done', { ok: true });
+        sendEvent('done', { ok: true, run: result });
         reply.raw.end();
       }
     } catch (error) {
@@ -155,39 +149,10 @@ export async function agentRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/agent/runs/:id/messages', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = agentRunIdParamSchema.parse(request.params);
-      const payload = appendAgentMessageSchema.parse(request.body);
-      const message = await appendAgentRunMessage(id, payload);
-      if (!message) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Agent run not found' });
-      }
-      return reply.code(201).send(message);
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
-  app.post('/agent/runs/:id/tools', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = agentRunIdParamSchema.parse(request.params);
-      const payload = createToolExecutionSchema.parse(request.body);
-      const execution = await createAgentToolExecution(id, payload);
-      if (!execution) {
-        return reply.code(404).send({ error: 'NOT_FOUND', message: 'Agent run not found' });
-      }
-      return reply.code(201).send(execution);
-    } catch (error) {
-      return sendInfrastructureError(reply, error);
-    }
-  });
-
   app.post('/agent/runs/:id/tools/:toolExecutionId/confirm', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id, toolExecutionId } = toolExecutionIdParamSchema.parse(request.params);
-      const payload = confirmToolExecutionSchema.parse(request.body);
-      const run = await confirmAgentRunTool(id, toolExecutionId, payload);
+      const run = await confirmAgentRunTool(id, toolExecutionId);
       if (!run) {
         return reply.code(404).send({ error: 'NOT_FOUND', message: 'Agent run or tool execution not found' });
       }

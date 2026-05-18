@@ -79,7 +79,7 @@
 src/
 ├── agent/                # 智能体前端状态管理
 │   ├── AgentContext.tsx   # React Context + useReducer
-│   ├── types.ts          # AgentMessage, AgentState, ToolCall 等
+│   ├── types.ts          # AgentState, ToolCall 等
 │   └── toolMetadata.ts   # 工具显示元数据
 ├── components/           # UI 组件
 │   ├── Agent/            # AI 助手（AgentTrigger 浮窗按钮 + AgentPanel 面板）
@@ -235,7 +235,7 @@ server/
 ├── src/
 │   ├── modules/          # 业务模块 (按功能划分)
 │   │   ├── agent/        # 智能体运行时
-│   │   │   ├── langgraph/ # LangGraph 执行引擎（state/graph/tools/parser/chatModel/streaming/persistence）
+│   │   │   ├── langgraph/ # LangGraph 执行引擎（state/graph/tools/parser/chatModel/message-manager/postgres-checkpointer）
 │   │   │   ├── service.ts # 业务服务层
 │   │   │   ├── routes.ts  # REST + SSE 端点
 │   │   │   ├── repository.ts # 数据访问层
@@ -446,8 +446,8 @@ server/src/modules/agent/langgraph/
 ├── tools.ts            # LangChain Tool 工具定义（9个）
 ├── parser.ts           # 工具调用解析（支持 tool/json 代码块和内联 JSON）
 ├── chatModel.ts        # ChatModel 适配层（Anthropic/OpenAI/Gemini/Custom）
-├── streaming.ts        # SSE 流式执行实现
-├── persistence.ts      # 状态快照持久化
+├── message-manager.ts   # 消息裁剪与上下文控制
+├── postgres-checkpointer.ts # PostgreSQL checkpointer
 ├── prompts.ts          # 系统提示模板
 └── index.ts            # 模块导出
 ```
@@ -469,7 +469,7 @@ init_node → build_messages → call_model → parse_tools
 **关键设计**：
 - 查询类工具并行执行（5秒 TTL 缓存）
 - 写操作工具使用 `interrupt()` 暂停等待用户确认
-- 状态快照持久化到 `AgentRunStateSnapshot` 表
+- 状态持久化由 LangGraph PostgreSQL checkpointer 负责
 - SSE 流式响应兼容现有前端格式
 - 最大迭代次数 `MAX_AGENT_ITERATIONS=5`
 
@@ -516,9 +516,9 @@ init_node → build_messages → call_model → parse_tools
 ```
 User (1) ──────────── (N) AgentRun
   │                         │
-  ├─── (1:1) UserSetting    ├─── (N) AgentMessage [CASCADE]
-  ├─── (N) ApiProvider      ├─── (N) ToolExecution [CASCADE]
-  ├─── (N) Task             └─── (N) AgentRunStateSnapshot [CASCADE]
+  ├─── (1:1) UserSetting    ├─── (N) LangGraph checkpoints
+  ├─── (N) ApiProvider      ├─── (N) LangGraph checkpoint blobs
+  ├─── (N) Task             └─── (N) LangGraph checkpoint writes
   ├─── (N) FinanceRecord
   ├─── (N) KnowledgeNote
   └─── (N) KnowledgePresetTag
@@ -534,9 +534,7 @@ User (1) ──────────── (N) AgentRun
 | **KnowledgeNote** | title(@db.VarChar(200)), content(@db.Text), tagsJson(JSON数组) | deletedAt | 全文搜索 GIN 索引 |
 | **KnowledgePresetTag** | name(≤50), color(≤7), sortOrder(0-9999) | 否 | — |
 | **ApiProvider** | name, apiFormat, baseUrl, apiKeyEncrypted(AES), model, isActive | deletedAt | API Key AES-256-GCM 加密 |
-| **AgentRun** | status(pending/running/waiting_confirmation/completed/failed/cancelled) | 否 | 状态快照 |
-| **AgentMessage** | role(system/user/assistant/tool), content, sequence | 否 | 有序消息链 |
-| **ToolExecution** | toolName, status, requiresConfirmation | 否 | 确认门控 |
+| **AgentRun** | status(pending/running/waiting_confirmation/completed/failed/cancelled) | 否 | 元数据记录 |
 
 ### 数据库迁移历史
 
@@ -545,7 +543,8 @@ User (1) ──────────── (N) AgentRun
 | `20260504_initial_foundation` | 核心表：users, user_settings, api_providers, tasks, finance_records |
 | `20260504_knowledge_authority` | knowledge_bases 表 |
 | `20260504_knowledge_structured_storage` | 知识图谱表：entities, documents, relations, assertions |
-| `20260505_agent_runtime_foundation` | 智能体运行时：agent_runs, agent_messages, tool_executions, snapshots |
+| `20260505_agent_runtime_foundation` | 智能体运行时：agent_runs |
+| `20260518_agent_checkpointer_migration` | LangGraph checkpoints, checkpoint_blobs, checkpoint_writes |
 | `20260505_knowledge_ontology_tables` | 本体：classes 和 relations |
 | `20260505_projection_outbox` | 事件溯源 outbox 表 |
 | `20260505_search_fts_indexes` | 全文搜索 GIN 索引 |
@@ -572,7 +571,6 @@ User (1) ──────────── (N) AgentRun
 | `DEFAULT_PROVIDER_MODEL` | string | `''` | 默认模型名称 |
 | `PROJECTION_OUTBOX_POLL_MS` | number | `1500` | Outbox 轮询间隔 |
 | `PROJECTION_OUTBOX_BATCH_SIZE` | number | `20` | Outbox 批次大小（≤100） |
-| `USE_LANGGRAPH` | boolean | `false` | 启用 LangGraph 执行引擎（true启用） |
 | `MAX_AGENT_ITERATIONS` | number | `5` | Agent 最大迭代次数 |
 
 ---

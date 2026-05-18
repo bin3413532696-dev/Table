@@ -59,6 +59,8 @@ taskkill /PID 12345 /F
 - 后端类型检查：`npm run server:typecheck`
 - 前端构建：`npm run build`
 - 后端构建：`npm run server:build`
+- 后端构建产物输出到 `dist-server/`，实际运行代码位于 `dist-server/src/...`
+- Agent 工具验证脚本：`node scripts/test-agent-tools.js`
 
 ## 目录说明
 
@@ -70,3 +72,4 @@ taskkill /PID 12345 /F
 ## 交付说明
 
 仓库已移除研发交接文档、构建产物、本地调试数据与本地工具目录，当前内容以直接交付和部署所需最小集为准。
+- 智能体运行时已切换为 LangGraph + PostgreSQL checkpointer，9 个 agent 工具已收口完成，写操作工具需要确认。

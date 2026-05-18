@@ -1,52 +1,53 @@
 import { fetchWithAuth } from './auth';
 
+export type AgentRunStatus = 'pending' | 'running' | 'waiting_confirmation' | 'completed' | 'failed' | 'cancelled';
+
 export interface AgentRunMessageDto {
   id: string;
-  runId: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
+  role: 'user' | 'assistant' | 'system';
   content: string;
-  sequence: number;
-  metadata: Record<string, unknown>;
-  createdAt: number;
+  createdAt?: number;
 }
 
 export interface AgentRunToolExecutionDto {
   id: string;
-  runId: string;
   toolName: string;
   arguments: Record<string, unknown>;
   status: string;
-  requiresConfirmation: boolean;
-  confirmationRequestedAt?: number;
-  confirmedAt?: number;
+  requiresConfirmation?: boolean;
   result?: Record<string, unknown>;
   errorMessage?: string;
-  sequence: number;
-  createdAt: number;
-  updatedAt: number;
+  createdAt?: number;
 }
 
-export interface AgentRunDetailDto {
+export interface TimelineEvent {
+  type: 'llm_start' | 'llm_end' | 'tool_start' | 'tool_end' | 'confirmation' | 'interrupted';
+  timestamp: string;
+  data: Record<string, unknown>;
+}
+
+export interface AgentRunDto {
   id: string;
   sessionId?: string;
   status: string;
   inputText: string;
   model: string;
-  requiresConfirmation: boolean;
-  errorMessage?: string;
-  startedAt: number;
-  finishedAt?: number;
   createdAt: number;
   updatedAt: number;
   version: number;
+}
+
+export interface AgentRunDetailDto extends AgentRunDto {
+  status: AgentRunStatus;
   messages: AgentRunMessageDto[];
-  toolExecutions: AgentRunToolExecutionDto[];
-  snapshots: Array<{
-    id: string;
-    runId: string;
-    snapshot: Record<string, unknown>;
-    createdAt: number;
-  }>;
+  executedToolCalls: AgentRunToolExecutionDto[];
+  pendingToolCalls: AgentRunToolExecutionDto[];
+  requiresConfirmation: boolean;
+  finalText: string;
+  error?: string;
+  iterationCount: number;
+  assistantTextChunks: string[];
+  timeline: TimelineEvent[];
 }
 
 export interface AgentRuntimeStatusDto {
@@ -68,14 +69,8 @@ export interface AgentRuntimeStatusDto {
 }
 
 export interface AgentRunStreamEvent {
-  type: 'run_created' | 'status' | 'run_completed' | 'run_waiting_confirmation' | 'run_failed' | 'run_cancelled' | 'text_chunk' | 'tool_call' | 'tool_result';
-  run?: AgentRunDetailDto;
-  runId?: string;
-  status?: 'running' | 'waiting_confirmation' | 'completed' | 'failed' | 'cancelled';
-  text?: string;
-  toolName?: string;
-  arguments?: Record<string, unknown>;
-  result?: unknown;
+  type: 'run_completed';
+  run: AgentRunDetailDto;
 }
 
 export async function fetchAgentRuntimeStatus(): Promise<AgentRuntimeStatusDto> {
@@ -108,9 +103,6 @@ export async function streamAgentRun(
   },
   handlers: {
     onEvent?: (event: AgentRunStreamEvent) => void;
-    onTextChunk?: (text: string) => void;
-    onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
-    onToolResult?: (toolName: string, result: unknown) => void;
     onDone?: () => void;
   } = {}
 ): Promise<AgentRunDetailDto> {
@@ -176,22 +168,7 @@ export async function streamAgentRun(
 
     const typedPayload = payload as AgentRunStreamEvent;
     handlers.onEvent?.(typedPayload);
-
-    if (typedPayload.type === 'text_chunk' && typedPayload.text) {
-      handlers.onTextChunk?.(typedPayload.text);
-    }
-
-    if (typedPayload.type === 'tool_call' && typedPayload.toolName && typedPayload.arguments) {
-      handlers.onToolCall?.(typedPayload.toolName, typedPayload.arguments);
-    }
-
-    if (typedPayload.type === 'tool_result' && typedPayload.toolName && typedPayload.result) {
-      handlers.onToolResult?.(typedPayload.toolName, typedPayload.result);
-    }
-
-    if (typedPayload.run) {
-      finalRun = typedPayload.run;
-    }
+    finalRun = typedPayload.run;
   };
 
   while (true) {
@@ -220,21 +197,6 @@ export async function streamAgentRun(
   }
 
   return finalRun;
-}
-
-export interface AgentRunDto {
-  id: string;
-  sessionId?: string;
-  status: string;
-  inputText: string;
-  model: string;
-  requiresConfirmation: boolean;
-  errorMessage?: string;
-  startedAt: number;
-  finishedAt?: number;
-  createdAt: number;
-  updatedAt: number;
-  version: number;
 }
 
 export interface AgentRunListResponse {
@@ -341,16 +303,13 @@ export async function createAgentRun(input: {
 
   return response.json() as Promise<AgentRunDetailDto>;
 }
+
 export async function confirmAgentToolExecution(input: {
   runId: string;
   toolExecutionId: string;
 }): Promise<AgentRunDetailDto> {
   const response = await fetchWithAuth(`/api/agent/runs/${input.runId}/tools/${input.toolExecutionId}/confirm`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({}),
   });
 
   if (!response.ok) {

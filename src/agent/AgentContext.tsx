@@ -201,12 +201,16 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     assistantMessageId: string,
     run: AgentRunDetailDto
   ) => {
-    const assistantReply = run.messages
-      .filter((message) => message.role === 'assistant')
-      .sort((a, b) => a.sequence - b.sequence)
-      .at(-1);
+    // 新的 Checkpoint 格式: messages 没有 sequence，按顺序排列
+    // 提取最后一条 assistant 消息
+    const assistantReplies = run.messages.filter((message) => message.role === 'assistant');
+    const assistantReply = assistantReplies[assistantReplies.length - 1];
 
-    const toolCalls: ToolCall[] = run.toolExecutions.map((execution) => ({
+    // 新的 Checkpoint 格式: executedToolCalls 而不是 toolExecutions
+    const toolCalls: ToolCall[] = [
+      ...(run.executedToolCalls || []),
+      ...(run.pendingToolCalls || []),
+    ].map((execution) => ({
       id: execution.id,
       name: execution.toolName,
       arguments: execution.arguments,
@@ -220,13 +224,13 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           content: assistantReply?.content || '',
           toolCalls,
           toolResults: Object.fromEntries(
-            run.toolExecutions
+            (run.executedToolCalls || [])
               .filter((execution) => execution.status === 'completed' || execution.status === 'failed')
               .map((execution) => [
                 execution.id,
                 {
                   success: execution.status === 'completed',
-                  data: execution.result?.data,
+                  data: execution.result?.data ?? execution.result,
                   error: execution.errorMessage,
                 } satisfies ToolResult,
               ])
@@ -236,7 +240,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       },
     });
 
-    const pendingExecution = run.toolExecutions.find((execution) => execution.status === 'waiting_confirmation');
+    // 新的 Checkpoint 格式: pendingToolCalls 包含待确认的工具
+    const pendingExecution = (run.pendingToolCalls || []).find((execution) => execution.status === 'waiting_confirmation');
     if (run.status === 'waiting_confirmation' && pendingExecution) {
       const confirmationMessage = typeof pendingExecution.result?.confirmationMessage === 'string'
         ? pendingExecution.result.confirmationMessage
@@ -259,7 +264,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     dispatch({
       type: 'SET_ERROR',
-      payload: run.errorMessage || null,
+      payload: run.error || run.errorMessage || null,
     });
   }, []);
 
@@ -334,7 +339,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         })),
       });
 
-      requestState.toolCalls = run.toolExecutions.map((execution) => ({
+      requestState.toolCalls = [
+        ...(run.executedToolCalls || []),
+        ...(run.pendingToolCalls || []),
+      ].map((execution) => ({
         id: execution.id,
         name: execution.toolName,
         arguments: execution.arguments,
@@ -447,11 +455,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loadHistoryRun = useCallback((run: AgentRunDetailDto) => {
-    const messages: AgentMessage[] = run.messages.map((msg) => ({
-      id: msg.id,
+    const messages: AgentMessage[] = run.messages.map((msg, index) => ({
+      id: msg.id || `msg-${index}`,
       role: msg.role,
       content: msg.content,
-      timestamp: msg.createdAt,
+      timestamp: msg.createdAt || Date.now(),
       status: 'completed' as const,
     }));
 

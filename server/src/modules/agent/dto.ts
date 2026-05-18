@@ -1,70 +1,107 @@
-import type {
-  AgentMessage,
-  AgentRun,
-  AgentRunStateSnapshot,
-  ToolExecution,
-} from '@prisma/client';
+import type { AgentRun } from '@prisma/client';
+import type { AgentState, RunStatus } from './langgraph/state';
 
-function toTimestamp(value: Date | null): number | undefined {
-  if (!value) {
-    return undefined;
-  }
+export type AgentRunListItemDto = {
+  id: string;
+  sessionId?: string;
+  status: string;
+  inputText: string;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+  version: number;
+};
 
-  return value.getTime();
-}
+export type AgentRunToolExecutionDto = {
+  id: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+  status: string;
+  requiresConfirmation?: boolean;
+  result?: Record<string, unknown>;
+  errorMessage?: string;
+  createdAt?: number;
+};
 
-export function toAgentRunDto(run: AgentRun) {
+export type AgentRunDetailDto = AgentRunListItemDto & {
+  status: RunStatus;
+  messages: Array<{
+    id: string;
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    createdAt?: number;
+  }>;
+  executedToolCalls: AgentRunToolExecutionDto[];
+  pendingToolCalls: AgentRunToolExecutionDto[];
+  requiresConfirmation: boolean;
+  finalText: string;
+  error?: string;
+  iterationCount: number;
+  assistantTextChunks: string[];
+  timeline: AgentState['timeline'];
+};
+
+export function toAgentRunDto(run: AgentRun): AgentRunListItemDto {
   return {
     id: run.id,
     sessionId: run.sessionId ?? undefined,
     status: run.status,
     inputText: run.inputText,
     model: run.model,
-    requiresConfirmation: run.requiresConfirmation,
-    errorMessage: run.errorMessage ?? undefined,
-    startedAt: run.startedAt.getTime(),
-    finishedAt: toTimestamp(run.finishedAt),
     createdAt: run.createdAt.getTime(),
     updatedAt: run.updatedAt.getTime(),
     version: run.version,
   };
 }
 
-export function toAgentMessageDto(message: AgentMessage) {
-  return {
-    id: message.id,
-    runId: message.runId,
-    role: message.role,
-    content: message.content,
-    sequence: message.sequence,
-    metadata: message.metadataJson,
-    createdAt: message.createdAt.getTime(),
-  };
-}
+export function buildAgentRunDetailDto(run: AgentRun, state: AgentState): AgentRunDetailDto {
+  const base = toAgentRunDto(run);
 
-export function toToolExecutionDto(execution: ToolExecution) {
-  return {
-    id: execution.id,
-    runId: execution.runId,
-    toolName: execution.toolName,
-    arguments: execution.argumentsJson,
-    status: execution.status,
-    requiresConfirmation: execution.requiresConfirmation,
-    confirmationRequestedAt: toTimestamp(execution.confirmationRequestedAt),
-    confirmedAt: toTimestamp(execution.confirmedAt),
-    result: execution.resultJson ?? undefined,
-    errorMessage: execution.errorMessage ?? undefined,
-    sequence: execution.sequence,
-    createdAt: execution.createdAt.getTime(),
-    updatedAt: execution.updatedAt.getTime(),
-  };
-}
+  const executedToolCalls: AgentRunToolExecutionDto[] = state.executedToolCalls.map((tool) => ({
+    id: tool.id,
+    toolName: tool.name,
+    arguments: tool.arguments,
+    status: tool.status ?? (tool.success ? 'completed' : 'failed'),
+    result: tool.result && typeof tool.result === 'object'
+      ? (tool.result as Record<string, unknown>)
+      : tool.result !== undefined
+        ? { value: tool.result }
+        : undefined,
+    errorMessage: tool.error,
+    createdAt: tool.createdAt,
+  }));
 
-export function toAgentRunSnapshotDto(snapshot: AgentRunStateSnapshot) {
+  const pendingToolCalls: AgentRunToolExecutionDto[] = (state.pendingToolCalls ?? []).map((tool) => {
+    const pending = state.pendingToolExecution && state.pendingToolExecution.id === tool.id
+      ? state.pendingToolExecution
+      : null;
+
+    return {
+      id: tool.id,
+      toolName: tool.name,
+      arguments: tool.arguments,
+      status: pending ? 'waiting_confirmation' : 'pending',
+      requiresConfirmation: Boolean(pending),
+      result: pending ? { confirmationMessage: pending.confirmationMessage } : undefined,
+    };
+  });
+
   return {
-    id: snapshot.id,
-    runId: snapshot.runId,
-    snapshot: snapshot.snapshotJson,
-    createdAt: snapshot.createdAt.getTime(),
+    ...base,
+    status: state.status,
+    messages: state.messages.map((message, index) => ({
+      id: `${state.runId}-msg-${index}`,
+      role: message.role,
+      content: message.content,
+      createdAt: message.createdAt,
+    })),
+    executedToolCalls,
+    pendingToolCalls,
+    requiresConfirmation: state.status === 'waiting_confirmation',
+    finalText: state.finalText,
+    error: state.error ?? undefined,
+    iterationCount: state.iterationCount,
+    assistantTextChunks: state.assistantTextChunks,
+    timeline: state.timeline,
   };
 }

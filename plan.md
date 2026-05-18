@@ -76,7 +76,7 @@ interface AgentState {
   model: string;                        // 模型名称
   userId: string;                       // 用户 ID
   provider: AgentProviderInput;         // Provider 配置
-  executedToolCalls: ToolExecution[];   // 已执行工具记录
+  executedToolCalls: ExecutedToolCall[];   // 已执行工具记录
   pendingToolCall?: ToolCall;           // 待确认工具
   iterationCount: number;               // 循环计数（限5轮）
   finalResponse?: string;               // 最终回复
@@ -88,7 +88,7 @@ interface AgentState {
 新增 LangGraph checkpoint 专用字段：
 
 ```prisma
-model AgentRunStateSnapshot {
+model AgentRun {
   // 现有字段
   id           String   @id ...
   userId       String   ...
@@ -131,16 +131,15 @@ model AgentRunStateSnapshot {
 - ✅ 条件路由：afterParseRouter/afterCheckConfirmationRouter/afterExecuteRouter/afterConfirmationRequestRouter
 
 ### Phase 5: SSE 流式集成（已完成）
-- ✅ 流式执行（`streaming.ts`）
 - ✅ 事件转换兼容现有前端格式
 
 ### Phase 6: 持久化（已完成）
-- ✅ 状态快照持久化（`persistence.ts`）
-- ✅ 与现有 `AgentRunStateSnapshot` 表兼容
+- ✅ LangGraph PostgreSQL checkpointer 持久化
+- ✅ 与 `checkpoints` / `checkpoint_blobs` / `checkpoint_writes` 表兼容
 
 ### Phase 7: Service 层迁移（已完成）
-- ✅ `service.ts` 添加 `USE_LANGGRAPH` 环境变量切换
-- ✅ 用户确认流程修复（`confirmAgentRunTool` 支持 LangGraph）
+- ✅ 业务服务层直接调用 LangGraph
+- ✅ 用户确认流程支持 checkpoint 恢复与 resume
 
 ### Phase 8: 测试验证（已完成）
 - ✅ TypeScript 类型检查通过
@@ -190,8 +189,8 @@ server/src/modules/agent/
 │   ├── tools.ts       # LangChain Tool（9个）
 │   ├── parser.ts      # 工具调用解析
 │   ├── chatModel.ts   # ChatModel 适配（Anthropic/OpenAI/Gemini/Custom）
-│   ├── streaming.ts   # SSE 流式执行
-│   ├── persistence.ts # 状态快照持久化
+│   ├── message-manager.ts # 消息裁剪与上下文控制
+│   ├── postgres-checkpointer.ts # PostgreSQL checkpointer
 │   ├── prompts.ts     # 系统提示模板
 │   └── index.ts       # 模块导出
 ├── service.ts         # 业务服务层（直接调用 LangGraph）
