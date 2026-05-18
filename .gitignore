@@ -5,6 +5,6 @@ dist-server/
 *.log
 .claude/
 .gstack/
+.codex/
 logs/
 data/
-docs/

@@ -12,11 +12,13 @@ import {
   deleteAgentRunById,
 } from './repository';
 import {
-  confirmAgentRunToolExecution,
-  executeAgentRun,
   executeAgentRunWithStream,
-  type PendingConfirmationSnapshot,
-} from './executor';
+  continueAgentRunWithStream,
+  type StreamEvent,
+  type StreamEventEmitter,
+} from './langgraph/streaming';
+import { saveStateSnapshot, cleanupOldSnapshots } from './langgraph/persistence';
+import type { AgentState, ToolCall } from './langgraph/state';
 import { getActiveProviderForCurrentUser, getRequiredActiveProviderForCurrentUser } from '../providers/service';
 import {
   toAgentMessageDto,
@@ -93,10 +95,7 @@ async function emitAgentRunEvent(
   emit: ((event: AgentRunStreamEvent) => Promise<void> | void) | undefined,
   event: AgentRunStreamEvent
 ) {
-  if (!emit) {
-    return;
-  }
-
+  if (!emit) return;
   await emit(event);
 }
 
@@ -106,185 +105,144 @@ async function executeAgentRunRecordLifecycle(
 ) {
   const run = await createAgentRun(input);
   const createdRun = await getAgentRunDetail(run.id);
-  if (!createdRun) {
-    throw new Error('Agent run created but detail not found');
-  }
+  if (!createdRun) throw new Error('Agent run created but detail not found');
 
-  await emitAgentRunEvent(emit, {
-    type: 'run_created',
-    run: createdRun,
-  });
+  await emitAgentRunEvent(emit, { type: 'run_created', run: createdRun });
 
   try {
     const provider = await getRequiredActiveProviderForCurrentUser();
+    const userId = run.userId;
 
-    await updateAgentRun(run.id, {
-      status: 'running',
-      snapshot: {
-        phase: 'running',
+    await updateAgentRun(run.id, { status: 'running', snapshot: { phase: 'running' } });
+    await emitAgentRunEvent(emit, { type: 'status', runId: run.id, status: 'running' });
+
+    // LangGraph 执行
+    const langGraphEmit: StreamEventEmitter = async (event: StreamEvent) => {
+      if (event.type === 'status') {
+        await emitAgentRunEvent(emit, { type: 'status', runId: run.id, status: event.status });
+      } else if (event.type === 'text_chunk') {
+        await emitAgentRunEvent(emit, { type: 'text_chunk', runId: run.id, text: event.text });
+      } else if (event.type === 'tool_call') {
+        await emitAgentRunEvent(emit, { type: 'tool_call', runId: run.id, toolName: event.toolName, arguments: event.arguments });
+      } else if (event.type === 'tool_result') {
+        await emitAgentRunEvent(emit, { type: 'tool_result', runId: run.id, toolName: event.toolName, result: event.result });
+      }
+    };
+
+    const result = await executeAgentRunWithStream({
+      inputText: input.inputText,
+      initialMessages: input.initialMessages
+        .filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+        .map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
+      provider: {
+        id: provider.id,
+        name: provider.name,
+        apiFormat: provider.apiFormat,
+        baseUrl: provider.baseUrl,
+        apiKey: provider.apiKey,
+        model: provider.model,
+        headers: provider.headers,
       },
-    });
-    await emitAgentRunEvent(emit, {
-      type: 'status',
+      model: input.model === 'default' ? (provider.model || 'default') : input.model,
       runId: run.id,
-      status: 'running',
-    });
+      userId,
+    }, langGraphEmit);
 
-    const execution = emit
-      ? await executeAgentRunWithStream(
-          {
-            ...input,
-            provider,
-            runId: run.id,
-          },
-          emit
-        )
-      : await executeAgentRun({
-          ...input,
-          provider,
-        });
+    await saveStateSnapshot(result);
 
-    if (execution.status === 'waiting_confirmation') {
-      for (const toolCall of execution.executedToolCalls) {
+    if (result.status === 'waiting_confirmation') {
+      for (const tc of result.executedToolCalls) {
         await createToolExecution(run.id, {
-          toolName: toolCall.name,
-          arguments: toolCall.arguments,
+          toolName: tc.name,
+          arguments: tc.arguments,
           status: 'completed',
           requiresConfirmation: false,
-          result: {
-            success: true,
-            data: toolCall.result,
-          },
+          result: { success: tc.success, data: tc.result },
         });
       }
 
+      const pendingTool = result.pendingToolExecution!;
       const pendingExecution = await createToolExecution(run.id, {
-        toolName: execution.pendingToolCall.name,
-        arguments: execution.pendingToolCall.arguments,
+        toolName: pendingTool.toolName,
+        arguments: pendingTool.arguments,
         status: 'waiting_confirmation',
         requiresConfirmation: true,
         confirmationRequestedAt: new Date(),
-        result: {
-          confirmationMessage: execution.confirmationMessage,
-        },
+        result: { confirmationMessage: pendingTool.confirmationMessage },
       });
 
       await appendAgentMessage(run.id, {
         role: 'assistant',
-        content: execution.interimText || execution.confirmationMessage,
-        metadata: {
-          pendingToolExecutionId: pendingExecution.id,
-          pendingToolName: execution.pendingToolCall.name,
-        },
+        content: result.messages[result.messages.length - 1]?.content || pendingTool.confirmationMessage,
+        metadata: { pendingToolExecutionId: pendingExecution.id, pendingToolName: pendingTool.toolName },
       });
 
       await updateAgentRun(run.id, {
         status: 'waiting_confirmation',
         requiresConfirmation: true,
-        snapshot: {
-          ...execution.snapshot,
-          pendingToolExecutionId: pendingExecution.id,
-        },
+        snapshot: { ...result, pendingToolExecutionId: pendingExecution.id },
       });
-      const waitingRun = await getAgentRunDetail(run.id);
-      if (!waitingRun) {
-        throw new Error('Agent run waiting confirmation but detail not found');
-      }
 
-      await emitAgentRunEvent(emit, {
-        type: 'status',
-        runId: run.id,
-        status: 'waiting_confirmation',
-      });
-      await emitAgentRunEvent(emit, {
-        type: 'run_waiting_confirmation',
-        run: waitingRun,
-      });
+      const waitingRun = await getAgentRunDetail(run.id);
+      if (!waitingRun) throw new Error('Agent run waiting confirmation but detail not found');
+
+      await emitAgentRunEvent(emit, { type: 'status', runId: run.id, status: 'waiting_confirmation' });
+      await emitAgentRunEvent(emit, { type: 'run_waiting_confirmation', run: waitingRun });
       return waitingRun;
     }
 
-    for (const toolCall of execution.toolCalls) {
+    // 完成
+    for (const tc of result.executedToolCalls) {
       await createToolExecution(run.id, {
-        toolName: toolCall.name,
-        arguments: toolCall.arguments,
+        toolName: tc.name,
+        arguments: tc.arguments,
         status: 'completed',
         requiresConfirmation: false,
-        result: {
-          success: true,
-          data: toolCall.result,
-        },
+        result: { success: tc.success, data: tc.result },
       });
     }
 
     await appendAgentMessage(run.id, {
       role: 'assistant',
-      content: execution.finalText,
-      metadata: execution.toolCalls.length > 0
-        ? {
-            toolCalls: execution.toolCalls.map((toolCall) => ({
-              name: toolCall.name,
-              arguments: toolCall.arguments,
-            })),
-          }
+      content: result.finalText,
+      metadata: result.executedToolCalls.length > 0
+        ? { toolCalls: result.executedToolCalls.map(tc => ({ name: tc.name, arguments: tc.arguments })) }
         : undefined,
     });
 
     await updateAgentRun(run.id, {
       status: 'completed',
       finishedAt: new Date(),
-      snapshot: {
-        phase: 'completed',
-        toolExecutionCount: execution.toolCalls.length,
-      },
+      snapshot: { phase: 'completed', toolExecutionCount: result.executedToolCalls.length },
     });
-    const completedRun = await getAgentRunDetail(run.id);
-    if (!completedRun) {
-      throw new Error('Agent run completed but detail not found');
-    }
 
-    await emitAgentRunEvent(emit, {
-      type: 'status',
-      runId: run.id,
-      status: 'completed',
-    });
-    await emitAgentRunEvent(emit, {
-      type: 'run_completed',
-      run: completedRun,
-    });
+    await cleanupOldSnapshots(run.id);
+
+    const completedRun = await getAgentRunDetail(run.id);
+    if (!completedRun) throw new Error('Agent run completed but detail not found');
+
+    await emitAgentRunEvent(emit, { type: 'status', runId: run.id, status: 'completed' });
+    await emitAgentRunEvent(emit, { type: 'run_completed', run: completedRun });
     return completedRun;
   } catch (error) {
     await appendAgentMessage(run.id, {
       role: 'assistant',
       content: '处理请求时发生错误。',
-      metadata: {
-        error: error instanceof Error ? error.message : '未知错误',
-      },
+      metadata: { error: error instanceof Error ? error.message : '未知错误' },
     });
 
     await updateAgentRun(run.id, {
       status: 'failed',
       errorMessage: error instanceof Error ? error.message : '未知错误',
       finishedAt: new Date(),
-      snapshot: {
-        phase: 'failed',
-        error: error instanceof Error ? error.message : '未知错误',
-      },
+      snapshot: { phase: 'failed', error: error instanceof Error ? error.message : '未知错误' },
     });
 
     const failedRun = await getAgentRunDetail(run.id);
-    if (!failedRun) {
-      throw new Error('Agent run failed but detail not found');
-    }
+    if (!failedRun) throw new Error('Agent run failed but detail not found');
 
-    await emitAgentRunEvent(emit, {
-      type: 'status',
-      runId: run.id,
-      status: 'failed',
-    });
-    await emitAgentRunEvent(emit, {
-      type: 'run_failed',
-      run: failedRun,
-    });
+    await emitAgentRunEvent(emit, { type: 'status', runId: run.id, status: 'failed' });
+    await emitAgentRunEvent(emit, { type: 'run_failed', run: failedRun });
     return failedRun;
   }
 }
@@ -306,149 +264,96 @@ export async function confirmAgentRunTool(
   input: ConfirmToolExecutionInput
 ) {
   const existingRun = await findAgentRunById(runId);
-  if (!existingRun) {
-    return null;
-  }
+  if (!existingRun) return null;
 
   const execution = await findToolExecutionById(runId, toolExecutionId);
-  if (!execution) {
-    return null;
-  }
+  if (!execution) return null;
 
   if (execution.status !== 'waiting_confirmation') {
     throw new Error('当前工具执行不处于待确认状态');
   }
 
   const latestSnapshot = await findLatestAgentRunSnapshot(runId);
-  const snapshot = latestSnapshot?.snapshotJson as Partial<PendingConfirmationSnapshot> | undefined;
-  if (!snapshot || snapshot.kind !== 'pending_confirmation') {
+  if (!latestSnapshot?.snapshotJson) {
     throw new Error('未找到可恢复的待确认执行快照');
   }
 
-  const provider = await getRequiredActiveProviderForCurrentUser();
+  const langGraphState = latestSnapshot.snapshotJson as AgentState;
+  if (langGraphState.status !== 'waiting_confirmation') {
+    throw new Error('快照状态不匹配');
+  }
 
-  const confirmed = await confirmAgentRunToolExecution({
-    provider,
-    snapshot: snapshot as PendingConfirmationSnapshot,
-    pendingToolCall: {
-      name: execution.toolName,
-      arguments: execution.argumentsJson as Record<string, unknown>,
-    },
-  });
+  const confirmedToolCall: ToolCall = {
+    id: execution.id,
+    name: execution.toolName,
+    arguments: execution.argumentsJson as Record<string, unknown>,
+  };
+
+  const result = await continueAgentRunWithStream(
+    langGraphState,
+    confirmedToolCall,
+    async (event: StreamEvent) => {
+      console.log('[LangGraph Confirm]', event.type);
+    }
+  );
+
+  await saveStateSnapshot(result);
+  await cleanupOldSnapshots(runId);
 
   await updateToolExecution(runId, toolExecutionId, {
     status: 'completed',
     requiresConfirmation: false,
     confirmedAt: new Date(),
     result: {
-      success: true,
-      data: confirmed.confirmedToolCall.result,
+      success: result.executedToolCalls[result.executedToolCalls.length - 1]?.success ?? true,
+      data: result.executedToolCalls[result.executedToolCalls.length - 1]?.result,
     },
     errorMessage: null,
   });
 
-  if (confirmed.status === 'waiting_confirmation') {
-    const alreadyRecordedKeys = new Set(
-      (snapshot.executedToolCalls || []).map(
-        (toolCall) => `${toolCall.name}:${JSON.stringify(toolCall.arguments)}`
-      )
-    );
-    alreadyRecordedKeys.add(`${execution.toolName}:${JSON.stringify(execution.argumentsJson)}`);
-
-    const intermediateToolCalls = confirmed.executedToolCalls.filter((toolCall) => {
-      const key = `${toolCall.name}:${JSON.stringify(toolCall.arguments)}`;
-      return !alreadyRecordedKeys.has(key);
-    });
-
-    for (const toolCall of intermediateToolCalls) {
-      await createToolExecution(runId, {
-        toolName: toolCall.name,
-        arguments: toolCall.arguments,
-        status: 'completed',
-        requiresConfirmation: false,
-        result: {
-          success: true,
-          data: toolCall.result,
-        },
-      });
-    }
-
+  if (result.status === 'waiting_confirmation') {
+    const nextPendingTool = result.pendingToolExecution!;
     const nextPendingExecution = await createToolExecution(runId, {
-      toolName: confirmed.pendingToolCall.name,
-      arguments: confirmed.pendingToolCall.arguments,
+      toolName: nextPendingTool.toolName,
+      arguments: nextPendingTool.arguments,
       status: 'waiting_confirmation',
       requiresConfirmation: true,
       confirmationRequestedAt: new Date(),
-      result: {
-        confirmationMessage: confirmed.confirmationMessage,
-      },
+      result: { confirmationMessage: nextPendingTool.confirmationMessage },
     });
 
     await appendAgentMessage(runId, {
       role: 'assistant',
-      content: confirmed.interimText || confirmed.confirmationMessage,
+      content: result.messages[result.messages.length - 1]?.content || nextPendingTool.confirmationMessage,
       metadata: {
         confirmedToolExecutionId: toolExecutionId,
         confirmedToolName: execution.toolName,
         pendingToolExecutionId: nextPendingExecution.id,
-        pendingToolName: confirmed.pendingToolCall.name,
+        pendingToolName: nextPendingTool.toolName,
       },
     });
 
     await updateAgentRun(runId, {
       status: 'waiting_confirmation',
       requiresConfirmation: true,
-      snapshot: {
-        ...confirmed.snapshot,
-        pendingToolExecutionId: nextPendingExecution.id,
-      },
+      snapshot: { ...result, pendingToolExecutionId: nextPendingExecution.id },
     });
 
     return getAgentRunDetail(runId);
   }
 
-  const alreadyRecordedKeys = new Set(
-    (snapshot.executedToolCalls || []).map(
-      (toolCall) => `${toolCall.name}:${JSON.stringify(toolCall.arguments)}`
-    )
-  );
-  alreadyRecordedKeys.add(`${execution.toolName}:${JSON.stringify(execution.argumentsJson)}`);
-
-  const trailingToolCalls = confirmed.toolCalls.filter((toolCall) => {
-    const key = `${toolCall.name}:${JSON.stringify(toolCall.arguments)}`;
-    return !alreadyRecordedKeys.has(key);
-  });
-
-  for (const toolCall of trailingToolCalls) {
-    await createToolExecution(runId, {
-      toolName: toolCall.name,
-      arguments: toolCall.arguments,
-      status: 'completed',
-      requiresConfirmation: false,
-      result: {
-        success: true,
-        data: toolCall.result,
-      },
-    });
-  }
-
+  // 完成
   await appendAgentMessage(runId, {
     role: 'assistant',
-    content: confirmed.finalText,
-    metadata: {
-      confirmedToolExecutionId: toolExecutionId,
-      confirmedToolName: execution.toolName,
-    },
+    content: result.finalText,
+    metadata: { confirmedToolExecutionId: toolExecutionId, confirmedToolName: execution.toolName },
   });
 
   await updateAgentRun(runId, {
     status: 'completed',
     requiresConfirmation: false,
     finishedAt: new Date(),
-    snapshot: {
-      phase: 'completed_after_confirmation',
-      confirmedToolExecutionId: toolExecutionId,
-    },
+    snapshot: { phase: 'completed_after_confirmation', confirmedToolExecutionId: toolExecutionId },
   });
 
   return getAgentRunDetail(runId);
@@ -456,14 +361,10 @@ export async function confirmAgentRunTool(
 
 export async function rejectAgentRunTool(runId: string, toolExecutionId: string) {
   const existingRun = await findAgentRunById(runId);
-  if (!existingRun) {
-    return null;
-  }
+  if (!existingRun) return null;
 
   const execution = await findToolExecutionById(runId, toolExecutionId);
-  if (!execution) {
-    return null;
-  }
+  if (!execution) return null;
 
   if (execution.status !== 'waiting_confirmation') {
     throw new Error('当前工具执行不处于待确认状态');
@@ -472,29 +373,21 @@ export async function rejectAgentRunTool(runId: string, toolExecutionId: string)
   await updateToolExecution(runId, toolExecutionId, {
     status: 'cancelled',
     requiresConfirmation: false,
-    result: {
-      cancelled: true,
-    },
+    result: { cancelled: true },
     errorMessage: '用户取消执行',
   });
 
   await appendAgentMessage(runId, {
     role: 'assistant',
     content: `已取消执行 ${execution.toolName}。`,
-    metadata: {
-      cancelledToolExecutionId: toolExecutionId,
-      cancelledToolName: execution.toolName,
-    },
+    metadata: { cancelledToolExecutionId: toolExecutionId, cancelledToolName: execution.toolName },
   });
 
   await updateAgentRun(runId, {
     status: 'cancelled',
     requiresConfirmation: false,
     finishedAt: new Date(),
-    snapshot: {
-      phase: 'cancelled',
-      cancelledToolExecutionId: toolExecutionId,
-    },
+    snapshot: { phase: 'cancelled', cancelledToolExecutionId: toolExecutionId },
   });
 
   return getAgentRunDetail(runId);
@@ -502,9 +395,7 @@ export async function rejectAgentRunTool(runId: string, toolExecutionId: string)
 
 export async function getAgentRunDetail(id: string) {
   const run = await findAgentRunDetailById(id);
-  if (!run) {
-    return null;
-  }
+  if (!run) return null;
 
   return {
     ...toAgentRunDto(run),
@@ -516,9 +407,7 @@ export async function getAgentRunDetail(id: string) {
 
 export async function appendAgentRunMessage(id: string, input: AppendAgentMessageInput) {
   const existing = await findAgentRunById(id);
-  if (!existing) {
-    return null;
-  }
+  if (!existing) return null;
 
   const message = await appendAgentMessage(id, input);
   return toAgentMessageDto(message);
@@ -526,9 +415,7 @@ export async function appendAgentRunMessage(id: string, input: AppendAgentMessag
 
 export async function updateAgentRunRecord(id: string, input: UpdateAgentRunInput) {
   const existing = await findAgentRunById(id);
-  if (!existing) {
-    return null;
-  }
+  if (!existing) return null;
 
   const run = await updateAgentRun(id, input);
   return toAgentRunDto(run);
@@ -536,9 +423,7 @@ export async function updateAgentRunRecord(id: string, input: UpdateAgentRunInpu
 
 export async function createAgentToolExecution(id: string, input: CreateToolExecutionInput) {
   const existing = await findAgentRunById(id);
-  if (!existing) {
-    return null;
-  }
+  if (!existing) return null;
 
   const execution = await createToolExecution(id, input);
   return toToolExecutionDto(execution);
@@ -546,8 +431,6 @@ export async function createAgentToolExecution(id: string, input: CreateToolExec
 
 export async function deleteAgentRunRecord(id: string) {
   const deleted = await deleteAgentRunById(id);
-  if (!deleted) {
-    return null;
-  }
+  if (!deleted) return null;
   return { id: deleted.id, deleted: true };
 }

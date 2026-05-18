@@ -5,7 +5,17 @@
 - React 前端工作台
 - Fastify + Prisma 后端服务
 - PostgreSQL 权威数据模型
-- 知识库、任务、财务、Provider、智能体运行基础能力
+- LangGraph 智能体执行引擎
+- 知识库、任务、财务、Provider 基础能力
+
+## 技术栈
+
+| 层次 | 技术 |
+|------|------|
+| 前端 | React 18 + TypeScript + Webpack 5 + Tailwind CSS |
+| 后端 | Fastify 5 + Prisma 6 + PostgreSQL |
+| 智能体 | LangGraph StateGraph + LangChain ChatModel |
+| 认证 | HMAC-SHA256 签名 Cookie + PIN 验证 |
 
 ## 运行要求
 

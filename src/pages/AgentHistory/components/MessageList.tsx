@@ -1,6 +1,8 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { User, Bot, Wrench, CheckCircle, XCircle, Clock } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { AgentRunMessageDto, AgentRunToolExecutionDto } from '../../../lib/agentApi';
 
 interface MessageListProps {
@@ -55,10 +57,16 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, toolExecutio
               <div className={`flex-1 max-w-[80%] ${message.role === 'user' ? 'text-right' : ''}`}>
                 <div className={`inline-block p-3 rounded-lg ${
                   message.role === 'user'
-                    ? 'bg-primary text-white'
+                    ? 'bg-white text-text-primary border border-border-primary'
                     : 'bg-bg-secondary text-text-primary'
                 }`}>
-                  <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                  <div className={`prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-1 ${
+                    message.role === 'user' ? '' : 'dark:prose-invert'
+                  }`}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
                 </div>
                 <p className="text-xs text-text-secondary mt-1">
                   {new Date(message.createdAt).toLocaleString('zh-CN')}

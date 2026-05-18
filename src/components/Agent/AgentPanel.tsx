@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, X, Send, Loader2, AlertCircle, Trash2, CheckCircle, XCircle, Square, History, ChevronLeft, Clock } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAgent } from '../../agent/AgentContext';
 import { AgentMessage } from '../../agent/types';
 import { registeredToolNames } from '../../agent/toolMetadata';
@@ -130,11 +132,17 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({ isOpen, onClose }) => {
         <div
           className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
             isUser
-              ? 'bg-primary text-white'
+              ? 'bg-white text-text-primary border border-border-primary'
               : 'bg-bg-secondary border border-border-primary'
           }`}
         >
-          <div className="whitespace-pre-wrap">{message.content}</div>
+          <div className={`prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-1 ${
+            isUser ? '' : 'dark:prose-invert'
+          }`}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
 
           {message.toolCalls && message.toolCalls.length > 0 && (
             <div className="mt-2 pt-2 border-t border-border-primary/50">
