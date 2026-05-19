@@ -69,8 +69,12 @@ export interface AgentRuntimeStatusDto {
 }
 
 export interface AgentRunStreamEvent {
-  type: 'run_completed';
-  run: AgentRunDetailDto;
+  type: 'metadata' | 'langgraph_chunk' | 'run_update' | 'run_completed';
+  runId?: string;
+  model?: string;
+  mode?: 'messages' | 'tasks';
+  chunk?: unknown;
+  run?: AgentRunDetailDto;
 }
 
 export async function fetchAgentRuntimeStatus(): Promise<AgentRuntimeStatusDto> {
@@ -104,7 +108,8 @@ export async function streamAgentRun(
   handlers: {
     onEvent?: (event: AgentRunStreamEvent) => void;
     onDone?: () => void;
-  } = {}
+  } = {},
+  signal?: AbortSignal
 ): Promise<AgentRunDetailDto> {
   const response = await fetchWithAuth('/api/agent/runs/stream', {
     method: 'POST',
@@ -112,6 +117,7 @@ export async function streamAgentRun(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
+    signal,
   });
 
   if (!response.ok || !response.body) {
@@ -168,7 +174,109 @@ export async function streamAgentRun(
 
     const typedPayload = payload as AgentRunStreamEvent;
     handlers.onEvent?.(typedPayload);
-    finalRun = typedPayload.run;
+    if (typedPayload.run) {
+      finalRun = typedPayload.run;
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const blocks = buffer.split('\n\n');
+    buffer = blocks.pop() || '';
+
+    for (const block of blocks) {
+      if (block.trim()) {
+        flushEventBlock(block.trim());
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    flushEventBlock(buffer.trim());
+  }
+
+  if (!finalRun) {
+    throw new Error('Agent stream finished without final run payload');
+  }
+
+  return finalRun;
+}
+
+async function streamToolDecision(
+  path: string,
+  handlers: {
+    onEvent?: (event: AgentRunStreamEvent) => void;
+    onDone?: () => void;
+  } = {},
+  signal?: AbortSignal
+): Promise<AgentRunDetailDto> {
+  const response = await fetchWithAuth(path, {
+    method: 'POST',
+    signal,
+  });
+
+  if (!response.ok || !response.body) {
+    let message = `Failed to stream agent run: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string };
+      if (payload.message) {
+        message = payload.message;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalRun: AgentRunDetailDto | null = null;
+
+  const flushEventBlock = (block: string) => {
+    const lines = block.split('\n');
+    let eventName = 'message';
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        eventName = line.slice(6).trim();
+      } else if (line.startsWith('data:')) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+
+    if (dataLines.length === 0) {
+      return;
+    }
+
+    let payload: AgentRunStreamEvent | { ok?: boolean; message?: string };
+    try {
+      payload = JSON.parse(dataLines.join('\n')) as AgentRunStreamEvent | { ok?: boolean; message?: string };
+    } catch {
+      console.error('[Agent] Failed to parse SSE event block');
+      return;
+    }
+
+    if (eventName === 'error') {
+      throw new Error('message' in payload && payload.message ? payload.message : 'Agent stream failed');
+    }
+
+    if (eventName === 'done') {
+      handlers.onDone?.();
+      return;
+    }
+
+    const typedPayload = payload as AgentRunStreamEvent;
+    handlers.onEvent?.(typedPayload);
+    if (typedPayload.run) {
+      finalRun = typedPayload.run;
+    }
   };
 
   while (true) {
@@ -328,6 +436,24 @@ export async function confirmAgentToolExecution(input: {
   return response.json() as Promise<AgentRunDetailDto>;
 }
 
+export async function streamConfirmAgentToolExecution(
+  input: {
+    runId: string;
+    toolExecutionId: string;
+  },
+  handlers: {
+    onEvent?: (event: AgentRunStreamEvent) => void;
+    onDone?: () => void;
+  } = {},
+  signal?: AbortSignal
+): Promise<AgentRunDetailDto> {
+  return streamToolDecision(
+    `/api/agent/runs/${input.runId}/tools/${input.toolExecutionId}/confirm/stream`,
+    handlers,
+    signal
+  );
+}
+
 export async function rejectAgentToolExecution(input: {
   runId: string;
   toolExecutionId: string;
@@ -350,4 +476,22 @@ export async function rejectAgentToolExecution(input: {
   }
 
   return response.json() as Promise<AgentRunDetailDto>;
+}
+
+export async function streamRejectAgentToolExecution(
+  input: {
+    runId: string;
+    toolExecutionId: string;
+  },
+  handlers: {
+    onEvent?: (event: AgentRunStreamEvent) => void;
+    onDone?: () => void;
+  } = {},
+  signal?: AbortSignal
+): Promise<AgentRunDetailDto> {
+  return streamToolDecision(
+    `/api/agent/runs/${input.runId}/tools/${input.toolExecutionId}/reject/stream`,
+    handlers,
+    signal
+  );
 }

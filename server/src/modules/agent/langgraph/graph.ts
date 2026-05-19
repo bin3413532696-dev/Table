@@ -17,8 +17,29 @@ function isoNow() {
   return new Date().toISOString();
 }
 
+const LLM_TIMEOUT_MS = Number(process.env.AGENT_LLM_TIMEOUT_MS) || 30000;
+
 function appendTimeline(state: AgentState, event: TimelineEvent): TimelineEvent[] {
   return [...state.timeline, event];
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 async function executeToolCallInternal(toolCall: ToolCall): Promise<ExecutedToolCall> {
@@ -110,7 +131,11 @@ async function callModelNode(state: AgentState): Promise<Partial<AgentState>> {
   lcMessages = (await messageManager.trim(lcMessages)) as typeof lcMessages;
 
   const startTs = isoNow();
-  const response = await chatModel.invoke(lcMessages);
+  const response = await withTimeout(
+    chatModel.invoke(lcMessages),
+    LLM_TIMEOUT_MS,
+    `LLM request (${state.model})`
+  );
   const responseContent =
     typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
 
@@ -119,6 +144,7 @@ async function callModelNode(state: AgentState): Promise<Partial<AgentState>> {
       ...state.messages,
       { role: 'assistant', content: responseContent, createdAt: now() },
     ],
+    assistantTextChunks: [...state.assistantTextChunks, responseContent],
     timeline: appendTimeline(state, {
       type: 'llm_start',
       timestamp: startTs,
@@ -382,6 +408,27 @@ export const agentGraph = workflow.compile({
   checkpointer: getCheckpointer(),
 });
 
+export type AgentGraphStreamChunk =
+  | { mode: 'values'; data: AgentState }
+  | { mode: 'messages'; data: unknown }
+  | { mode: 'tasks'; data: unknown };
+
+async function resolveFinalState(runId: string, fallback?: AgentState): Promise<AgentState> {
+  const snapshot = await agentGraph.getState({
+    configurable: { thread_id: runId },
+  });
+
+  if (snapshot?.values) {
+    return snapshot.values as AgentState;
+  }
+
+  if (fallback) {
+    return fallback;
+  }
+
+  throw new Error(`Missing checkpoint state for run ${runId}`);
+}
+
 export async function executeAgentGraph(input: {
   inputText: string;
   initialMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
@@ -406,8 +453,87 @@ export async function executeAgentGraph(input: {
   });
 }
 
+export async function streamAgentGraph(input: {
+  inputText: string;
+  initialMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>;
+  provider: AgentState['provider'];
+  model: string;
+  runId: string;
+  userId: string;
+  systemPrompt?: string;
+  onChunk: (chunk: AgentGraphStreamChunk) => Promise<void> | void;
+}): Promise<AgentState> {
+  const initialState: Partial<AgentState> = {
+    inputText: input.inputText,
+    initialMessages: input.initialMessages,
+    provider: input.provider,
+    model: input.model,
+    runId: input.runId,
+    userId: input.userId,
+    systemPrompt: input.systemPrompt || SYSTEM_PROMPT,
+  };
+
+  const stream = await agentGraph.stream(initialState, {
+    configurable: { thread_id: input.runId },
+    streamMode: ['values', 'tasks'],
+  });
+
+  let lastValues: AgentState | undefined;
+
+  for await (const chunk of stream) {
+    if (!Array.isArray(chunk) || chunk.length < 2) {
+      continue;
+    }
+
+    const [mode, data] = chunk as [string, unknown];
+    if (mode !== 'values' && mode !== 'tasks') {
+      continue;
+    }
+
+    if (mode === 'values') {
+      lastValues = data as AgentState;
+    }
+
+    await input.onChunk({ mode, data } as AgentGraphStreamChunk);
+  }
+
+  return resolveFinalState(input.runId, lastValues);
+}
+
 export async function continueAgentGraph(runId: string, approved: boolean): Promise<AgentState> {
   return agentGraph.invoke(new Command({ resume: approved }), {
     configurable: { thread_id: runId },
   });
+}
+
+export async function streamContinueAgentGraph(input: {
+  runId: string;
+  approved: boolean;
+  onChunk: (chunk: AgentGraphStreamChunk) => Promise<void> | void;
+}): Promise<AgentState> {
+  const stream = await agentGraph.stream(new Command({ resume: input.approved }), {
+    configurable: { thread_id: input.runId },
+    streamMode: ['values', 'tasks'],
+  });
+
+  let lastValues: AgentState | undefined;
+
+  for await (const chunk of stream) {
+    if (!Array.isArray(chunk) || chunk.length < 2) {
+      continue;
+    }
+
+    const [mode, data] = chunk as [string, unknown];
+    if (mode !== 'values' && mode !== 'tasks') {
+      continue;
+    }
+
+    if (mode === 'values') {
+      lastValues = data as AgentState;
+    }
+
+    await input.onChunk({ mode, data } as AgentGraphStreamChunk);
+  }
+
+  return resolveFinalState(input.runId, lastValues);
 }

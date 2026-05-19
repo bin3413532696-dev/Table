@@ -3,10 +3,11 @@ import { AgentMessage, AgentState, ConfirmationRequest, ToolCall, ToolResult, MA
 import { API_CONFIG_CHANGED_EVENT, getPreferredAgentModel } from '../lib/apiConfig';
 import {
   type AgentRunDetailDto,
-  confirmAgentToolExecution,
-  createAgentRun,
+  type AgentRunStreamEvent,
   fetchAgentRuntimeStatus,
-  rejectAgentToolExecution,
+  streamAgentRun,
+  streamConfirmAgentToolExecution,
+  streamRejectAgentToolExecution,
 } from '../lib/agentApi';
 import { MESSAGES } from '../core/messages';
 
@@ -29,6 +30,7 @@ interface ActiveRequestState {
   canceled: boolean;
   stopHandled: boolean;
   toolCalls: ToolCall[];
+  runId?: string;
 }
 
 const initialState: AgentState = {
@@ -264,9 +266,76 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     dispatch({
       type: 'SET_ERROR',
-      payload: run.error || run.errorMessage || null,
+      payload: run.error || null,
     });
   }, []);
+
+  const applyStreamEventToAssistantMessage = useCallback((
+    assistantMessageId: string,
+    event: AgentRunStreamEvent,
+    requestState?: ActiveRequestState
+  ) => {
+    if (event.type === 'metadata') {
+      if (requestState && event.runId) {
+        requestState.runId = event.runId;
+      }
+      return;
+    }
+
+    if (event.type === 'run_update') {
+      if (event.run && event.run.status === 'waiting_confirmation') {
+        applyRunResultToAssistantMessage(assistantMessageId, event.run);
+      }
+      return;
+    }
+
+    if (event.type === 'run_completed') {
+      if (event.run) {
+        applyRunResultToAssistantMessage(assistantMessageId, event.run);
+      }
+      return;
+    }
+
+    if (event.type === 'langgraph_chunk' && event.mode === 'messages' && Array.isArray(event.chunk)) {
+      const messageTuple = event.chunk as [unknown, Record<string, unknown>?];
+      const messageLike = messageTuple[0] as { content?: unknown } | undefined;
+      const content = messageLike?.content;
+
+      let textChunk = '';
+      if (typeof content === 'string') {
+        textChunk = content;
+      } else if (Array.isArray(content)) {
+        textChunk = content
+          .map((part) => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+              return part.text;
+            }
+            return '';
+          })
+          .join('');
+      }
+
+      if (!textChunk) {
+        return;
+      }
+
+      if (requestState) {
+        requestState.content += textChunk;
+      }
+
+      dispatch({
+        type: 'UPDATE_MESSAGE',
+        payload: {
+          id: assistantMessageId,
+          updates: {
+            content: (requestState?.content ?? '') || textChunk,
+            status: 'streaming',
+          },
+        },
+      });
+    }
+  }, [applyRunResultToAssistantMessage]);
 
   useEffect(() => {
     const handleConfigChanged = () => {
@@ -330,14 +399,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     };
 
     try {
-      const run = await createAgentRun({
+      const run = await streamAgentRun({
         inputText: content,
         model: state.selectedModel,
         initialMessages: state.messages.map((message) => ({
           role: message.role,
           content: message.content,
         })),
-      });
+      }, {
+        onEvent: (event) => {
+          applyStreamEventToAssistantMessage(assistantMessage.id, event, requestState);
+        },
+      }, requestState.controller.signal);
 
       requestState.toolCalls = [
         ...(run.executedToolCalls || []),
@@ -406,10 +479,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'SET_PROCESSING', payload: true });
 
     try {
-      const run = await confirmAgentToolExecution({
+      const controller = new AbortController();
+      const run = await streamConfirmAgentToolExecution({
         runId: confirmationRequest.runId,
         toolExecutionId: confirmationRequest.id,
-      });
+      }, {
+        onEvent: (event) => {
+          applyStreamEventToAssistantMessage(confirmationRequest.pendingMessageId, event);
+        },
+      }, controller.signal);
       applyRunResultToAssistantMessage(confirmationRequest.pendingMessageId, run);
     } catch (error) {
       dispatch({
@@ -431,10 +509,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'SET_PROCESSING', payload: true });
 
     try {
-      const run = await rejectAgentToolExecution({
+      const controller = new AbortController();
+      const run = await streamRejectAgentToolExecution({
         runId: confirmationRequest.runId,
         toolExecutionId: confirmationRequest.id,
-      });
+      }, {
+        onEvent: (event) => {
+          applyStreamEventToAssistantMessage(confirmationRequest.pendingMessageId, event);
+        },
+      }, controller.signal);
       applyRunResultToAssistantMessage(confirmationRequest.pendingMessageId, run);
     } catch (error) {
       dispatch({

@@ -15,11 +15,23 @@ import {
   getAgentRunList,
   rejectAgentRunTool,
   streamAgentRunRecord,
+  streamConfirmAgentRunTool,
+  streamRejectAgentRunTool,
   updateAgentRunRecord,
   deleteAgentRunRecord,
 } from './service';
 
 export async function agentRoutes(app: FastifyInstance) {
+  const writeSseHeaders = (reply: FastifyReply) => {
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+  };
+
   app.get('/agent/health', async () => {
     const runtime = await getAgentRuntimeStatus();
     return {
@@ -60,18 +72,12 @@ export async function agentRoutes(app: FastifyInstance) {
     const cleanup = () => {
       connectionClosed = true;
     };
-    request.raw.on('close', cleanup);
+    reply.raw.on('close', cleanup);
 
     try {
       const payload = createAgentRunSchema.parse(request.body);
 
-      reply.hijack();
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-transform',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
+      writeSseHeaders(reply);
 
       const sendEvent = (event: string, data: unknown) => {
         if (connectionClosed) {
@@ -90,7 +96,7 @@ export async function agentRoutes(app: FastifyInstance) {
       }
     } catch (error) {
       if (!reply.raw.headersSent) {
-        request.raw.off('close', cleanup);
+        reply.raw.off('close', cleanup);
         return sendInfrastructureError(reply, error);
       }
 
@@ -105,7 +111,7 @@ export async function agentRoutes(app: FastifyInstance) {
         }
       }
     } finally {
-      request.raw.off('close', cleanup);
+      reply.raw.off('close', cleanup);
     }
   });
 
@@ -162,6 +168,55 @@ export async function agentRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post('/agent/runs/:id/tools/:toolExecutionId/confirm/stream', async (request: FastifyRequest, reply: FastifyReply) => {
+    let connectionClosed = false;
+
+    const cleanup = () => {
+      connectionClosed = true;
+    };
+    reply.raw.on('close', cleanup);
+
+    try {
+      const { id, toolExecutionId } = toolExecutionIdParamSchema.parse(request.params);
+
+      writeSseHeaders(reply);
+
+      const sendEvent = (event: string, data: unknown) => {
+        if (connectionClosed) {
+          throw new Error('Client disconnected');
+        }
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const result = await streamConfirmAgentRunTool(id, toolExecutionId, (event) => {
+        sendEvent((event as { type: string }).type, event);
+      });
+
+      if (!connectionClosed) {
+        sendEvent('done', { ok: true, run: result });
+        reply.raw.end();
+      }
+    } catch (error) {
+      if (!reply.raw.headersSent) {
+        reply.raw.off('close', cleanup);
+        return sendInfrastructureError(reply, error);
+      }
+
+      if (!connectionClosed) {
+        try {
+          reply.raw.write(`event: error\ndata: ${JSON.stringify({
+            message: error instanceof Error ? error.message : 'Unknown error',
+          })}\n\n`);
+          reply.raw.end();
+        } catch {
+          // ignore write errors after disconnect
+        }
+      }
+    } finally {
+      reply.raw.off('close', cleanup);
+    }
+  });
+
   app.post('/agent/runs/:id/tools/:toolExecutionId/reject', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id, toolExecutionId } = toolExecutionIdParamSchema.parse(request.params);
@@ -172,6 +227,55 @@ export async function agentRoutes(app: FastifyInstance) {
       return run;
     } catch (error) {
       return sendInfrastructureError(reply, error);
+    }
+  });
+
+  app.post('/agent/runs/:id/tools/:toolExecutionId/reject/stream', async (request: FastifyRequest, reply: FastifyReply) => {
+    let connectionClosed = false;
+
+    const cleanup = () => {
+      connectionClosed = true;
+    };
+    reply.raw.on('close', cleanup);
+
+    try {
+      const { id, toolExecutionId } = toolExecutionIdParamSchema.parse(request.params);
+
+      writeSseHeaders(reply);
+
+      const sendEvent = (event: string, data: unknown) => {
+        if (connectionClosed) {
+          throw new Error('Client disconnected');
+        }
+        reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const result = await streamRejectAgentRunTool(id, toolExecutionId, (event) => {
+        sendEvent((event as { type: string }).type, event);
+      });
+
+      if (!connectionClosed) {
+        sendEvent('done', { ok: true, run: result });
+        reply.raw.end();
+      }
+    } catch (error) {
+      if (!reply.raw.headersSent) {
+        reply.raw.off('close', cleanup);
+        return sendInfrastructureError(reply, error);
+      }
+
+      if (!connectionClosed) {
+        try {
+          reply.raw.write(`event: error\ndata: ${JSON.stringify({
+            message: error instanceof Error ? error.message : 'Unknown error',
+          })}\n\n`);
+          reply.raw.end();
+        } catch {
+          // ignore write errors after disconnect
+        }
+      }
+    } finally {
+      reply.raw.off('close', cleanup);
     }
   });
 }
