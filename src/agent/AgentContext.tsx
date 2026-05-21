@@ -3,8 +3,11 @@ import { AgentMessage, AgentState, ConfirmationRequest, ToolCall, ToolResult, MA
 import { API_CONFIG_CHANGED_EVENT, getPreferredAgentModel } from '../lib/apiConfig';
 import {
   type AgentRunDetailDto,
+  type AgentSessionDetailDto,
   type AgentRunStreamEvent,
   fetchAgentRuntimeStatus,
+  fetchAgentSessionList,
+  fetchAgentSessionDetail,
   streamAgentRun,
   streamConfirmAgentToolExecution,
   streamRejectAgentToolExecution,
@@ -14,14 +17,18 @@ import { MESSAGES } from '../core/messages';
 type AgentAction =
   | { type: 'ADD_MESSAGE'; payload: AgentMessage }
   | { type: 'UPDATE_MESSAGE'; payload: { id: string; updates: Partial<AgentMessage> } }
+  | { type: 'APPEND_STREAMING_CONTENT'; payload: { messageId: string; chunk: string } }
+  | { type: 'FINALIZE_STREAMING'; payload: { messageId: string; finalContent: string; updates: Partial<AgentMessage> } }
   | { type: 'SET_PROCESSING'; payload: boolean }
   | { type: 'SET_CONNECTED'; payload: boolean }
   | { type: 'SET_MODELS'; payload: string[] }
   | { type: 'SELECT_MODEL'; payload: string }
   | { type: 'SET_CONFIRMATION'; payload: ConfirmationRequest | null }
   | { type: 'CLEAR_MESSAGES' }
+  | { type: 'NEW_SESSION'; payload?: string }
   | { type: 'SET_ERROR'; payload: string | null }
-  | { type: 'LOAD_HISTORY'; payload: { messages: AgentMessage[]; runId: string } };
+  | { type: 'LOAD_HISTORY'; payload: { messages: AgentMessage[]; runId: string; sessionId: string | null } }
+  | { type: 'UPDATE_SESSION_ID'; payload: string };
 
 interface ActiveRequestState {
   controller: AbortController;
@@ -33,16 +40,31 @@ interface ActiveRequestState {
   runId?: string;
 }
 
-const initialState: AgentState = {
-  messages: [],
-  isProcessing: false,
-  isConnected: false,
-  selectedModel: getPreferredAgentModel(),
-  availableModels: [],
-  confirmationRequest: null,
-  error: null,
-  currentRunId: null,
-};
+const SESSION_ID_KEY = 'agent_session_id';
+
+function getStoredSessionId(): string {
+  if (typeof window === 'undefined') {
+    return crypto.randomUUID();
+  }
+  const stored = localStorage.getItem(SESSION_ID_KEY);
+  if (stored) {
+    return stored;
+  }
+  // 不在这里写入 localStorage，让 checkConnection 有机会加载服务端会话
+  return crypto.randomUUID();
+}
+
+function storeSessionId(sessionId: string) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(SESSION_ID_KEY, sessionId);
+  }
+}
+
+function clearStoredSessionId() {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(SESSION_ID_KEY);
+  }
+}
 
 /**
  * 对话历史管理：裁剪消息以符合限制
@@ -80,6 +102,20 @@ function appendManualStopMessage(content: string): string {
 
   return content.includes(stopMessage) ? content : `${content}\n\n${stopMessage}`;
 }
+
+const initialState: AgentState = {
+  messages: [],
+  streamingContent: null,
+  isProcessing: false,
+  isConnected: false,
+  selectedModel: getPreferredAgentModel(),
+  availableModels: [],
+  confirmationRequest: null,
+  error: null,
+  currentRunId: null,
+  currentSessionId: getStoredSessionId(),
+};
+
 function agentReducer(state: AgentState, action: AgentAction): AgentState {
   switch (action.type) {
     case 'ADD_MESSAGE':
@@ -93,6 +129,30 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
           message.id === action.payload.id ? { ...message, ...action.payload.updates } : message
         ),
       };
+    // 流式输出优化：追加streaming内容，不触发messages数组重建
+    case 'APPEND_STREAMING_CONTENT':
+      const current = state.streamingContent;
+      return {
+        ...state,
+        streamingContent: {
+          messageId: action.payload.messageId,
+          content: current?.messageId === action.payload.messageId
+            ? current.content + action.payload.chunk
+            : action.payload.chunk,
+          status: 'streaming',
+        },
+      };
+    // 流式完成：将streaming内容合并到messages，清空streamingContent
+    case 'FINALIZE_STREAMING':
+      return {
+        ...state,
+        streamingContent: null,
+        messages: state.messages.map((message) =>
+          message.id === action.payload.messageId
+            ? { ...message, content: action.payload.finalContent, ...action.payload.updates }
+            : message
+        ),
+      };
     case 'SET_PROCESSING':
       return { ...state, isProcessing: action.payload };
     case 'SET_CONNECTED':
@@ -104,18 +164,51 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
     case 'SET_CONFIRMATION':
       return { ...state, confirmationRequest: action.payload };
     case 'CLEAR_MESSAGES':
-      return { ...state, messages: [], error: null };
+      const clearSessionId = crypto.randomUUID();
+      clearStoredSessionId();
+      storeSessionId(clearSessionId);
+      return {
+        ...state,
+        messages: [],
+        streamingContent: null,
+        error: null,
+        currentRunId: null,
+        currentSessionId: clearSessionId,
+        confirmationRequest: null,
+      };
+    case 'NEW_SESSION':
+      const newSessionId = action.payload || crypto.randomUUID();
+      clearStoredSessionId();
+      storeSessionId(newSessionId);
+      return {
+        ...state,
+        messages: [],
+        streamingContent: null,
+        error: null,
+        currentRunId: null,
+        currentSessionId: newSessionId,
+        confirmationRequest: null,
+      };
     case 'SET_ERROR':
       return { ...state, error: action.payload };
     case 'LOAD_HISTORY':
+      const sessionId = action.payload.sessionId ?? getStoredSessionId();
+      if (action.payload.sessionId) {
+        storeSessionId(action.payload.sessionId);
+      }
       return {
         ...state,
         messages: action.payload.messages,
+        streamingContent: null,
         currentRunId: action.payload.runId,
+        currentSessionId: sessionId,
         isProcessing: false,
         error: null,
         confirmationRequest: null,
       };
+    case 'UPDATE_SESSION_ID':
+      storeSessionId(action.payload);
+      return { ...state, currentSessionId: action.payload };
     default:
       return state;
   }
@@ -128,9 +221,11 @@ interface AgentContextType {
   confirmAction: () => Promise<void>;
   rejectAction: () => Promise<void>;
   clearConversation: () => void;
+  newSession: (sessionId?: string) => void;
   checkConnection: () => Promise<void>;
   selectModel: (model: string) => void;
   loadHistoryRun: (run: AgentRunDetailDto) => void;
+  loadHistorySession: (session: AgentSessionDetailDto) => void;
 }
 
 const AgentContext = createContext<AgentContextType | null>(null);
@@ -190,6 +285,41 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           : (runtime.runtime.availableModels[0] || preferredModel),
       });
       dispatch({ type: 'SET_ERROR', payload: null });
+
+      // 自动加载最近会话的历史消息（每次启动都同步）
+      try {
+        const sessionList = await fetchAgentSessionList({ limit: 1 });
+        if (sessionList.items.length > 0) {
+          const latestSession = sessionList.items[0];
+          const detail = await fetchAgentSessionDetail(latestSession.id);
+          if (detail.messages && detail.messages.length > 0) {
+            // 过滤掉系统消息，不显示给用户
+            const messages: AgentMessage[] = detail.messages
+              .filter((msg) => msg.role !== 'system')
+              .map((msg, index) => ({
+                id: msg.id || `msg-${index}`,
+                role: msg.role,
+                content: msg.content,
+                timestamp: msg.createdAt || Date.now(),
+                status: 'completed' as const,
+              }));
+            dispatch({
+              type: 'LOAD_HISTORY',
+              payload: {
+                messages,
+                runId: detail.runs[detail.runs.length - 1]?.id ?? '',
+                sessionId: detail.id,
+              },
+            });
+          } else {
+            // 没有消息，只同步 sessionId
+            storeSessionId(latestSession.id);
+            dispatch({ type: 'UPDATE_SESSION_ID', payload: latestSession.id });
+          }
+        }
+      } catch {
+        // 加载历史失败不影响主流程
+      }
     } catch (error) {
       handleRuntimeUnavailable(error);
     }
@@ -284,6 +414,17 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     if (event.type === 'run_update') {
       if (event.run && event.run.status === 'waiting_confirmation') {
+        // 等待确认时，将streaming内容合并到messages
+        if (requestState) {
+          dispatch({
+            type: 'FINALIZE_STREAMING',
+            payload: {
+              messageId: assistantMessageId,
+              finalContent: requestState.content,
+              updates: {},
+            },
+          });
+        }
         applyRunResultToAssistantMessage(assistantMessageId, event.run);
       }
       return;
@@ -291,15 +432,48 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     if (event.type === 'run_completed') {
       if (event.run) {
+        // 流式完成，将streaming内容合并到messages
+        if (requestState) {
+          dispatch({
+            type: 'FINALIZE_STREAMING',
+            payload: {
+              messageId: assistantMessageId,
+              finalContent: requestState.content,
+              updates: {},
+            },
+          });
+        }
         applyRunResultToAssistantMessage(assistantMessageId, event.run);
       }
       return;
     }
 
+    // 处理新的 token 事件：直接发送token级内容
+    if (event.type === 'token' && event.token) {
+      const token = event.token;
+
+      if (requestState) {
+        requestState.content += token;
+      }
+
+      // 流式输出优化：使用 APPEND_STREAMING_CONTENT 避免高频 messages 数组重建
+      dispatch({
+        type: 'APPEND_STREAMING_CONTENT',
+        payload: {
+          messageId: assistantMessageId,
+          chunk: token,
+        },
+      });
+      return;
+    }
+
     if (event.type === 'langgraph_chunk' && event.mode === 'messages' && Array.isArray(event.chunk)) {
-      const messageTuple = event.chunk as [unknown, Record<string, unknown>?];
-      const messageLike = messageTuple[0] as { content?: unknown } | undefined;
-      const content = messageLike?.content;
+      // LangGraph messages chunk 格式: [metadata, AIMessageChunk]
+      // AIMessageChunk 是 LangChain 的消息类型，包含 content 字段
+      const messageTuple = event.chunk as [Record<string, unknown>, { content?: string | Array<{ text?: string } | string> }?];
+      // 第二个元素是 AIMessageChunk
+      const messageChunk = messageTuple[1];
+      const content = messageChunk?.content;
 
       let textChunk = '';
       if (typeof content === 'string') {
@@ -324,14 +498,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         requestState.content += textChunk;
       }
 
+      // 流式输出优化：使用 APPEND_STREAMING_CONTENT 避免高频 messages 数组重建
       dispatch({
-        type: 'UPDATE_MESSAGE',
+        type: 'APPEND_STREAMING_CONTENT',
         payload: {
-          id: assistantMessageId,
-          updates: {
-            content: (requestState?.content ?? '') || textChunk,
-            status: 'streaming',
-          },
+          messageId: assistantMessageId,
+          chunk: textChunk,
         },
       });
     }
@@ -353,6 +525,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       }
     };
   }, [checkConnection]);
+
+  // 多标签页同步：监听其他标签页对 sessionId 的更新
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === SESSION_ID_KEY && e.newValue && e.newValue !== state.currentSessionId) {
+        dispatch({ type: 'UPDATE_SESSION_ID', payload: e.newValue });
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [state.currentSessionId]);
 
   const sendMessage = useCallback(async (content: string) => {
     if (state.isProcessing || !state.isConnected) {
@@ -379,7 +563,14 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       status: 'streaming',
     };
 
+    // 添加空的助手消息作为占位符
     dispatch({ type: 'ADD_MESSAGE', payload: assistantMessage });
+
+    // 初始化 streamingContent
+    dispatch({
+      type: 'APPEND_STREAMING_CONTENT',
+      payload: { messageId: assistantMessage.id, chunk: '' },
+    });
 
     const requestState: ActiveRequestState = {
       controller: new AbortController(),
@@ -391,23 +582,27 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     };
     activeRequestRef.current = requestState;
 
-    const updateAssistantMessage = (updates: Partial<AgentMessage>) => {
-      dispatch({
-        type: 'UPDATE_MESSAGE',
-        payload: { id: assistantMessage.id, updates },
-      });
-    };
-
     try {
-      const run = await streamAgentRun({
+      // 验证 sessionId 是否是有效 UUID，如果不是则不传（后端会自动创建）
+      const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(state.currentSessionId);
+      const requestBody: {
+        inputText: string;
+        model: string;
+        sessionId?: string;
+      } = {
         inputText: content,
-        model: state.selectedModel,
-        initialMessages: state.messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-        })),
-      }, {
+        model: state.selectedModel || 'default',
+      };
+      if (isValidUuid) {
+        requestBody.sessionId = state.currentSessionId;
+      }
+
+      const run = await streamAgentRun(requestBody, {
         onEvent: (event) => {
+          // 处理 metadata 中的 sessionId，确保前后端一致
+          if (event.type === 'metadata' && event.sessionId) {
+            dispatch({ type: 'UPDATE_SESSION_ID', payload: event.sessionId });
+          }
           applyStreamEventToAssistantMessage(assistantMessage.id, event, requestState);
         },
       }, requestState.controller.signal);
@@ -421,19 +616,25 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         arguments: execution.arguments,
       }));
 
-      updateAssistantMessage({ status: 'completed' });
+      // 流式完成，将最终内容合并到messages
+      dispatch({
+        type: 'FINALIZE_STREAMING',
+        payload: {
+          messageId: assistantMessage.id,
+          finalContent: requestState.content,
+          updates: { status: 'completed' },
+        },
+      });
       applyRunResultToAssistantMessage(assistantMessage.id, run);
     } catch (error) {
       if (requestState.canceled || requestState.controller.signal.aborted) {
         if (!requestState.stopHandled && activeRequestRef.current === requestState) {
           dispatch({
-            type: 'UPDATE_MESSAGE',
+            type: 'FINALIZE_STREAMING',
             payload: {
-              id: assistantMessage.id,
-              updates: {
-                status: 'completed',
-                content: appendManualStopMessage(requestState.content),
-              },
+              messageId: assistantMessage.id,
+              finalContent: appendManualStopMessage(requestState.content),
+              updates: { status: 'completed' },
             },
           });
           dispatch({ type: 'SET_ERROR', payload: null });
@@ -442,10 +643,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       }
 
       dispatch({
-        type: 'UPDATE_MESSAGE',
+        type: 'FINALIZE_STREAMING',
         payload: {
-          id: assistantMessage.id,
-          updates: { status: 'error', content: MESSAGES.agent.processError },
+          messageId: assistantMessage.id,
+          finalContent: MESSAGES.agent.processError,
+          updates: { status: 'error' },
         },
       });
       dispatch({
@@ -458,7 +660,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: 'SET_PROCESSING', payload: false });
       }
     }
-  }, [applyRunResultToAssistantMessage, state.isConnected, state.isProcessing, state.messages, state.selectedModel]);
+  }, [applyRunResultToAssistantMessage, state.currentSessionId, state.isConnected, state.isProcessing, state.selectedModel]);
 
   const stopThinking = useCallback(() => {
     const activeRequest = activeRequestRef.current;
@@ -533,22 +735,72 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'CLEAR_MESSAGES' });
   }, []);
 
+  const newSession = useCallback((sessionId?: string) => {
+    dispatch({ type: 'NEW_SESSION', payload: sessionId });
+  }, []);
+
   const selectModel = useCallback((model: string) => {
     dispatch({ type: 'SELECT_MODEL', payload: model });
   }, []);
 
   const loadHistoryRun = useCallback((run: AgentRunDetailDto) => {
-    const messages: AgentMessage[] = run.messages.map((msg, index) => ({
-      id: msg.id || `msg-${index}`,
-      role: msg.role,
-      content: msg.content,
-      timestamp: msg.createdAt || Date.now(),
-      status: 'completed' as const,
-    }));
+    // 过滤掉系统消息，不显示给用户
+    const messages: AgentMessage[] = run.messages
+      .filter((msg) => msg.role !== 'system')
+      .map((msg, index) => ({
+        id: msg.id || `msg-${index}`,
+        role: msg.role,
+        content: msg.content,
+        timestamp: msg.createdAt || Date.now(),
+        status: 'completed' as const,
+      }));
 
     dispatch({
       type: 'LOAD_HISTORY',
-      payload: { messages, runId: run.id },
+      payload: { messages, runId: run.id, sessionId: run.sessionId ?? null },
+    });
+  }, []);
+
+  const loadHistorySession = useCallback((session: AgentSessionDetailDto) => {
+    // 优先使用 checkpoint 中的完整消息
+    const messages: AgentMessage[] = [];
+
+    if (session.messages && session.messages.length > 0) {
+      // 从 checkpoint 加载的完整对话历史（过滤掉系统消息）
+      for (const msg of session.messages) {
+        // 过滤掉系统消息，不显示给用户
+        if (msg.role === 'system') continue;
+        messages.push({
+          id: msg.id || `msg-${messages.length}`,
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.createdAt || Date.now(),
+          status: 'completed' as const,
+        });
+      }
+    } else {
+      // 降级：从 run 列表构建消息
+      for (const run of session.runs) {
+        messages.push({
+          id: `user-${run.id}`,
+          role: 'user',
+          content: run.inputText,
+          timestamp: run.createdAt,
+          status: 'completed' as const,
+        });
+        messages.push({
+          id: `assistant-${run.id}`,
+          role: 'assistant',
+          content: run.status === 'completed' ? '（回复内容不可用）' : `状态: ${run.status}`,
+          timestamp: run.createdAt + 1,
+          status: run.status === 'failed' ? 'error' as const : 'completed' as const,
+        });
+      }
+    }
+
+    dispatch({
+      type: 'LOAD_HISTORY',
+      payload: { messages, runId: session.runs[session.runs.length - 1]?.id ?? '', sessionId: session.id },
     });
   }, []);
 
@@ -559,10 +811,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     confirmAction,
     rejectAction,
     clearConversation,
+    newSession,
     checkConnection,
     selectModel,
     loadHistoryRun,
-  }), [state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, checkConnection, selectModel, loadHistoryRun]);
+    loadHistorySession,
+  }), [state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, newSession, checkConnection, selectModel, loadHistoryRun, loadHistorySession]);
 
   return <AgentContext.Provider value={value}>{children}</AgentContext.Provider>;
 }

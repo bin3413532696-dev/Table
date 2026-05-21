@@ -87,7 +87,6 @@ export async function listProvidersForCurrentUser() {
   const providers = await prisma.apiProvider.findMany({
     where: {
       userId: getCurrentUserId(),
-      deletedAt: null,
     },
     orderBy: [
       { isActive: 'desc' },
@@ -103,7 +102,6 @@ export async function getActiveProviderForCurrentUser() {
   const provider = await prisma.apiProvider.findFirst({
     where: {
       userId: getCurrentUserId(),
-      deletedAt: null,
       isActive: true,
     },
     orderBy: [
@@ -141,7 +139,6 @@ export async function createProviderForCurrentUser(input: CreateProviderInput) {
   const activeProviderCount = await prisma.apiProvider.count({
     where: {
       userId,
-      deletedAt: null,
       isActive: true,
     },
   });
@@ -152,7 +149,6 @@ export async function createProviderForCurrentUser(input: CreateProviderInput) {
       await tx.apiProvider.updateMany({
         where: {
           userId,
-          deletedAt: null,
           isActive: true,
         },
         data: {
@@ -188,7 +184,6 @@ export async function updateProviderForCurrentUser(id: string, input: UpdateProv
     where: {
       id,
       userId,
-      deletedAt: null,
     },
   });
 
@@ -212,7 +207,6 @@ export async function updateProviderForCurrentUser(id: string, input: UpdateProv
       await tx.apiProvider.updateMany({
         where: {
           userId,
-          deletedAt: null,
           isActive: true,
           id: {
             not: id,
@@ -254,7 +248,6 @@ export async function activateProviderForCurrentUser(id: string) {
     where: {
       id,
       userId,
-      deletedAt: null,
     },
   });
 
@@ -266,7 +259,6 @@ export async function activateProviderForCurrentUser(id: string) {
     await tx.apiProvider.updateMany({
       where: {
         userId,
-        deletedAt: null,
         isActive: true,
       },
       data: {
@@ -296,7 +288,6 @@ export async function deleteProviderForCurrentUser(id: string) {
     where: {
       id,
       userId,
-      deletedAt: null,
     },
   });
 
@@ -305,16 +296,9 @@ export async function deleteProviderForCurrentUser(id: string) {
   }
 
   await prisma.$transaction(async (tx) => {
-    await tx.apiProvider.update({
+    await tx.apiProvider.delete({
       where: {
         id,
-      },
-      data: {
-        deletedAt: new Date(),
-        isActive: false,
-        version: {
-          increment: 1,
-        },
       },
     });
 
@@ -325,7 +309,6 @@ export async function deleteProviderForCurrentUser(id: string) {
     const fallback = await tx.apiProvider.findFirst({
       where: {
         userId,
-        deletedAt: null,
       },
       orderBy: [
         { updatedAt: 'desc' },

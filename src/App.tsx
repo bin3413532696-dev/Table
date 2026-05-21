@@ -2,7 +2,6 @@ import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { PinLock } from './components/PinLock';
-import { AgentTrigger } from './components/Agent';
 import ErrorBoundary from './components/ErrorBoundary';
 import Loading from './components/Loading';
 import { fetchPinStatus } from './lib/auth';
@@ -93,7 +92,6 @@ function App() {
           </Routes>
         </Suspense>
       </HashRouter>
-      <AgentTrigger />
     </ErrorBoundary>
   );
 }

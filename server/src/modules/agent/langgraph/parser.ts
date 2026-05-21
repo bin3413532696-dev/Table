@@ -1,10 +1,48 @@
 import { randomUUID } from 'crypto';
 import type { ToolCall } from './state';
+import type { AIMessage } from '@langchain/core/messages';
 
 /**
  * 工具调用解析器
- * 复用 executor.ts 中的解析逻辑
+ * 支持原生 Function Calling 和文本解析两种方式
  */
+
+/**
+ * 从 LangChain AIMessage 中提取原生 tool_calls
+ */
+export function parseToolCallsFromResponse(response: AIMessage): ToolCall[] {
+  // 检查是否有原生 tool_calls
+  if (response.tool_calls && response.tool_calls.length > 0) {
+    return response.tool_calls.map((tc) => ({
+      id: tc.id || randomUUID(),
+      name: tc.name,
+      arguments: tc.args as Record<string, unknown>,
+    }));
+  }
+
+  // 检查是否有 additional_kwargs 中的 tool_calls（某些模型的兼容格式）
+  const additionalToolCalls = response.additional_kwargs?.tool_calls;
+  if (Array.isArray(additionalToolCalls) && additionalToolCalls.length > 0) {
+    return additionalToolCalls.map((tc: { id?: string; function?: { name?: string; arguments?: string } }) => {
+      let args: Record<string, unknown> = {};
+      if (tc.function?.arguments) {
+        try {
+          args = JSON.parse(tc.function.arguments);
+        } catch {
+          args = {};
+        }
+      }
+      return {
+        id: tc.id || randomUUID(),
+        name: tc.function?.name || '',
+        arguments: args,
+      };
+    }).filter((tc) => tc.name);
+  }
+
+  // 没有原生 tool_calls，返回空数组
+  return [];
+}
 
 /**
  * 从内容中提取内联 JSON 工具调用

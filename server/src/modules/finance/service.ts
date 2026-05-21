@@ -3,7 +3,7 @@ import {
   createFinanceRecord,
   findFinanceRecordById,
   listFinanceRecords,
-  softDeleteFinanceRecord,
+  deleteFinanceRecord,
   updateFinanceRecord,
 } from './repository';
 import { toFinanceRecordDto } from './dto';
@@ -40,6 +40,6 @@ export async function deleteFinanceRecordEntry(id: string) {
   if (!existing) {
     return null;
   }
-  const record = await softDeleteFinanceRecord(id);
-  return toFinanceRecordDto(record);
+  const record = await deleteFinanceRecord(id);
+  return record ? toFinanceRecordDto(record) : null;
 }

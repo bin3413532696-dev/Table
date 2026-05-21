@@ -45,6 +45,11 @@ export type TimelineEvent = {
   data: Record<string, unknown>;
 };
 
+const arrayAppendReducer = <T>() => (x: T[] | undefined, y: T[] | undefined): T[] =>
+  [...(x ?? []), ...(y ?? [])];
+
+const scalarReplaceReducer = <T>() => (_: T, y: T): T => y;
+
 export const AgentStateAnnotation = Annotation.Root({
   inputText: Annotation<string>,
   initialMessages: Annotation<Array<{
@@ -59,60 +64,69 @@ export const AgentStateAnnotation = Annotation.Root({
 
   messages: Annotation<ConversationMessage[]>({
     default: () => [],
-    reducer: (_, y) => y ?? [],
+    reducer: arrayAppendReducer(),
+  }),
+
+  modelInputMessages: Annotation<ConversationMessage[]>({
+    default: () => [],
+    reducer: scalarReplaceReducer(),
   }),
 
   executedToolCalls: Annotation<ExecutedToolCall[]>({
     default: () => [],
-    reducer: (_, y) => y ?? [],
+    reducer: arrayAppendReducer(),
   }),
 
   pendingToolCalls: Annotation<ToolCall[]>({
     default: () => [],
-    reducer: (_, y) => y ?? [],
+    reducer: scalarReplaceReducer(),
   }),
 
   requiresConfirmation: Annotation<boolean>({
     default: () => false,
-    reducer: (_, y) => y,
+    reducer: scalarReplaceReducer(),
   }),
   pendingToolExecution: Annotation<PendingToolExecution | null>({
     default: () => null,
-    reducer: (_, y) => y,
+    reducer: scalarReplaceReducer(),
   }),
   confirmedToolCall: Annotation<ToolCall | null>({
     default: () => null,
-    reducer: (_, y) => y,
+    reducer: scalarReplaceReducer(),
   }),
 
   finalText: Annotation<string>({
     default: () => '',
-    reducer: (_, y) => y,
+    reducer: scalarReplaceReducer(),
   }),
 
   runId: Annotation<string>,
   userId: Annotation<string>,
   iterationCount: Annotation<number>({
     default: () => 0,
-    reducer: (_, y) => y,
+    reducer: scalarReplaceReducer(),
+  }),
+  inputAppended: Annotation<boolean>({
+    default: () => false,
+    reducer: scalarReplaceReducer(),
   }),
   status: Annotation<RunStatus>({
     default: () => 'running',
-    reducer: (_, y) => y,
+    reducer: scalarReplaceReducer(),
   }),
   error: Annotation<string | null>({
     default: () => null,
-    reducer: (_, y) => y,
+    reducer: scalarReplaceReducer(),
   }),
 
   assistantTextChunks: Annotation<string[]>({
     default: () => [],
-    reducer: (_, y) => y ?? [],
+    reducer: arrayAppendReducer(),
   }),
 
   timeline: Annotation<TimelineEvent[]>({
     default: () => [],
-    reducer: (x, y) => [...(x ?? []), ...(y ?? [])],
+    reducer: arrayAppendReducer(),
   }),
 });
 

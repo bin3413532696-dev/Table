@@ -251,13 +251,11 @@ async function ensureUserBaseline(context: ServerUserContext) {
       prisma.task.count({
         where: {
           userId: context.userId,
-          deletedAt: null,
         },
       }),
       prisma.financeRecord.count({
         where: {
           userId: context.userId,
-          deletedAt: null,
         },
       }),
     ]);

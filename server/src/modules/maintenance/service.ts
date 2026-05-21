@@ -163,7 +163,6 @@ export async function exportBusinessSnapshot() {
     prisma.task.findMany({
       where: {
         userId,
-        deletedAt: null,
       },
       orderBy: {
         updatedAt: 'desc',
@@ -172,7 +171,6 @@ export async function exportBusinessSnapshot() {
     prisma.financeRecord.findMany({
       where: {
         userId,
-        deletedAt: null,
       },
       orderBy: {
         updatedAt: 'desc',
@@ -181,7 +179,6 @@ export async function exportBusinessSnapshot() {
     prisma.knowledgeNote.findMany({
       where: {
         userId,
-        deletedAt: null,
       },
       orderBy: {
         updatedAt: 'desc',
@@ -327,23 +324,20 @@ export async function resetWorkspaceData(scope: 'all' | 'tasks' | 'finance' | 'k
 
   await prisma.$transaction(async (tx) => {
     if (shouldResetTasks) {
-      await tx.task.updateMany({
+      await tx.task.deleteMany({
         where: { userId },
-        data: { deletedAt: new Date() },
       });
     }
 
     if (shouldResetFinance) {
-      await tx.financeRecord.updateMany({
+      await tx.financeRecord.deleteMany({
         where: { userId },
-        data: { deletedAt: new Date() },
       });
     }
 
     if (shouldResetKnowledge) {
-      await tx.knowledgeNote.updateMany({
+      await tx.knowledgeNote.deleteMany({
         where: { userId },
-        data: { deletedAt: new Date() },
       });
 
       await tx.knowledgePresetTag.deleteMany({

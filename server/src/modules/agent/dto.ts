@@ -1,9 +1,26 @@
-import type { AgentRun } from '@prisma/client';
+import type { AgentRun, AgentSession } from '@prisma/client';
 import type { AgentState, RunStatus } from './langgraph/state';
+
+export type AgentSessionDto = {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  runs: AgentRunListItemDto[];
+};
+
+export type AgentSessionDetailDto = AgentSessionDto & {
+  messages: Array<{
+    id: string;
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    createdAt?: number;
+  }>;
+};
 
 export type AgentRunListItemDto = {
   id: string;
-  sessionId?: string;
+  sessionId: string;
   status: string;
   inputText: string;
   model: string;
@@ -44,13 +61,47 @@ export type AgentRunDetailDto = AgentRunListItemDto & {
 export function toAgentRunDto(run: AgentRun): AgentRunListItemDto {
   return {
     id: run.id,
-    sessionId: run.sessionId ?? undefined,
+    sessionId: run.sessionId,
     status: run.status,
     inputText: run.inputText,
     model: run.model,
     createdAt: run.createdAt.getTime(),
     updatedAt: run.updatedAt.getTime(),
     version: run.version,
+  };
+}
+
+export function toAgentSessionDto(session: AgentSession & { runs?: AgentRun[] }): AgentSessionDto {
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.createdAt.getTime(),
+    updatedAt: session.updatedAt.getTime(),
+    runs: (session.runs || []).map(toAgentRunDto),
+  };
+}
+
+export function buildAgentSessionDetailDto(
+  session: AgentSession & { runs?: AgentRun[] },
+  state?: AgentState | null
+): AgentSessionDetailDto {
+  const base = toAgentSessionDto(session);
+
+  // 如果有 checkpoint 状态，提取消息（过滤掉系统消息，不显示给用户）
+  const messages = state?.messages
+    ? state.messages
+        .filter((message) => message.role !== 'system')
+        .map((message, index) => ({
+          id: `session-${session.id}-msg-${index}`,
+          role: message.role,
+          content: message.content,
+          createdAt: message.createdAt,
+        }))
+    : [];
+
+  return {
+    ...base,
+    messages,
   };
 }
 
@@ -89,12 +140,15 @@ export function buildAgentRunDetailDto(run: AgentRun, state: AgentState): AgentR
   return {
     ...base,
     status: state.status,
-    messages: state.messages.map((message, index) => ({
-      id: `${state.runId}-msg-${index}`,
-      role: message.role,
-      content: message.content,
-      createdAt: message.createdAt,
-    })),
+    // 过滤掉系统消息，不显示给用户
+    messages: state.messages
+      .filter((message) => message.role !== 'system')
+      .map((message, index) => ({
+        id: `${state.runId}-msg-${index}`,
+        role: message.role,
+        content: message.content,
+        createdAt: message.createdAt,
+      })),
     executedToolCalls,
     pendingToolCalls,
     requiresConfirmation: state.status === 'waiting_confirmation',

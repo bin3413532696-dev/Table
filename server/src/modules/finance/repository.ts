@@ -6,7 +6,6 @@ export async function listFinanceRecords() {
   return prisma.financeRecord.findMany({
     where: {
       userId: getCurrentUserId(),
-      deletedAt: null,
     },
     orderBy: {
       updatedAt: 'desc',
@@ -33,7 +32,6 @@ export async function findFinanceRecordById(id: string) {
     where: {
       id,
       userId: getCurrentUserId(),
-      deletedAt: null,
     },
   });
 }
@@ -43,7 +41,6 @@ export async function updateFinanceRecord(id: string, input: UpdateFinanceRecord
     where: {
       id,
       userId: getCurrentUserId(),
-      deletedAt: null,
       version: input.version,
     },
     data: {
@@ -62,14 +59,18 @@ export async function updateFinanceRecord(id: string, input: UpdateFinanceRecord
   }).then((records) => records[0] ?? null);
 }
 
-export async function softDeleteFinanceRecord(id: string) {
-  return prisma.financeRecord.update({
-    where: { id, userId: getCurrentUserId() },
-    data: {
-      deletedAt: new Date(),
-      version: {
-        increment: 1,
-      },
+export async function deleteFinanceRecord(id: string) {
+  const record = await prisma.financeRecord.findFirst({
+    where: {
+      id,
+      userId: getCurrentUserId(),
     },
   });
+  if (!record) return null;
+
+  await prisma.financeRecord.delete({
+    where: { id },
+  });
+
+  return record;
 }

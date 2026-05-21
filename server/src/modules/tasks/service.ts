@@ -1,5 +1,5 @@
 import type { CreateTaskInput, UpdateTaskInput } from './schema';
-import { createTask, findTaskById, listTasks, softDeleteTask, updateTask } from './repository';
+import { createTask, findTaskById, listTasks, deleteTask, updateTask } from './repository';
 import { toTaskDto } from './dto';
 import { ensureMutationResult } from '../../shared/conflict';
 
@@ -34,6 +34,6 @@ export async function deleteTaskRecord(id: string) {
   if (!existing) {
     return null;
   }
-  const task = await softDeleteTask(id);
-  return toTaskDto(task);
+  const task = await deleteTask(id);
+  return task ? toTaskDto(task) : null;
 }

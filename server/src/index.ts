@@ -2,6 +2,7 @@ import { createApp } from './app';
 import { loadServerConfig } from './shared/config';
 import { prisma } from './db/client';
 import { closeCheckpointer, initCheckpointer } from './modules/agent/langgraph/postgres-checkpointer';
+import { repairZombieSessions } from './modules/agent/service';
 
 async function bootstrap() {
   const config = loadServerConfig();
@@ -13,6 +14,16 @@ async function bootstrap() {
     app.log.info('LangGraph checkpointer initialized');
   } catch (error) {
     app.log.error({ err: error }, 'Failed to initialize checkpointer');
+  }
+
+  // 修复异常终止的会话
+  try {
+    const repaired = await repairZombieSessions();
+    if (repaired > 0) {
+      app.log.info({ count: repaired }, 'Repaired zombie sessions');
+    }
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed to repair zombie sessions');
   }
 
   try {

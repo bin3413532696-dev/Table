@@ -52,6 +52,13 @@ export interface ConfirmationRequest {
 
 export interface AgentState {
   messages: AgentMessage[];
+  // 流式输出优化：独立存储正在streaming的消息内容
+  // 更新此字段不会触发整个messages数组重建
+  streamingContent: {
+    messageId: string;
+    content: string;
+    status: MessageStatus;
+  } | null;
   isProcessing: boolean;
   isConnected: boolean;
   selectedModel: string;
@@ -59,6 +66,7 @@ export interface AgentState {
   confirmationRequest: ConfirmationRequest | null;
   error: string | null;
   currentRunId: string | null;
+  currentSessionId: string;
 }
 
 export const MAX_HISTORY_MESSAGES = 50;

@@ -20,12 +20,14 @@ const WRITE_TOOLS_DESC = `写操作工具（需用户确认）：
 - update_task(id!, title?, completed?, priority?, dueDate?) - 更新任务
 - delete_task(id!) - 删除任务`;
 
-export const SYSTEM_PROMPT = `你是个人工作站智能助手。可用工具：
-
-${QUERY_TOOLS_DESC}
+export const TOOL_PROMPT_SECTION = `${QUERY_TOOLS_DESC}
 ${WRITE_TOOLS_DESC}
 
-${TOOL_FORMAT}
+${TOOL_FORMAT}`;
+
+export const SYSTEM_PROMPT = `你是个人工作站智能助手。可用工具：
+
+${TOOL_PROMPT_SECTION}
 
 规则：
 1. 查询直接执行，写操作需确认

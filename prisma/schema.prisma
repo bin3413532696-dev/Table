@@ -14,7 +14,7 @@ model User {
   status           String             @default("active")
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  agentRuns        AgentRun[]
+  agentSessions    AgentSession[]
   providers        ApiProvider[]
   finances         FinanceRecord[]
   knowledgeNotes   KnowledgeNote[]
@@ -25,20 +25,36 @@ model User {
   @@map("users")
 }
 
-model AgentRun {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
-  sessionId    String?  @map("session_id") @db.Uuid
-  status       String   // 'pending' | 'running' | 'waiting_confirmation' | 'completed' | 'failed' | 'cancelled'
-  inputText    String   @map("input_text")
-  model        String
-  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  version      Int      @default(1)
-  user         User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+model AgentSession {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  title     String     @default("新会话")
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  runs      AgentRun[]
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@index([userId, status])
+  @@index([userId])
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("agent_sessions")
+}
+
+model AgentRun {
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  sessionId    String       @map("session_id") @db.Uuid
+  status       String
+  inputText    String       @map("input_text")
+  model        String
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version      Int          @default(1)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  session      AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([sessionId])
   @@map("agent_runs")
 }
 
@@ -54,27 +70,26 @@ model UserSetting {
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   version              Int      @default(1)
-  user                 User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@map("user_settings")
 }
 
 model ApiProvider {
-  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId          String    @map("user_id") @db.Uuid
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
   name            String
-  apiFormat       String    @map("api_format")
-  baseUrl         String    @map("base_url")
-  apiKeyEncrypted String?   @map("api_key_encrypted")
+  apiFormat       String   @map("api_format")
+  baseUrl         String   @map("base_url")
+  apiKeyEncrypted String?  @map("api_key_encrypted")
   model           String?
-  headersJson     Json      @default("{}") @map("headers_json")
-  isActive        Boolean   @default(false) @map("is_active")
-  source          String    @default("manual") @map("source")
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
-  version         Int       @default(1)
-  user            User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  headersJson     Json     @default("{}") @map("headers_json")
+  isActive        Boolean  @default(false) @map("is_active")
+  source          String   @default("manual") @map("source")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version         Int      @default(1)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([userId])
   @@map("api_providers")
@@ -90,31 +105,29 @@ model Task {
   notes     String?
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
   version   Int       @default(1)
-  user      User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@index([userId, deletedAt])
+  @@index([userId])
   @@map("tasks")
 }
 
 model FinanceRecord {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String    @map("user_id") @db.Uuid
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
   type         String
-  amount       Decimal   @db.Decimal(18, 2)
+  amount       Decimal  @db.Decimal(18, 2)
   category     String
   description  String
-  recordDate   DateTime  @map("record_date") @db.Date
+  recordDate   DateTime @map("record_date") @db.Date
   model        String?
-  metadataJson Json      @default("{}") @map("metadata_json")
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(6)
-  version      Int       @default(1)
-  user         User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  metadataJson Json     @default("{}") @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version      Int      @default(1)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@index([userId, deletedAt])
+  @@index([userId])
   @@map("finance_records")
 }
 
@@ -126,12 +139,10 @@ model KnowledgeNote {
   tagsJson  Json     @default("[]") @map("tags_json")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
-  user      User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([userId])
   @@index([userId, updatedAt(sort: Desc)])
-  @@index([userId, deletedAt])
   @@map("knowledge_notes")
 }
 
@@ -143,7 +154,7 @@ model KnowledgePresetTag {
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user      User     @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@unique([userId, name])
   @@index([userId, sortOrder])

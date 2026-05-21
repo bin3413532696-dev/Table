@@ -43,7 +43,7 @@ function escapeLikePattern(input: string) {
 export async function listNotes(): Promise<KnowledgeNoteRecord[]> {
   const userId = getCurrentUserId();
   const notes = await prisma.knowledgeNote.findMany({
-    where: { userId, deletedAt: null },
+    where: { userId },
     orderBy: { updatedAt: 'desc' },
   });
 
@@ -70,7 +70,7 @@ export async function createNote(input: CreateNoteInput): Promise<KnowledgeNoteR
 export async function findNoteById(id: string): Promise<KnowledgeNoteRecord | null> {
   const userId = getCurrentUserId();
   const note = await prisma.knowledgeNote.findFirst({
-    where: { id, userId, deletedAt: null },
+    where: { id, userId },
   });
 
   if (!note) return null;
@@ -81,7 +81,7 @@ export async function findNoteById(id: string): Promise<KnowledgeNoteRecord | nu
 export async function updateNote(id: string, input: UpdateNoteInput): Promise<KnowledgeNoteRecord | null> {
   const userId = getCurrentUserId();
   const existing = await prisma.knowledgeNote.findFirst({
-    where: { id, userId, deletedAt: null },
+    where: { id, userId },
   });
 
   if (!existing) return null;
@@ -102,14 +102,13 @@ export async function updateNote(id: string, input: UpdateNoteInput): Promise<Kn
 export async function deleteNote(id: string): Promise<boolean> {
   const userId = getCurrentUserId();
   const existing = await prisma.knowledgeNote.findFirst({
-    where: { id, userId, deletedAt: null },
+    where: { id, userId },
   });
 
   if (!existing) return false;
 
-  await prisma.knowledgeNote.update({
+  await prisma.knowledgeNote.delete({
     where: { id, userId },
-    data: { deletedAt: new Date() },
   });
 
   return true;
@@ -193,7 +192,6 @@ export async function searchNotes(input: NoteSearchQueryInput): Promise<Knowledg
       n.updated_at as "updatedAt"
     from knowledge_notes n
     where n.user_id = cast(${userId} as uuid)
-      and n.deleted_at is null
     ${tagFilter}
     ${searchFilter}
     order by score desc, n.updated_at desc
@@ -226,7 +224,6 @@ export async function listAllTags(): Promise<string[]> {
       end
     ) as tag(value)
     where n.user_id = cast(${userId} as uuid)
-      and n.deleted_at is null
     order by tag.value asc
   `);
 

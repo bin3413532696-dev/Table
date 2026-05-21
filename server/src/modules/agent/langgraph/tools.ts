@@ -5,7 +5,7 @@ import { toTaskDto } from '../../tasks/dto';
 import { listFinanceRecords, createFinanceRecord } from '../../finance/repository';
 import { toFinanceRecordDto } from '../../finance/dto';
 import { searchNotes } from '../../knowledge/repository';
-import { createTask, findTaskById, updateTask, softDeleteTask } from '../../tasks/repository';
+import { createTask, findTaskById, updateTask, deleteTask } from '../../tasks/repository';
 
 const taskPriorityEnum = z.enum(['low', 'medium', 'high']);
 
@@ -260,7 +260,10 @@ export const deleteTaskTool = tool(
       throw new Error(`未找到任务 ${id}`);
     }
 
-    const deleted = await softDeleteTask(id);
+    const deleted = await deleteTask(id);
+    if (!deleted) {
+      throw new Error(`删除任务失败: ${id}`);
+    }
     return {
       id: deleted.id,
       deleted: true,

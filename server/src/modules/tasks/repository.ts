@@ -6,7 +6,6 @@ export async function listTasks() {
   return prisma.task.findMany({
     where: {
       userId: getCurrentUserId(),
-      deletedAt: null,
     },
     orderBy: {
       updatedAt: 'desc',
@@ -32,7 +31,6 @@ export async function findTaskById(id: string) {
     where: {
       id,
       userId: getCurrentUserId(),
-      deletedAt: null,
     },
   });
 }
@@ -42,7 +40,6 @@ export async function updateTask(id: string, input: UpdateTaskInput) {
     where: {
       id,
       userId: getCurrentUserId(),
-      deletedAt: null,
       version: input.version,
     },
     data: {
@@ -60,14 +57,18 @@ export async function updateTask(id: string, input: UpdateTaskInput) {
   }).then((tasks) => tasks[0] ?? null);
 }
 
-export async function softDeleteTask(id: string) {
-  return prisma.task.update({
-    where: { id, userId: getCurrentUserId() },
-    data: {
-      deletedAt: new Date(),
-      version: {
-        increment: 1,
-      },
+export async function deleteTask(id: string) {
+  const task = await prisma.task.findFirst({
+    where: {
+      id,
+      userId: getCurrentUserId(),
     },
   });
+  if (!task) return null;
+
+  await prisma.task.delete({
+    where: { id },
+  });
+
+  return task;
 }

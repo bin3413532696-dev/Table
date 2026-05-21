@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon, Shield, HardDrive, Plus, Edit2, Trash2 as TrashIcon, Globe, ChevronDown, ChevronUp, Power } from 'lucide-react';
+import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon, Shield, HardDrive, Plus, Edit2, Trash2 as TrashIcon, Globe, ChevronDown, ChevronUp, Power, Bot, Sparkles, MessageSquare, Zap } from 'lucide-react';
 import { dataManager, financeDB, taskDB } from '../../db';
 import { initializeData } from '../../lib/dataSync';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -28,6 +28,11 @@ import {
   switchAuthSession,
   updateAuthMe,
 } from '../../lib/auth';
+import {
+  fetchAgentPersona,
+  updateAgentPersona,
+  type AgentPersonaDto,
+} from '../../lib/agentApi';
 import { registeredToolNames } from '../../agent/toolMetadata';
 import { MESSAGES } from '../../core/messages';
 
@@ -841,6 +846,12 @@ function ApiConfigSettings() {
   });
   const [editingApiKeyPreview, setEditingApiKeyPreview] = useState('');
 
+  // 人格配置状态
+  const [persona, setPersona] = useState<AgentPersonaDto>({ systemPrompt: '' });
+  const [loadingPersona, setLoadingPersona] = useState(false);
+  const [savingPersona, setSavingPersona] = useState(false);
+  const [personaSaved, setPersonaSaved] = useState(false);
+
   const apiFormats = [
     { value: 'openai', label: 'OpenAI Chat Completions' },
     { value: 'anthropic', label: 'Anthropic Messages' },
@@ -946,6 +957,86 @@ function ApiConfigSettings() {
       disposed = true;
     };
   }, []);
+
+  // 加载人格配置
+  useEffect(() => {
+    let disposed = false;
+
+    const loadPersona = async () => {
+      setLoadingPersona(true);
+      try {
+        const data = await fetchAgentPersona();
+        if (!disposed) {
+          setPersona(data);
+        }
+      } catch (error) {
+        console.warn('[Settings] Failed to load persona:', error);
+      } finally {
+        if (!disposed) {
+          setLoadingPersona(false);
+        }
+      }
+    };
+
+    void loadPersona();
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  // 预设模板
+  const personaTemplates = [
+    {
+      name: '默认',
+      icon: Bot,
+      prompt: '你是个人工作站智能助手。可用工具：\n\n查询工具（可直接调用）：\n- query_tasks(completed?, priority?, limit?) - 查询任务\n- get_task_stats() - 任务统计\n- query_finance(type?, category?, startDate?, endDate?, limit?) - 查询财务\n- get_finance_stats() - 财务统计\n- search_knowledge(query?, tags?, limit?) - 搜索知识库\n\n写操作工具（需用户确认）：\n- create_task(title!, priority?, dueDate?) - 创建任务\n- add_finance_record(type!, amount!, description!, category!, date!) - 新增财务\n- update_task(id!, title?, completed?, priority?, dueDate?) - 更新任务\n- delete_task(id!) - 删除任务\n\n规则：\n1. 查询直接执行，写操作需确认\n2. 缺参数时询问用户，勿猜测\n3. 用简体中文回复，简洁直接\n4. 结果基于工具返回，勿编造',
+    },
+    {
+      name: '专业助手',
+      icon: Sparkles,
+      prompt: '你是一个专业、严谨的技术助手。回复时保持结构化、逻辑清晰，提供详细的技术细节和最佳实践建议。使用简体中文，必要时提供代码示例。可用工具请参考系统默认配置。',
+    },
+    {
+      name: '亲切伙伴',
+      icon: MessageSquare,
+      prompt: '你是一个温和、友好的助手，以鼓励性和支持性的语气与用户交流。对于新手用户，耐心解释每个步骤，避免使用过于技术性的术语。使用简体中文回复。',
+    },
+    {
+      name: '极简模式',
+      icon: Zap,
+      prompt: '你是高效助手。只返回核心结果，不提供额外解释。回复控制在 100 字以内。除非用户明确询问详情，否则直接给出答案。使用简体中文。',
+    },
+  ];
+
+  const handleSavePersona = async () => {
+    setSavingPersona(true);
+    try {
+      const updated = await updateAgentPersona(persona.systemPrompt);
+      setPersona(updated);
+      setPersonaSaved(true);
+      setTimeout(() => setPersonaSaved(false), 2000);
+    } catch (error) {
+      console.error('[Settings] Failed to save persona:', error);
+      const message = error instanceof Error ? error.message : '保存人格配置失败';
+      alert(`保存失败: ${message}`);
+    } finally {
+      setSavingPersona(false);
+    }
+  };
+
+  const handleApplyTemplate = (template: typeof personaTemplates[0]) => {
+    setPersona({ systemPrompt: template.prompt });
+  };
+
+  const handleResetPersona = () => {
+    setPersona({ systemPrompt: personaTemplates[0].prompt });
+  };
+
+  // 清空人格配置，回退到系统默认
+  const handleClearPersona = () => {
+    setPersona({ systemPrompt: '' });
+  };
 
   const handleAdd = () => {
     setEditingProvider(null);
@@ -1309,6 +1400,71 @@ function ApiConfigSettings() {
               {toolName}
             </span>
           ))}
+        </div>
+      </div>
+
+      {/* 人格配置 */}
+      <div className="p-4 rounded-xl bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
+          <Bot className="w-4 h-4" />
+          智能体人格设置
+        </h4>
+        <p className="text-sm text-text-muted mb-2">
+          自定义智能体的系统提示词，影响智能体的回复风格和行为。留空则使用默认配置。
+        </p>
+        <div className="p-3 rounded-lg bg-info/10 border border-info/20 mb-4">
+          <p className="text-xs text-info">
+            ⚠️ 新的人格配置仅在<strong>新会话</strong>中生效。已有会话使用的是创建时的人格配置，更换人格后需点击智能体侧边栏的"新建会话"按钮开始新对话。
+          </p>
+        </div>
+
+        {/* 预设模板 */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {personaTemplates.map((template) => {
+            const Icon = template.icon;
+            return (
+              <button
+                key={template.name}
+                onClick={() => handleApplyTemplate(template)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-bg-primary border border-border-primary hover:border-primary hover:text-primary transition-colors"
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {template.name}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 文本框 */}
+        <textarea
+          value={persona.systemPrompt}
+          onChange={(e) => setPersona({ systemPrompt: e.target.value })}
+          placeholder="输入自定义系统提示词..."
+          className="w-full h-64 p-3 text-sm border border-border-primary rounded-lg resize-none focus:outline-none focus:border-primary bg-bg-primary placeholder:text-text-muted"
+          disabled={loadingPersona || savingPersona}
+        />
+
+        {/* 操作按钮 */}
+        <div className="flex items-center justify-between mt-3">
+          <p className="text-xs text-text-muted">
+            最多 5000 字符，当前 {persona.systemPrompt.length} 字
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleResetPersona}
+              className="px-3 py-1.5 text-xs rounded-lg border border-border-primary hover:bg-bg-primary transition-colors"
+              disabled={savingPersona}
+            >
+              重置为默认
+            </button>
+            <Button
+              variant="primary"
+              onClick={() => void handleSavePersona()}
+              disabled={savingPersona || loadingPersona}
+            >
+              {savingPersona ? '保存中...' : personaSaved ? '已保存' : '保存'}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

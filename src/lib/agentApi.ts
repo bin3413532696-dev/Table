@@ -28,7 +28,7 @@ export interface TimelineEvent {
 
 export interface AgentRunDto {
   id: string;
-  sessionId?: string;
+  sessionId: string;
   status: string;
   inputText: string;
   model: string;
@@ -50,6 +50,18 @@ export interface AgentRunDetailDto extends AgentRunDto {
   timeline: TimelineEvent[];
 }
 
+export interface AgentSessionDto {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  runs: AgentRunDto[];
+}
+
+export interface AgentSessionDetailDto extends AgentSessionDto {
+  messages: AgentRunMessageDto[];
+}
+
 export interface AgentRuntimeStatusDto {
   ok: boolean;
   module: string;
@@ -69,22 +81,163 @@ export interface AgentRuntimeStatusDto {
 }
 
 export interface AgentRunStreamEvent {
-  type: 'metadata' | 'langgraph_chunk' | 'run_update' | 'run_completed';
+  type: 'metadata' | 'langgraph_chunk' | 'token' | 'run_update' | 'run_completed';
   runId?: string;
+  sessionId?: string;
   model?: string;
   mode?: 'messages' | 'tasks';
   chunk?: unknown;
+  token?: string;
   run?: AgentRunDetailDto;
 }
+
+// ============ Session APIs ============
+
+export interface AgentSessionListResponse {
+  items: AgentSessionDto[];
+  total: number;
+}
+
+export async function fetchAgentSessionList(params?: {
+  limit?: number;
+  offset?: number;
+}): Promise<AgentSessionListResponse> {
+  const query = new URLSearchParams();
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.offset) query.set('offset', String(params.offset));
+
+  const response = await fetchWithAuth(`/api/agent/sessions?${query}`);
+  if (!response.ok) {
+    let message = `Failed to fetch agent sessions: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string; details?: unknown };
+      if (payload.message) {
+        message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<AgentSessionListResponse>;
+}
+
+export async function fetchAgentSessionDetail(sessionId: string): Promise<AgentSessionDetailDto> {
+  const response = await fetchWithAuth(`/api/agent/sessions/${sessionId}`);
+  if (!response.ok) {
+    let message = `Failed to fetch agent session detail: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string; details?: unknown };
+      if (payload.message) {
+        message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<AgentSessionDetailDto>;
+}
+
+export async function createAgentSession(title?: string): Promise<AgentSessionDto> {
+  const response = await fetchWithAuth('/api/agent/sessions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ title }),
+  });
+
+  if (!response.ok) {
+    let message = `Failed to create agent session: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string; details?: unknown };
+      if (payload.message) {
+        message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<AgentSessionDto>;
+}
+
+export async function updateAgentSession(sessionId: string, title: string): Promise<AgentSessionDto> {
+  const response = await fetchWithAuth(`/api/agent/sessions/${sessionId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ title }),
+  });
+
+  if (!response.ok) {
+    let message = `Failed to update agent session: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string; details?: unknown };
+      if (payload.message) {
+        message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<AgentSessionDto>;
+}
+
+export async function deleteAgentSessionApi(sessionId: string): Promise<void> {
+  const response = await fetchWithAuth(`/api/agent/sessions/${sessionId}`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    let message = `Failed to delete agent session: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string; details?: unknown };
+      if (payload.message) {
+        message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+}
+
+// ============ Run APIs ============
 
 export async function fetchAgentRuntimeStatus(): Promise<AgentRuntimeStatusDto> {
   const response = await fetchWithAuth('/api/agent/health');
   if (!response.ok) {
     let message = `Failed to load agent runtime status: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -99,6 +252,7 @@ export async function streamAgentRun(
   input: {
     inputText: string;
     model: string;
+    sessionId?: string; // 可选，首次对话时后端自动创建
     initialMessages?: Array<{
       role: 'user' | 'assistant' | 'system' | 'tool';
       content: string;
@@ -117,15 +271,19 @@ export async function streamAgentRun(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(input),
-    signal,
+    // SSE 超时 5 分钟：配合后端 SSE_TIMEOUT_MS，前端 AbortController 作为最终保险
+    signal: signal ?? new AbortController().signal,
   });
 
   if (!response.ok || !response.body) {
     let message = `Failed to stream agent run: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -223,9 +381,12 @@ async function streamToolDecision(
   if (!response.ok || !response.body) {
     let message = `Failed to stream agent run: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -316,20 +477,25 @@ export interface AgentRunListResponse {
 export async function fetchAgentRunList(params?: {
   limit?: number;
   offset?: number;
+  sessionId?: string;
   status?: string;
 }): Promise<AgentRunListResponse> {
   const query = new URLSearchParams();
   if (params?.limit) query.set('limit', String(params.limit));
   if (params?.offset) query.set('offset', String(params.offset));
+  if (params?.sessionId) query.set('sessionId', params.sessionId);
   if (params?.status) query.set('status', params.status);
 
   const response = await fetchWithAuth(`/api/agent/runs?${query}`);
   if (!response.ok) {
     let message = `Failed to fetch agent runs: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -345,9 +511,12 @@ export async function fetchAgentRunDetail(runId: string): Promise<AgentRunDetail
   if (!response.ok) {
     let message = `Failed to fetch agent run detail: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -366,9 +535,12 @@ export async function deleteAgentRunApi(runId: string): Promise<{ id: string; de
   if (!response.ok) {
     let message = `Failed to delete agent run: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -382,6 +554,7 @@ export async function deleteAgentRunApi(runId: string): Promise<{ id: string; de
 export async function createAgentRun(input: {
   inputText: string;
   model: string;
+  sessionId: string;
   initialMessages?: Array<{
     role: 'user' | 'assistant' | 'system' | 'tool';
     content: string;
@@ -399,9 +572,12 @@ export async function createAgentRun(input: {
   if (!response.ok) {
     let message = `Failed to create agent run: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -423,9 +599,12 @@ export async function confirmAgentToolExecution(input: {
   if (!response.ok) {
     let message = `Failed to confirm tool execution: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -465,9 +644,12 @@ export async function rejectAgentToolExecution(input: {
   if (!response.ok) {
     let message = `Failed to reject tool execution: HTTP ${response.status}`;
     try {
-      const payload = await response.json() as { message?: string };
+      const payload = await response.json() as { message?: string; details?: unknown };
       if (payload.message) {
         message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
       }
     } catch {
       // noop
@@ -494,4 +676,59 @@ export async function streamRejectAgentToolExecution(
     handlers,
     signal
   );
+}
+
+// ============ Persona APIs ============
+
+export interface AgentPersonaDto {
+  systemPrompt: string;
+}
+
+export async function fetchAgentPersona(): Promise<AgentPersonaDto> {
+  const response = await fetchWithAuth('/api/agent/persona');
+  if (!response.ok) {
+    let message = `Failed to fetch agent persona: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string; details?: unknown };
+      if (payload.message) {
+        message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<AgentPersonaDto>;
+}
+
+export async function updateAgentPersona(systemPrompt: string): Promise<AgentPersonaDto> {
+  const response = await fetchWithAuth('/api/agent/persona', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ systemPrompt }),
+  });
+
+  if (!response.ok) {
+    let message = `Failed to update agent persona: HTTP ${response.status}`;
+    try {
+      const payload = await response.json() as { message?: string; details?: unknown };
+      if (payload.message) {
+        message = payload.message;
+      }
+      if (payload.details) {
+        message += `: ${JSON.stringify(payload.details)}`;
+      }
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+
+  return response.json() as Promise<AgentPersonaDto>;
 }
