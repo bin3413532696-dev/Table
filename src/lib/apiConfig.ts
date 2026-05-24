@@ -10,6 +10,7 @@ export interface ApiProvider {
   hasApiKey?: boolean;
   apiKeyPreview?: string;
   model?: string;
+  embeddingModel?: string;
   headers?: Record<string, string>;
   createdAt?: string;
   updatedAt?: string;
@@ -106,6 +107,7 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
           baseUrl: provider.baseUrl,
           ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
           model: provider.model || '',
+          embeddingModel: provider.embeddingModel || '',
           headers: provider.headers || {},
           isActive: provider.isActive,
         }),
@@ -126,6 +128,7 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
       existing.baseUrl !== provider.baseUrl ||
       apiKeyChanged ||
       (existing.model || '') !== (provider.model || '') ||
+      (existing.embeddingModel || '') !== (provider.embeddingModel || '') ||
       JSON.stringify(existing.headers || {}) !== JSON.stringify(provider.headers || {}) ||
       existing.isActive !== provider.isActive;
 
@@ -144,6 +147,7 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
         baseUrl: provider.baseUrl,
         ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
         model: provider.model || '',
+        embeddingModel: provider.embeddingModel || '',
         headers: provider.headers || {},
         isActive: provider.isActive,
       }),

@@ -1,277 +1,643 @@
-import React from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Bot, Send, Loader2, AlertCircle, CheckCircle, XCircle, Square, ChevronDown, ChevronRight, Sparkles, CheckSquare, BookOpen, Wallet, Calendar, History, Plus, Trash2, Menu, X, Clock } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { useAgent } from '../../agent/AgentContext';
+import { AgentMessage } from '../../agent/types';
 import { useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard, CheckSquare, Wallet,
-  TrendingUp, TrendingDown, ArrowRight,
-  Calendar, AlertCircle, Clock, Target
-} from 'lucide-react';
-import { financeDB, taskDB, Task, createUseDB } from '../../db';
-import Loading from '../../components/Loading';
-import { Button, EmptyState } from '../../components/ui';
+  fetchAgentSessionList,
+  fetchAgentSessionDetail,
+  deleteAgentSessionApi,
+  createAgentSession,
+  type AgentSessionDto,
+} from '../../lib/agentApi';
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.08 }
-  }
-};
+// 快捷功能卡片配置
+const quickActions = [
+  { icon: CheckSquare, label: '创建任务', desc: '管理日常任务', path: '/tasks', color: 'primary' },
+  { icon: BookOpen, label: '知识检索', desc: '搜索知识库', path: '/knowledge', color: 'success' },
+  { icon: Wallet, label: '记录收支', desc: '财务统计', path: '/finance', color: 'warning' },
+  { icon: Calendar, label: '工具集合', desc: '效率工具', path: '/tools', color: 'neutral' },
+];
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 16 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.3 } }
-};
+// 消息渲染组件
+interface MessageItemProps {
+  message: AgentMessage;
+  streamingContent?: string;
+  expandedToolCalls: Set<string>;
+  toggleToolCallExpand: (id: string) => void;
+}
 
-const useDB = createUseDB(React);
-
-export default function Dashboard() {
-  const navigate = useNavigate();
-
-  const { data, loading } = useDB(async () => {
-    const [taskStats, financeStats, tasks] = await Promise.all([
-      taskDB.getStats(),
-      financeDB.getStats(),
-      taskDB.getAll()
-    ]);
-    return { taskStats, financeStats, tasks };
-  }, ['tasks', 'finance']);
-
-  const { taskStats, financeStats, tasks } = data ?? { taskStats: { total: 0, completed: 0, pending: 0 }, financeStats: { income: 0, expense: 0, profit: 0 }, tasks: [] };
-
-  const pendingTasks = tasks.filter((t: Task) => !t.completed).slice(0, 5);
-
-  // 统计卡片数据
-  const statsCards = [
-    {
-      icon: CheckSquare,
-      label: '待办任务',
-      value: taskStats.pending,
-      unit: '项',
-      color: 'primary',
-      trend: taskStats.total > 0 ? `${Math.round(taskStats.completed / taskStats.total * 100)}% 完成` : '暂无任务',
-      path: '/tasks'
-    },
-    {
-      icon: Wallet,
-      label: '净收益',
-      value: financeStats.profit,
-      unit: '元',
-      color: financeStats.profit >= 0 ? 'success' : 'error',
-      trend: financeStats.income > 0 ? `收入 ¥${financeStats.income.toLocaleString()}` : '暂无收入',
-      path: '/finance'
-    },
-    {
-      icon: Calendar,
-      label: '今日',
-      value: new Date().getDate(),
-      unit: new Date().toLocaleDateString('zh-CN', { month: 'long' }),
-      color: 'info',
-      trend: new Date().toLocaleDateString('zh-CN', { weekday: 'long' }),
-      path: '/tasks'
-    },
-  ];
-
-  if (loading) {
-    return <Loading />;
-  }
+const MessageItem = memo(function MessageItem({ message, streamingContent, expandedToolCalls, toggleToolCallExpand }: MessageItemProps) {
+  const isUser = message.role === 'user';
+  const displayContent = streamingContent ?? message.content;
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-screen bg-bg-secondary">
-      {/* 页面头部 */}
-      <motion.div
-        initial={{ opacity: 0, y: -16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="page-header"
-      >
-        <div className="page-header-icon">
-          <LayoutDashboard className="w-5 h-5 text-white" />
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+      className={isUser ? 'flex justify-end gap-3' : 'flex justify-start gap-3'}
+    >
+      {!isUser && (
+        <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm bg-bg-tertiary">
+          <Bot className="w-4 h-4 text-primary" />
         </div>
-        <div>
-          <h1 className="page-header-title">个人工作台</h1>
-          <p className="page-header-subtitle">
-            {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-          </p>
-        </div>
-      </motion.div>
-
-      {/* 统计卡片区 */}
-      <motion.div
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5 mb-6 md:mb-8"
+      )}
+      
+      <div
+        className={isUser
+          ? 'max-w-[85%] sm:max-w-[80%] md:max-w-[70%] lg:max-w-[65%] xl:max-w-[60%] px-4 py-3 rounded-2xl text-sm shadow-sm transition-shadow duration-200 bg-bg-card border border-border-primary text-text-primary'
+          : 'max-w-[85%] sm:max-w-[80%] md:max-w-[70%] lg:max-w-[65%] xl:max-w-[60%] px-4 py-3 rounded-2xl text-sm shadow-sm transition-shadow duration-200 bg-bg-card border border-border-primary hover:shadow-md'
+        }
       >
-        {statsCards.map((card) => {
-          const colorMap: Record<string, { bg: string; iconBg: string; text: string }> = {
-            primary: { bg: 'bg-primary/10 dark:bg-primary/20', iconBg: 'bg-primary', text: 'text-primary dark:text-primary-400' },
-            success: { bg: 'bg-success/10 dark:bg-success/20', iconBg: 'bg-success', text: 'text-success dark:text-success-400' },
-            error: { bg: 'bg-error/10 dark:bg-error/20', iconBg: 'bg-error', text: 'text-error dark:text-error-400' },
-            info: { bg: 'bg-info/10 dark:bg-info/20', iconBg: 'bg-info', text: 'text-info dark:text-info-400' },
-          };
-          const colors = colorMap[card.color];
+        <div className='prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-2'>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+        </div>
 
-          return (
-            <motion.div
-              key={card.label}
-              variants={itemVariants}
-              whileHover={{ y: -2 }}
-              onClick={() => navigate(card.path)}
-              className="card cursor-pointer group"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className={`w-11 h-11 rounded-xl ${colors.bg} flex items-center justify-center`}>
-                  <card.icon className={`w-5 h-5 ${colors.text}`} />
-                </div>
-                <ArrowRight className="w-4 h-4 text-text-muted group-hover:text-text-secondary group-hover:translate-x-0.5 transition-all" />
-              </div>
-              <p className="text-sm text-text-secondary mb-1">{card.label}</p>
-              <div className="flex items-baseline gap-1">
-                <span className={`text-3xl font-bold ${colors.text}`}>
-                  {typeof card.value === 'number' && card.label !== '今日' ? card.value.toLocaleString() : card.value}
-                </span>
-                <span className="text-sm text-text-muted">{card.unit}</span>
-              </div>
-              <p className="text-xs text-text-muted mt-2">{card.trend}</p>
-            </motion.div>
-          );
-        })}
-      </motion.div>
-
-      {/* 主内容区 */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6">
-        {/* 待办任务 - 占 3 列 */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="lg:col-span-3 card"
-        >
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center">
-                <Target className="w-4 h-4 text-primary dark:text-primary-400" />
-              </div>
-              <h2 className="text-base font-semibold text-text-primary">待办任务</h2>
-              {taskStats.pending > 0 && (
-                <span className="badge badge-primary">{taskStats.pending}</span>
-              )}
-            </div>
-            <button
-              onClick={() => navigate('/tasks')}
-              className="btn btn-ghost btn-sm"
-            >
-              查看全部
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {pendingTasks.length > 0 ? (
-            <div className="space-y-2">
-              {pendingTasks.map((task, index) => (
-                <motion.div
-                  key={task.id}
-                  initial={{ opacity: 0, x: -12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.3 + index * 0.05 }}
-                  onClick={() => navigate('/tasks')}
-                  className="flex items-center justify-between p-3 rounded-lg border border-border-primary hover:bg-bg-tertiary hover:border-border-secondary cursor-pointer transition-all duration-150"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${
-                      task.priority === 'high' ? 'bg-error' :
-                      task.priority === 'medium' ? 'bg-warning' : 'bg-success'
-                    }`} />
-                    <span className="text-sm text-text-primary truncate max-w-[200px] md:max-w-[300px]">{task.title}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {task.dueDate && (
-                      <span className="text-xs text-text-muted flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        {new Date(task.dueDate).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })}
+        {message.toolCalls && message.toolCalls.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-border-primary/30 space-y-2">
+            {message.toolCalls.map((toolCall) => {
+              const result = message.toolResults?.[toolCall.id];
+              const isExpanded = expandedToolCalls.has(toolCall.id);
+              return (
+                <div key={toolCall.id} className="text-xs">
+                  <button
+                    onClick={() => toggleToolCallExpand(toolCall.id)}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-primary/10 text-primary rounded-lg hover:bg-primary/15 transition-colors duration-150"
+                  >
+                    {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                    <span className="font-medium">{toolCall.name}</span>
+                    {result && (
+                      <span className="ml-1">
+                        {result.success ? <CheckCircle className="w-3 h-3 text-success" /> : <XCircle className="w-3 h-3 text-error" />}
                       </span>
                     )}
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      task.priority === 'high' ? 'bg-error/10 text-error' :
-                      task.priority === 'medium' ? 'bg-warning/10 text-warning' :
-                      'bg-success/10 text-success'
-                    }`}>
-                      {task.priority === 'high' ? '高' : task.priority === 'medium' ? '中' : '低'}
-                    </span>
-                  </div>
-                </motion.div>
-              ))}
+                  </button>
+                  {isExpanded && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mt-2 p-2.5 bg-bg-tertiary/50 rounded-lg text-xs overflow-hidden"
+                    >
+                      <div className="text-text-muted mb-1.5 font-medium">参数:</div>
+                      <pre className="text-text-secondary overflow-auto">{JSON.stringify(toolCall.arguments, null, 2)}</pre>
+                      {result && (
+                        <div className="mt-2 text-text-muted">
+                          <div className="mb-1.5 font-medium">结果:</div>
+                          <pre className="text-text-secondary overflow-auto">{JSON.stringify(result.data ?? result.error, null, 2)}</pre>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      
+      {isUser && (
+        <div className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm bg-primary text-white">
+          <span className="text-sm font-semibold">U</span>
+        </div>
+      )}
+    </motion.div>
+  );
+}, (prev, next) => {
+  return prev.message.id === next.message.id
+    && prev.message.content === next.message.content
+    && prev.message.status === next.message.status
+    && prev.streamingContent === next.streamingContent
+    && prev.expandedToolCalls === next.expandedToolCalls;
+});
+
+// 格式化时间
+function formatTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  if (hours < 24) return `${hours}小时前`;
+  if (days < 7) return `${days}天前`;
+  return new Date(timestamp).toLocaleDateString('zh-CN');
+}
+
+// 获取会话预览文本
+function getSessionPreview(session: AgentSessionDto): string {
+  const lastRun = session.runs[session.runs.length - 1];
+  if (!lastRun) return '空会话';
+  return lastRun.inputText.slice(0, 40) + (lastRun.inputText.length > 40 ? '...' : '');
+}
+
+// 获取会话状态
+function getSessionStatus(session: AgentSessionDto): string {
+  const lastRun = session.runs[session.runs.length - 1];
+  if (!lastRun) return 'completed';
+  return lastRun.status;
+}
+
+export default function Dashboard() {
+  const { state, sendMessage, stopThinking, confirmAction, rejectAction, newSession, loadHistorySession } = useAgent();
+  const [input, setInput] = useState('');
+  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const navigate = useNavigate();
+
+  // 会话历史管理
+  const [showHistory, setShowHistory] = useState(false);
+  const [historySessions, setHistorySessions] = useState<AgentSessionDto[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  const hasMessages = state.messages.length > 0;
+
+  // 自动滚动控制
+  const isAutoScrollRef = useRef(true);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // 检测用户是否主动滚动
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    isAutoScrollRef.current = scrollHeight - scrollTop - clientHeight < 100;
+  }, []);
+
+  // 自动滚动到底部
+  const scrollToBottom = useCallback(() => {
+    requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    });
+  }, []);
+
+  // 组件挂载时：如果已有消息，滚动到底部
+  useEffect(() => {
+    if (hasMessages) {
+      const timer = setTimeout(scrollToBottom, 100);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // 消息或状态变化时滚动
+  useEffect(() => {
+    if (state.isProcessing || state.streamingContent) {
+      if (isAutoScrollRef.current) {
+        scrollToBottom();
+        const timer = setInterval(scrollToBottom, 500);
+        return () => clearInterval(timer);
+      }
+    }
+  }, [state.isProcessing, state.streamingContent, hasMessages, scrollToBottom]);
+
+  // 构建渲染消息列表
+  const messagesToRender = useMemo(() => {
+    return state.messages.map((message) => ({
+      message,
+      streamingContent: state.streamingContent?.messageId === message.id
+        ? state.streamingContent.content
+        : undefined,
+    }));
+  }, [state.messages, state.streamingContent]);
+
+  const toggleToolCallExpand = useCallback((toolCallId: string) => {
+    setExpandedToolCalls((prev) => {
+      const next = new Set(prev);
+      if (next.has(toolCallId)) next.delete(toolCallId);
+      else next.add(toolCallId);
+      return next;
+    });
+  }, []);
+
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || state.isProcessing) return;
+    const message = input.trim();
+    setInput('');
+    await sendMessage(message);
+    inputRef.current?.focus();
+  }, [input, state.isProcessing, sendMessage]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }, [handleSend]);
+
+  // 加载历史会话列表
+  const loadHistory = useCallback(async () => {
+    setIsLoadingHistory(true);
+    try {
+      const result = await fetchAgentSessionList({ limit: 20 });
+      setHistorySessions(result.items);
+    } catch (error) {
+      console.error('Failed to load history:', error);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, []);
+
+  // 打开历史面板时加载
+  useEffect(() => {
+    if (showHistory) loadHistory();
+  }, [showHistory, loadHistory]);
+
+  // 发送消息后刷新历史
+  useEffect(() => {
+    if (!state.isProcessing && showHistory) loadHistory();
+  }, [state.isProcessing, showHistory, loadHistory]);
+
+  // 切换会话
+  const handleLoadSession = useCallback(async (sessionId: string) => {
+    try {
+      const detail = await fetchAgentSessionDetail(sessionId);
+      loadHistorySession(detail);
+      setShowHistory(false);
+    } catch (error) {
+      console.error('Failed to load session:', error);
+    }
+  }, [loadHistorySession]);
+
+  // 删除会话
+  const handleDeleteSession = useCallback(async (sessionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('确定要删除这个会话吗？会话中的所有对话记录都将被删除。')) return;
+    try {
+      await deleteAgentSessionApi(sessionId);
+      setHistorySessions((prev) => prev.filter((s) => s.id !== sessionId));
+      if (sessionId === state.currentSessionId) {
+        handleNewSession();
+      }
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+    }
+  }, [state.currentSessionId]);
+
+  // 新建会话
+  const handleNewSession = useCallback(async () => {
+    try {
+      const newSessionData = await createAgentSession('新会话');
+      newSession(newSessionData.id);
+      await loadHistory();
+      setShowHistory(false);
+      inputRef.current?.focus();
+    } catch (error) {
+      console.error('Failed to create new session:', error);
+    }
+  }, [newSession, loadHistory]);
+
+  return (
+    <div className="h-full flex min-h-0 overflow-hidden relative">
+      {/* 左侧会话历史面板 */}
+      <AnimatePresence>
+        {showHistory && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 280, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="h-full bg-bg-card dark:bg-dark-bg-card border-r border-border-primary dark:border-dark-border-primary flex flex-col shrink-0 overflow-hidden"
+          >
+            {/* Header */}
+            <div className="p-3 border-b border-border-primary dark:border-dark-border-primary flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <History className="w-4 h-4 text-primary" />
+                <span className="text-sm font-medium text-text-primary dark:text-dark-text-primary">会话历史</span>
+              </div>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="p-1.5 hover:bg-bg-secondary dark:hover:bg-dark-bg-secondary rounded-lg transition-colors"
+                title="关闭"
+              >
+                <X className="w-4 h-4 text-text-muted dark:text-dark-text-muted" />
+              </button>
+            </div>
+
+            {/* 新建按钮 */}
+            <div className="p-3 shrink-0">
+              <button
+                onClick={handleNewSession}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-primary text-white rounded-lg hover:bg-primary-dark transition-colors text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                新建会话
+              </button>
+            </div>
+
+            {/* 会话列表 */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {isLoadingHistory ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-text-muted dark:text-dark-text-muted" />
+                </div>
+              ) : historySessions.length === 0 ? (
+                <div className="text-center py-8 text-text-muted dark:text-dark-text-muted text-sm">
+                  <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p>暂无会话记录</p>
+                </div>
+              ) : (
+                historySessions.map((session) => {
+                  const status = getSessionStatus(session);
+                  const isActive = session.id === state.currentSessionId;
+                  return (
+                    <motion.div
+                      key={session.id}
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      onClick={() => handleLoadSession(session.id)}
+                      className={isActive
+                        ? 'group p-2.5 rounded-lg border cursor-pointer transition-all border-primary bg-primary/10'
+                        : 'group p-2.5 rounded-lg border cursor-pointer transition-all border-border-primary hover:border-primary/50 hover:bg-bg-tertiary'
+                      }
+                    >
+                      <div className="flex items-start gap-2">
+                        <div className={status === 'completed'
+                          ? 'w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-success/10 text-success'
+                          : status === 'failed'
+                          ? 'w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-error/10 text-error'
+                          : 'w-5 h-5 rounded-full flex items-center justify-center shrink-0 bg-bg-tertiary text-text-secondary'
+                        }>
+                          {status === 'completed' ? <CheckCircle className="w-3 h-3" /> :
+                           status === 'failed' ? <XCircle className="w-3 h-3" /> :
+                           <Clock className="w-3 h-3" />}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-text-primary truncate font-medium">
+                            {session.title || getSessionPreview(session)}
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-text-muted mt-1">
+                            <span>{session.runs.length} 条对话</span>
+                            <span>{formatTime(session.updatedAt)}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={(e) => handleDeleteSession(session.id, e)}
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-error/10 rounded transition-all"
+                          title="删除"
+                        >
+                          <Trash2 className="w-3 h-3 text-error" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  );
+                })
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 主内容区域 */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* 顶部工具栏 */}
+        <div className="px-4 sm:px-6 py-3 flex items-center justify-between shrink-0 bg-bg-card border-b border-border-primary">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className={showHistory
+                ? 'p-2 rounded-lg transition-colors bg-primary/10 text-primary'
+                : 'p-2 rounded-lg transition-colors hover:bg-bg-tertiary text-text-muted'
+              }
+              title="会话历史"
+            >
+              {showHistory ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+            {!showHistory && (
+              <button
+                onClick={handleNewSession}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-white text-sm hover:bg-primary-dark transition-colors"
+              >
+                <Plus className="w-4 h-4" />
+                新建
+              </button>
+            )}
+          </div>
+
+          {/* 连接状态 */}
+          <div className="flex items-center gap-2 text-sm text-text-muted">
+            <span className={state.isConnected ? 'w-2 h-2 rounded-full bg-success' : 'w-2 h-2 rounded-full bg-error animate-pulse'} />
+            {state.isConnected ? '已连接' : '未连接'}
+          </div>
+        </div>
+
+        {/* 消息区域 */}
+        <div ref={scrollAreaRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto pb-24" style={{ overscrollBehavior: 'y contain' }}>
+          {!hasMessages ? (
+            <div className="h-full flex items-center justify-center p-6">
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, ease: [0.23, 1, 0.32, 1] }}
+                className="text-center max-w-lg"
+              >
+                {/* AI 图标 */}
+                <div className="relative inline-block mb-6">
+                  <motion.div
+                    whileHover={{ scale: 1.05 }}
+                    transition={{ duration: 0.2, ease: 'easeOut' }}
+                    className="w-20 h-20 rounded-2xl bg-primary flex items-center justify-center shadow-md relative z-10"
+                  >
+                    <Bot className="w-10 h-10 text-white" />
+                  </motion.div>
+                  <div className="absolute inset-0 rounded-2xl bg-primary/20 blur-xl -z-0" />
+                </div>
+
+                <h2 className="text-2xl font-bold text-text-primary mb-2">
+                  您好，我是 AI 助手
+                </h2>
+                <p className="text-base text-text-muted mb-6">
+                  可以帮您管理任务、记录财务、检索知识等
+                </p>
+
+                {/* 快捷功能卡片 */}
+                <p className="text-sm font-medium text-text-secondary mb-4 text-left">快捷操作</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-6">
+                  {quickActions.map((action, index) => {
+                    const colorClasses = {
+                      primary: 'bg-primary/10 text-primary hover:bg-primary/15',
+                      success: 'bg-success/10 text-success hover:bg-success/15',
+                      warning: 'bg-warning/10 text-warning hover:bg-warning/15',
+                      neutral: 'bg-bg-tertiary text-text-secondary hover:bg-bg-tertiary/80',
+                    };
+                    return (
+                      <motion.button
+                        key={action.path}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: 0.1 + index * 0.06 }}
+                        whileHover={{ scale: 1.02, y: -2 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => navigate(action.path)}
+                        className="flex items-center gap-3 p-3.5 bg-bg-card rounded-lg border border-border-primary shadow-sm hover:shadow-md transition-all duration-200 text-left"
+                      >
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-200 ${colorClasses[action.color as keyof typeof colorClasses]}`}>
+                          <action.icon className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-text-primary">{action.label}</p>
+                          <p className="text-xs text-text-muted truncate">{action.desc}</p>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.5 }}
+                  className="text-xs text-text-muted/60"
+                >
+                  试着对我说点什么...
+                </motion.p>
+              </motion.div>
             </div>
           ) : (
-            <EmptyState
-              icon={CheckSquare}
-              title="暂无待办任务"
-              description="所有任务都已完成"
-              action={{ label: '添加任务', onClick: () => navigate('/tasks') }}
-            />
+            <div className="max-w-4xl mx-auto px-4 sm:px-8 lg:px-12 xl:px-16 space-y-6">
+              {messagesToRender.map(({ message, streamingContent }, index) => (
+                <motion.div
+                  key={message.id}
+                  initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.25, ease: [0.23, 1, 0.32, 1], delay: index === 0 ? 0 : 0 }}
+                >
+                  <MessageItem
+                    message={message}
+                    streamingContent={streamingContent}
+                    expandedToolCalls={expandedToolCalls}
+                    toggleToolCallExpand={toggleToolCallExpand}
+                  />
+                </motion.div>
+              ))}
+
+              {state.isProcessing && !state.streamingContent && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="flex items-center gap-2.5 text-text-muted dark:text-dark-text-muted text-sm"
+                >
+                  <div className="relative">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <div className="absolute inset-0 w-4 h-4 animate-ping opacity-30">
+                      <Loader2 className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <span className="font-medium">思考中...</span>
+                </motion.div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
           )}
-        </motion.div>
+        </div>
 
-        {/* 费用概览 - 占 2 列 */}
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="lg:col-span-2 card"
-        >
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-success/10 dark:bg-success/20 flex items-center justify-center">
-                <Wallet className="w-4 h-4 text-success dark:text-success-400" />
+        {/* 确认操作栏 */}
+        <AnimatePresence>
+          {state.confirmationRequest && (
+            <motion.div
+              initial={{ opacity: 0, y: 20, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+              className="fixed left-0 right-0 z-10 px-4 sm:px-6 py-3 border-t border-warning/20 bg-warning/5 backdrop-blur-md"
+              style={{ bottom: '88px' }}
+            >
+              <div className="max-w-3xl mx-auto flex items-start gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-warning/10 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-4 h-4 text-warning" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-warning">确认操作</p>
+                  <p className="text-xs text-text-muted dark:text-dark-text-muted mt-1 whitespace-pre-wrap leading-relaxed">{state.confirmationRequest.description}</p>
+                  <div className="flex gap-2 mt-2.5">
+                    <button
+                      onClick={() => void confirmAction()}
+                      disabled={state.isProcessing}
+                      className="px-3.5 py-2 bg-warning text-white text-xs font-medium rounded-lg hover:bg-warning-dark disabled:opacity-50 transition-all duration-150 active:scale-95"
+                    >
+                      确认执行
+                    </button>
+                    <button
+                      onClick={() => void rejectAction()}
+                      className="px-3.5 py-2 border border-border-primary dark:border-dark-border-primary text-text-primary dark:text-dark-text-primary text-xs font-medium rounded-lg hover:bg-bg-tertiary dark:hover:bg-dark-bg-tertiary transition-colors duration-150"
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
               </div>
-              <h2 className="text-base font-semibold text-text-primary">费用概览</h2>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/finance')}>
-              详情
-              <ArrowRight className="w-3.5 h-3.5" />
-            </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* 错误提示 */}
+        {state.error && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="px-4 sm:px-6 py-2.5 shrink-0 bg-error/10 border-t border-error/20 text-error text-xs text-center font-medium"
+          >
+            {state.error}
+          </motion.div>
+        )}
+
+        {/* 输入区域 */}
+        <div className="fixed bottom-0 left-0 right-0 z-20 px-4 sm:px-6 lg:px-16 xl:px-32 py-4 bg-bg-card backdrop-blur-xl border-t border-border-primary">
+          <div className="max-w-4xl mx-auto flex gap-2.5 items-end">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                e.target.style.height = 'auto';
+                e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder="试着对我说点什么..."
+              className="flex-1 resize-none border border-border-primary rounded-xl px-4 py-3 text-sm bg-bg-card focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-text-muted/60 transition-all duration-200"
+              style={{ minHeight: '44px', maxHeight: '150px' }}
+              disabled={!state.isConnected || state.isProcessing || !!state.confirmationRequest}
+            />
+            {state.isProcessing && (
+              <motion.button
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                onClick={stopThinking}
+                className="flex items-center gap-1.5 px-3.5 py-3 border border-error/30 text-error rounded-xl hover:bg-error/10 transition-colors duration-150 text-sm active:scale-95"
+                title="中断"
+              >
+                <Square className="w-4 h-4" />
+                <span className="hidden sm:inline">停止</span>
+              </motion.button>
+            )}
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleSend}
+              disabled={!input.trim() || state.isProcessing || !state.isConnected || !!state.confirmationRequest}
+              className="px-5 py-3 bg-primary text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary-dark transition-colors duration-150 shadow-sm hover:shadow-md active:shadow-sm"
+            >
+              <Send className="w-5 h-5" />
+            </motion.button>
           </div>
-
-          <div className="space-y-3">
-            {/* 收入 */}
-            <div className="flex items-center justify-between p-3 rounded-lg bg-success/5 dark:bg-success/10 border border-success/20">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-success dark:text-success-400" />
-                <span className="text-sm text-text-secondary">收入</span>
-              </div>
-              <span className="text-lg font-semibold text-success dark:text-success-400">
-                ¥{financeStats.income.toLocaleString()}
-              </span>
-            </div>
-
-            {/* 支出 */}
-            <div className="flex items-center justify-between p-3 rounded-lg bg-error/5 dark:bg-error/10 border border-error/20">
-              <div className="flex items-center gap-2">
-                <TrendingDown className="w-4 h-4 text-error dark:text-error-400" />
-                <span className="text-sm text-text-secondary">支出</span>
-              </div>
-              <span className="text-lg font-semibold text-error dark:text-error-400">
-                ¥{financeStats.expense.toLocaleString()}
-              </span>
-            </div>
-
-            {/* 净收益 */}
-            <div className={`flex items-center justify-between p-3 rounded-lg border ${
-              financeStats.profit >= 0
-                ? 'bg-success/5 dark:bg-success/10 border-success/20'
-                : 'bg-error/5 dark:bg-error/10 border-error/20'
-            }`}>
-              <div className="flex items-center gap-2">
-                <Wallet className={`w-4 h-4 ${financeStats.profit >= 0 ? 'text-success dark:text-success-400' : 'text-error dark:text-error-400'}`} />
-                <span className="text-sm text-text-secondary">净收益</span>
-              </div>
-              <span className={`text-xl font-bold ${financeStats.profit >= 0 ? 'text-success dark:text-success-400' : 'text-error dark:text-error-400'}`}>
-                ¥{financeStats.profit.toLocaleString()}
-              </span>
-            </div>
-          </div>
-        </motion.div>
+          {state.isProcessing && state.streamingContent && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="max-w-4xl mx-auto flex items-center gap-2 mt-2 text-xs text-text-muted"
+            >
+              <Sparkles className="w-3 h-3 animate-pulse" />
+              <span>正在输出...</span>
+            </motion.div>
+          )}
+        </div>
       </div>
     </div>
   );

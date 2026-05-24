@@ -12,7 +12,7 @@ export const VirtualList = <T extends { id: string }>({
   items,
   itemHeight,
   renderItem,
-  containerHeight = 400
+  containerHeight = 480
 }: VirtualListProps<T>) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);

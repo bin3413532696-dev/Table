@@ -8,16 +8,20 @@ import {
   ArrowLeft,
   FileText,
   Settings,
+  Brain,
 } from 'lucide-react';
 import { Button } from '../../components/ui';
 import { NoteEditor } from './components/NoteEditor';
 import { TagSelector } from './components/TagSelector';
 import { NoteList } from './components/NoteList';
+import { RagSection } from './components/RagSection';
 import type { KnowledgeNote, KnowledgePresetTag } from './types';
 import * as api from './api';
 import { MESSAGES } from '../../core/messages';
+import { PageHeader, PageContent, defaultEasing } from '../../components/ui/PageAnimations';
 
-type ViewMode = 'list' | 'edit' | 'settings';
+type MainTab = 'notes' | 'rag';
+type NoteViewMode = 'list' | 'edit' | 'settings';
 
 interface NoteFormData {
   title: string;
@@ -26,7 +30,11 @@ interface NoteFormData {
 }
 
 export default function KnowledgePage() {
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  // Main tab state
+  const [mainTab, setMainTab] = useState<MainTab>('notes');
+
+  // Note management state
+  const [viewMode, setViewMode] = useState<NoteViewMode>('list');
   const [notes, setNotes] = useState<KnowledgeNote[]>([]);
   const [presetTags, setPresetTags] = useState<KnowledgePresetTag[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]);
@@ -159,9 +167,10 @@ export default function KnowledgePage() {
         )}
       </AnimatePresence>
 
-      <div className="flex items-center justify-between p-4 border-b">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b bg-white">
         <div className="flex items-center gap-3">
-          {viewMode !== 'list' && (
+          {mainTab === 'notes' && viewMode !== 'list' && (
             <button
               type="button"
               onClick={() => setViewMode('list')}
@@ -172,8 +181,36 @@ export default function KnowledgePage() {
           )}
           <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">知识库</h1>
         </div>
+
+        {/* Main Tabs */}
+        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+          <button
+            onClick={() => setMainTab('notes')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+              mainTab === 'notes'
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <FileText size={16} />
+            笔记管理
+          </button>
+          <button
+            onClick={() => setMainTab('rag')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
+              mainTab === 'rag'
+                ? 'bg-white text-purple-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            <Brain size={16} />
+            RAG知识库
+          </button>
+        </div>
+
+        {/* Actions */}
         <div className="flex items-center gap-2">
-          {viewMode === 'list' && (
+          {mainTab === 'notes' && viewMode === 'list' && (
             <>
               <Button onClick={handleCreateNote} className="flex items-center gap-2">
                 <Plus size={18} />
@@ -188,7 +225,7 @@ export default function KnowledgePage() {
               </button>
             </>
           )}
-          {viewMode === 'edit' && (
+          {mainTab === 'notes' && viewMode === 'edit' && (
             <div className="flex items-center gap-2">
               {selectedNote && (
                 <button
@@ -208,101 +245,110 @@ export default function KnowledgePage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-4">
-        {viewMode === 'list' && (
-          <NoteList
-            notes={notes}
-            onSelectNote={handleEditNote}
-            presetTags={presetTags}
-            allTags={allTags}
-          />
-        )}
+      {/* Content */}
+      <div className="flex-1 overflow-auto">
+        {mainTab === 'notes' && (
+          <div className="p-4">
+            {viewMode === 'list' && (
+              <NoteList
+                notes={notes}
+                onSelectNote={handleEditNote}
+                presetTags={presetTags}
+                allTags={allTags}
+              />
+            )}
 
-        {viewMode === 'edit' && (
-          <div className="max-w-3xl mx-auto space-y-4">
-            <input
-              type="text"
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="笔记标题"
-              className="w-full text-2xl font-bold bg-transparent border-none focus:outline-none placeholder-gray-400"
-            />
-            <TagSelector
-              selectedTags={formData.tags}
-              onChange={(tags) => setFormData({ ...formData, tags })}
-              presetTags={presetTags}
-              allTags={allTags}
-              onCreatePresetTag={handleCreatePresetTag}
-            />
-            <NoteEditor
-              content={formData.content}
-              onChange={(content) => setFormData({ ...formData, content })}
-              placeholder="开始编写笔记..."
-            />
-          </div>
-        )}
+            {viewMode === 'edit' && (
+              <div className="max-w-3xl mx-auto space-y-4">
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  placeholder="笔记标题"
+                  className="w-full text-2xl font-bold bg-transparent border-none focus:outline-none placeholder-gray-400"
+                />
+                <TagSelector
+                  selectedTags={formData.tags}
+                  onChange={(tags) => setFormData({ ...formData, tags })}
+                  presetTags={presetTags}
+                  allTags={allTags}
+                  onCreatePresetTag={handleCreatePresetTag}
+                />
+                <NoteEditor
+                  content={formData.content}
+                  onChange={(content) => setFormData({ ...formData, content })}
+                  placeholder="开始编写笔记..."
+                />
+              </div>
+            )}
 
-        {viewMode === 'settings' && (
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div>
-              <h2 className="text-lg font-medium mb-4 flex items-center gap-2">
-                <Tag size={20} />
-                预设标签管理
-              </h2>
-              <div className="space-y-2">
-                {presetTags.map((tag) => (
-                  <div
-                    key={tag.id}
-                    className="flex items-center justify-between p-3 border rounded-lg"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-4 h-4 rounded-full"
-                        style={{ backgroundColor: tag.color }}
-                      />
-                      <span>{tag.name}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (window.confirm(`确定要删除预设标签 "${tag.name}" 吗？`)) {
-                          try {
-                            await api.deletePresetTag(tag.id);
-                            setPresetTags(presetTags.filter((t) => t.id !== tag.id));
-                          } catch {
-                            showFeedback('error', MESSAGES.knowledge.deletePresetTagFailed);
-                          }
-                        }
-                      }}
-                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded text-red-500"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+            {viewMode === 'settings' && (
+              <div className="max-w-2xl mx-auto space-y-6">
+                <div>
+                  <h2 className="text-lg font-medium mb-4 flex items-center gap-2">
+                    <Tag size={20} />
+                    预设标签管理
+                  </h2>
+                  <div className="space-y-2">
+                    {presetTags.map((tag) => (
+                      <div
+                        key={tag.id}
+                        className="flex items-center justify-between p-3 border rounded-lg"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-4 h-4 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                          />
+                          <span>{tag.name}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (window.confirm(`确定要删除预设标签 "${tag.name}" 吗？`)) {
+                              try {
+                                await api.deletePresetTag(tag.id);
+                                setPresetTags(presetTags.filter((t) => t.id !== tag.id));
+                              } catch {
+                                showFeedback('error', MESSAGES.knowledge.deletePresetTagFailed);
+                              }
+                            }
+                          }}
+                          className="p-1 hover:bg-red-100 dark:hover:bg-red-900 rounded text-red-500"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ))}
+                    {presetTags.length === 0 && (
+                      <p className="text-gray-500 text-sm">{MESSAGES.knowledge.noPresetTags}</p>
+                    )}
                   </div>
-                ))}
-                {presetTags.length === 0 && (
-                  <p className="text-gray-500 text-sm">{MESSAGES.knowledge.noPresetTags}</p>
-                )}
-              </div>
-            </div>
+                </div>
 
-            <div>
-              <h2 className="text-lg font-medium mb-4 flex items-center gap-2">
-                <FileText size={20} />
-                统计信息
-              </h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 border rounded-lg">
-                  <div className="text-2xl font-bold">{notes.length}</div>
-                  <div className="text-sm text-gray-500">知识笔记</div>
-                </div>
-                <div className="p-4 border rounded-lg">
-                  <div className="text-2xl font-bold">{allTags.length}</div>
-                  <div className="text-sm text-gray-500">已用标签</div>
+                <div>
+                  <h2 className="text-lg font-medium mb-4 flex items-center gap-2">
+                    <FileText size={20} />
+                    统计信息
+                  </h2>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 border rounded-lg">
+                      <div className="text-2xl font-bold">{notes.length}</div>
+                      <div className="text-sm text-gray-500">知识笔记</div>
+                    </div>
+                    <div className="p-4 border rounded-lg">
+                      <div className="text-2xl font-bold">{allTags.length}</div>
+                      <div className="text-sm text-gray-500">已用标签</div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
+        )}
+
+        {mainTab === 'rag' && (
+          <RagSection onFeedback={showFeedback} />
         )}
       </div>
     </div>

@@ -12,8 +12,9 @@ import { financeDB, FinanceRecord, createUseDB, getErrorMessage } from '../../db
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
 import { Button, EmptyState } from '../../components/ui';
-import { RecordItem, RecordForm, StatsCards } from './components';
+import { RecordItem, RecordForm, FinanceOverview } from './components';
 import { MESSAGES } from '../../core/messages';
+import { PageHeader, PageContent, defaultEasing } from '../../components/ui/PageAnimations';
 
 const DEFAULT_CATEGORIES = {
   income: ['API调用收入', '服务收入', '其他收入'],
@@ -277,8 +278,9 @@ export default function Finance() {
   );
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-screen bg-bg-secondary">
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 md:mb-8">
+    <div className="p-3 md:p-6 min-h-screen bg-bg-secondary">
+      <div className="max-w-6xl mx-auto space-y-4">
+      <PageHeader className="mb-4">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="page-header-icon">
@@ -294,30 +296,31 @@ export default function Finance() {
             导出 CSV
           </button>
         </div>
-      </motion.div>
+      </PageHeader>
 
       {batchFeedback && (
-        <div className="mb-4 rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
+        <div className="rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
           {batchFeedback}
         </div>
       )}
 
       {(loadError || feedback) && (
-        <div className="mb-4 rounded-lg border border-error/20 bg-error/10 px-4 py-3 text-sm text-error">
+        <div className="rounded-lg border border-error/20 bg-error/10 px-4 py-3 text-sm text-error">
           {feedback?.message || loadError}
         </div>
       )}
 
-      <StatsCards stats={stats} />
+      {/* 统一的财务概览组件 */}
+      <FinanceOverview stats={stats} />
 
       {records.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5 mb-6 md:mb-8">
+        <PageContent delay={0.15} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl shadow-sm border p-4 md:p-5 bg-bg-card border-border-primary">
             <div className="flex items-center gap-2 mb-4">
               <BarChart3 className="w-5 h-5 text-text-secondary" />
-              <h2 className="text-base font-semibold text-text-primary">月度收支趋势</h2>
+              <h2 className="text-sm font-medium text-text-primary">月度收支趋势</h2>
             </div>
-            <div className="h-48 md:h-56">
+            <div className="chart-height">
               {monthlyTrend.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={monthlyTrend}>
@@ -337,9 +340,9 @@ export default function Finance() {
           <div className="rounded-xl shadow-sm border p-4 md:p-5 bg-bg-card border-border-primary">
             <div className="flex items-center gap-2 mb-4">
               <PieChart className="w-5 h-5 text-text-secondary" />
-              <h2 className="text-base font-semibold text-text-primary">模型费用占比</h2>
+              <h2 className="text-sm font-medium text-text-primary">模型费用占比</h2>
             </div>
-            <div className="h-48 md:h-56">
+            <div className="chart-height">
               {modelPieData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <RechartsPie>
@@ -351,14 +354,18 @@ export default function Finance() {
                   </RechartsPie>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-text-muted text-sm">暂无支出数据</div>
+                <div className="h-full flex flex-col items-center justify-center gap-3">
+                  <PieChart className="w-10 h-10 text-text-muted/50" />
+                  <p className="text-sm text-text-muted">暂无支出数据</p>
+                  <button onClick={() => setShowForm(true)} className="text-sm text-primary hover:text-primary-dark transition-colors">添加支出记录</button>
+                </div>
               )}
             </div>
           </div>
-        </motion.div>
+        </PageContent>
       )}
 
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-5">
+      <PageContent delay={0.2} className="grid-content-2-1 gap-5">
         <div className="lg:col-span-2 rounded-xl shadow-sm border bg-bg-card border-border-primary">
           <div className="p-5 border-b border-border-primary">
             <div className="flex items-center justify-between mb-4">
@@ -392,25 +399,25 @@ export default function Finance() {
 
             <AnimatePresence>
               {showFilters && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="rounded-lg p-4 space-y-3 bg-bg-secondary">
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="rounded-lg p-4 space-y-3 bg-bg-secondary border border-border-primary mt-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs mb-1 text-text-muted">开始日期</label>
-                      <input type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-primary bg-bg-card border-border-primary" />
+                      <label className="block text-sm mb-1.5 text-text-secondary font-medium">开始日期</label>
+                      <input type="date" value={dateRange.start} onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })} className="input text-sm" />
                     </div>
                     <div>
-                      <label className="block text-xs mb-1 text-text-muted">结束日期</label>
-                      <input type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-primary bg-bg-card border-border-primary" />
+                      <label className="block text-sm mb-1.5 text-text-secondary font-medium">结束日期</label>
+                      <input type="date" value={dateRange.end} onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })} className="input text-sm" />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-xs mb-1 text-text-muted">模型筛选</label>
-                    <select value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} className="w-full px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:border-primary bg-bg-card border-border-primary">
+                    <label className="block text-sm mb-1.5 text-text-secondary font-medium">模型筛选</label>
+                    <select value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} className="input text-sm">
                       <option value="">全部模型</option>
                       {models.map(m => <option key={m} value={m}>{m}</option>)}
                     </select>
                   </div>
-                  {hasFilters && <button onClick={clearFilters} className="text-sm flex items-center gap-1 text-text-muted hover:text-text-secondary"><X className="w-3 h-3" />清除筛选</button>}
+                  {hasFilters && <button onClick={clearFilters} className="text-sm flex items-center gap-1 text-text-muted hover:text-primary transition-colors"><X className="w-4 h-4" />清除筛选</button>}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -432,7 +439,7 @@ export default function Finance() {
                     <span className="text-sm text-text-muted">全选 ({filteredRecords.length} 条记录)</span>
                   </div>
                 )}
-                <VirtualList<FinanceRecord> items={filteredRecords} itemHeight={72} containerHeight={400} renderItem={renderRecordItem} />
+                <VirtualList<FinanceRecord> items={filteredRecords} itemHeight={72} containerHeight={480} renderItem={renderRecordItem} />
               </>
             ) : (
               <>
@@ -448,46 +455,50 @@ export default function Finance() {
           </div>
         </div>
 
-        <div className="space-y-5">
-          <div className="rounded-xl shadow-sm border p-5 bg-bg-card border-border-primary">
-            <div className="flex items-center gap-2 mb-4">
-              <PieChart className="w-5 h-5 text-text-secondary" />
-              <h2 className="text-base font-semibold text-text-primary">模型统计</h2>
+        <div className="space-y-4">
+          {/* 合并的统计卡片 - 模型和分类 */}
+          <div className="rounded-lg shadow-md border p-4 bg-bg-card border-border-primary">
+            <div className="flex items-center gap-2 mb-3">
+              <BarChart3 className="w-4 h-4 text-text-secondary" />
+              <h3 className="text-sm font-semibold text-text-primary">统计概览</h3>
             </div>
-            <div className="space-y-3">
-              {Object.entries(modelStats).map(([model, stat]) => (
-                <div key={model} className="flex items-center justify-between text-sm">
-                  <span className="text-text-secondary">{model}</span>
-                  <div className="flex gap-3">
-                    {stat.income > 0 && <span className="text-success dark:text-success-400">+¥{stat.income.toLocaleString()}</span>}
-                    {stat.expense > 0 && <span className="text-error dark:text-error-400">-¥{stat.expense.toLocaleString()}</span>}
-                  </div>
-                </div>
-              ))}
-              {Object.keys(modelStats).length === 0 && <div className="text-center py-6 text-text-muted text-sm">暂无数据</div>}
-            </div>
-          </div>
 
-          <div className="rounded-xl shadow-sm border p-5 bg-bg-card border-border-primary">
-            <div className="flex items-center gap-2 mb-4">
-              <BarChart3 className="w-5 h-5 text-text-secondary" />
-              <h2 className="text-base font-semibold text-text-primary">分类统计</h2>
-            </div>
-            <div className="space-y-3">
-              {Object.entries(categoryStats).map(([cat, stat]) => (
-                <div key={cat} className="flex items-center justify-between text-sm">
-                  <span className="text-text-secondary truncate max-w-[120px]" title={cat}>{cat}</span>
-                  <div className="flex gap-3 shrink-0">
-                    {stat.income > 0 && <span className="text-success dark:text-success-400">+¥{stat.income.toLocaleString()}</span>}
-                    {stat.expense > 0 && <span className="text-error dark:text-error-400">-¥{stat.expense.toLocaleString()}</span>}
+            {/* 模型统计 - 紧凑列表 */}
+            <div className="mb-3">
+              <p className="text-xs text-text-muted mb-2">按模型</p>
+              <div className="space-y-1.5">
+                {Object.entries(modelStats).slice(0, 5).map(([model, stat]) => (
+                  <div key={model} className="flex items-center justify-between text-sm p-1.5 rounded bg-bg-secondary/50">
+                    <span className="text-text-secondary truncate max-w-[80px]" title={model}>{model}</span>
+                    <div className="flex gap-2 shrink-0">
+                      {stat.income > 0 && <span className="text-success text-xs">+¥{stat.income.toLocaleString()}</span>}
+                      {stat.expense > 0 && <span className="text-error text-xs">-¥{stat.expense.toLocaleString()}</span>}
+                    </div>
                   </div>
-                </div>
-              ))}
-              {Object.keys(categoryStats).length === 0 && <div className="text-center py-6 text-text-muted text-sm">暂无数据</div>}
+                ))}
+                {Object.keys(modelStats).length === 0 && <p className="text-center py-3 text-text-muted text-xs">暂无数据</p>}
+              </div>
+            </div>
+
+            {/* 分类统计 - 紧凑列表 */}
+            <div>
+              <p className="text-xs text-text-muted mb-2">按分类</p>
+              <div className="space-y-1.5">
+                {Object.entries(categoryStats).slice(0, 5).map(([cat, stat]) => (
+                  <div key={cat} className="flex items-center justify-between text-sm p-1.5 rounded bg-bg-secondary/50">
+                    <span className="text-text-secondary truncate max-w-[100px]" title={cat}>{cat}</span>
+                    <div className="flex gap-2 shrink-0">
+                      {stat.income > 0 && <span className="text-success text-xs">+¥{stat.income.toLocaleString()}</span>}
+                      {stat.expense > 0 && <span className="text-error text-xs">-¥{stat.expense.toLocaleString()}</span>}
+                    </div>
+                  </div>
+                ))}
+                {Object.keys(categoryStats).length === 0 && <p className="text-center py-3 text-text-muted text-xs">暂无数据</p>}
+              </div>
             </div>
           </div>
         </div>
-      </motion.div>
+      </PageContent>
 
       <AnimatePresence>
         {showForm && (
@@ -511,7 +522,7 @@ export default function Finance() {
       <AnimatePresence>
         {showDeleteConfirm && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="rounded-xl p-6 w-full max-w-sm bg-bg-card shadow-xl border border-border-primary">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="rounded-lg p-6 w-full max-w-sm bg-bg-card shadow-xl border border-border-primary">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-error-light dark:bg-error/20 flex items-center justify-center">
                   <AlertTriangle className="w-5 h-5 text-error dark:text-error-400" />
@@ -531,6 +542,7 @@ export default function Finance() {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }

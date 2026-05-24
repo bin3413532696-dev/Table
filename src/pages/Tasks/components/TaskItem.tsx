@@ -91,30 +91,32 @@ export const TaskItem: React.FC<TaskItemProps> = ({
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      transition={index !== undefined ? { delay: Math.min(index * 0.03, 0.3) } : undefined}
-      className={`group relative flex items-center gap-4 p-4 rounded-lg border transition-all duration-150 ${
-        task.completed
-          ? 'bg-bg-secondary/50 border-border-primary'
-          : 'bg-bg-card border-border-primary hover:border-primary/30 hover:shadow-card'
+      exit={{ opacity: 0, y: -8 }}
+      transition={index !== undefined ? { delay: Math.min(index * 0.02, 0.2) } : undefined}
+      className={`group relative flex items-center gap-2 md:gap-3 p-2.5 md:p-3 rounded-lg border transition-all duration-150 ${
+        selectedIds.has(task.id)
+          ? 'bg-primary/5 border-primary/40 shadow-sm'
+          : task.completed
+            ? 'bg-bg-secondary/30 border-border-primary opacity-60'
+            : 'bg-bg-card border-border-primary hover:border-primary/30 hover:shadow-card'
       }`}
     >
-      <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l ${overdue ? 'bg-error' : config.bgColor}`} />
+      <div className={`absolute left-0 top-0 bottom-0 w-1.5 rounded-l-lg ${overdue ? 'bg-error' : selectedIds.has(task.id) ? 'bg-primary' : task.completed ? 'bg-text-muted' : config.bgColor}`} />
 
       {showBatchActions && (
         <input
           type="checkbox"
           checked={selectedIds.has(task.id)}
           onChange={() => onToggleSelect(task.id)}
-          className="w-4 h-4 rounded border-border-primary accent-primary shrink-0"
+          className="w-5 h-5 md:w-6 md:h-6 rounded border-border-primary accent-primary shrink-0"
         />
       )}
 
       <button
         onClick={() => onToggle(task.id)}
-        className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
+        className={`flex-shrink-0 w-5 h-5 md:w-6 md:h-6 rounded-full flex items-center justify-center transition-colors ${
           task.completed
             ? 'bg-success text-white'
             : 'border-2 border-border-secondary hover:border-primary'
@@ -173,17 +175,25 @@ export const TaskItem: React.FC<TaskItemProps> = ({
       </div>
 
       {editingId !== task.id && (
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+        <div className="flex gap-1 shrink-0 transition-opacity">
           <button
             onClick={() => onStartEdit(task)}
-            className="p-2 rounded-lg text-text-muted hover:text-primary hover:bg-primary/10 transition-colors"
+            className={`p-1.5 rounded-lg transition-all ${
+              selectedIds.has(task.id)
+                ? 'text-text-secondary hover:text-primary hover:bg-primary/10'
+                : 'text-text-muted/60 hover:text-primary hover:bg-primary/10 opacity-60 group-hover:opacity-100'
+            }`}
             title="编辑"
           >
             <Edit2 size={16} />
           </button>
           <button
             onClick={() => onDelete(task.id)}
-            className="p-2 rounded-lg text-text-muted hover:text-error hover:bg-error/10 transition-colors"
+            className={`p-1.5 rounded-lg transition-all ${
+              selectedIds.has(task.id)
+                ? 'text-text-secondary hover:text-error hover:bg-error/10'
+                : 'text-text-muted/60 hover:text-error hover:bg-error/10 opacity-60 group-hover:opacity-100'
+            }`}
             title="删除"
           >
             <Trash2 size={16} />
@@ -202,7 +212,7 @@ interface PriorityButtonGroupProps {
 export const PriorityButtonGroup: React.FC<PriorityButtonGroupProps> = ({ selected, onChange }) => {
   const priorities: PriorityType[] = ['low', 'medium', 'high'];
   return (
-    <div className="flex gap-1">
+    <div className="flex gap-1.5">
       {priorities.map(p => {
         const config = PRIORITY_CONFIG[p];
         const isSelected = selected === p;
@@ -210,7 +220,7 @@ export const PriorityButtonGroup: React.FC<PriorityButtonGroupProps> = ({ select
           <button
             key={p}
             onClick={() => onChange(p)}
-            className={`px-2 py-1 text-xs rounded font-medium transition-all flex items-center gap-1 ${
+            className={`px-1.5 py-0.5 md:px-2 md:py-1 text-xs rounded font-medium transition-all flex items-center gap-1 ${
               isSelected
                 ? `${config.bgColor} text-white shadow-sm`
                 : 'bg-bg-secondary text-text-secondary hover:bg-bg-tertiary border border-border-primary'

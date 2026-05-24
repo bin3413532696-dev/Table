@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wrench, FileJson, Copy, Check, RefreshCw, ArrowLeft, Zap } from 'lucide-react';
+import { PageHeader, PageContent, StaggerContainer, StaggerItem, defaultEasing } from '../../components/ui/PageAnimations';
+import { Button } from '../../components/ui';
 
 const tools = [
-  { icon: FileJson, label: 'JSON格式化', desc: 'JSON数据处理', color: 'bg-success' },
+  { icon: FileJson, label: 'JSON格式化', desc: 'JSON数据处理', color: 'success' },
 ];
 
 function JsonFormatterTool() {
@@ -48,7 +50,7 @@ function JsonFormatterTool() {
 
   return (
     <div className="card">
-      <div className="grid grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4 mb-4">
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-sm font-medium text-text-secondary">输入 JSON</label>
@@ -60,7 +62,7 @@ function JsonFormatterTool() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder='{"key": "value"}'
-            className="input h-48 resize-none font-mono text-sm"
+            className="input h-40 md:h-48 lg:h-56 resize-none font-mono text-sm"
           />
         </div>
         <div>
@@ -76,7 +78,7 @@ function JsonFormatterTool() {
           <textarea
             value={output}
             readOnly
-            className="input h-48 resize-none font-mono text-sm bg-bg-tertiary"
+            className="input h-40 md:h-48 lg:h-56 resize-none font-mono text-sm bg-bg-tertiary"
           />
         </div>
       </div>
@@ -88,8 +90,8 @@ function JsonFormatterTool() {
       )}
 
       <div className="flex gap-3">
-        <button onClick={formatJson} className="btn btn-primary btn-md flex-1">格式化</button>
-        <button onClick={minifyJson} className="btn btn-secondary btn-md flex-1">压缩</button>
+        <Button variant="primary" className="flex-1" onClick={formatJson}>格式化</Button>
+        <Button variant="secondary" className="flex-1" onClick={minifyJson}>压缩</Button>
       </div>
     </div>
   );
@@ -106,9 +108,10 @@ export default function Tools() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
+    <div className="p-3 md:p-6 min-h-screen bg-bg-secondary space-y-4">
+      <div className="max-w-[1000px] mx-auto">
       {/* 页面头部 */}
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="page-header">
+      <PageHeader className="page-header">
         <div className="page-header-icon">
           <Wrench className="w-5 h-5" />
         </div>
@@ -116,54 +119,55 @@ export default function Tools() {
           <h1 className="page-header-title">工具箱</h1>
           <p className="page-header-subtitle">便捷的在线工具集合</p>
         </div>
-      </motion.div>
+      </PageHeader>
 
       <AnimatePresence mode="wait">
         {activeTool ? (
           <motion.div
             key="tool"
-            initial={{ opacity: 0, y: 16 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -16 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25, ease: defaultEasing }}
           >
-            <button onClick={() => setActiveTool(null)} className="btn btn-ghost btn-sm mb-4">
-              <ArrowLeft className="w-4 h-4" />
+            <Button variant="ghost" size="sm" className="mb-4" onClick={() => setActiveTool(null)} icon={<ArrowLeft className="w-4 h-4" />}>
               返回工具列表
-            </button>
+            </Button>
             {renderTool()}
           </motion.div>
         ) : (
-          <motion.div
-            key="list"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -16 }}
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-          >
-            {tools.map((tool, index) => (
-              <motion.div
-                key={tool.label}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.08 }}
-                whileHover={{ y: -4 }}
-                onClick={() => setActiveTool(tool.label)}
-                className="card cursor-pointer group"
-              >
-                <div className={`w-14 h-14 ${tool.color} rounded-xl flex items-center justify-center mb-4 group-hover:scale-105 transition-transform`}>
-                  <tool.icon className="w-7 h-7 text-white" />
-                </div>
-                <h3 className="font-semibold text-text-primary mb-1">{tool.label}</h3>
-                <p className="text-sm text-text-muted">{tool.desc}</p>
-                <div className="flex items-center gap-1 mt-4 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Zap className="w-3 h-3" />
-                  点击使用
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
+          <StaggerContainer className="grid-tools-3" staggerDelay={0.06}>
+            {tools.map((tool) => {
+              const getIconClasses = () => {
+                if (tool.color === 'success') {
+                  return 'card-icon-md bg-success/10 text-success';
+                }
+                return 'card-icon-md bg-primary/10 text-primary';
+              };
+              return (
+                <StaggerItem key={tool.label}>
+                  <motion.div
+                    whileHover={{ y: -4 }}
+                    onClick={() => setActiveTool(tool.label)}
+                    className="card cursor-pointer group min-w-[240px] max-w-[320px]"
+                  >
+                    <div className={`${getIconClasses()} rounded-xl flex items-center justify-center mb-4 group-hover:scale-105 transition-transform`}>
+                      <tool.icon className="w-7 h-7" />
+                    </div>
+                    <h3 className="font-semibold text-text-primary mb-1">{tool.label}</h3>
+                    <p className="text-sm text-text-muted">{tool.desc}</p>
+                    <div className="flex items-center gap-1 mt-4 text-xs text-primary opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Zap className="w-3 h-3" />
+                      点击使用
+                    </div>
+                  </motion.div>
+                </StaggerItem>
+              );
+            })}
+          </StaggerContainer>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }

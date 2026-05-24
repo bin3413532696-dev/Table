@@ -6,6 +6,7 @@ import { healthRoutes } from './modules/health/routes';
 import { taskRoutes } from './modules/tasks/routes';
 import { financeRoutes } from './modules/finance/routes';
 import { knowledgeRoutes } from './modules/knowledge/routes';
+import { knowledgeRagRoutes } from './modules/knowledge-rag/routes';
 import { maintenanceRoutes } from './modules/maintenance/routes';
 import { agentRoutes } from './modules/agent/routes';
 import { providerRoutes } from './modules/providers/routes';
@@ -132,6 +133,7 @@ export function createApp() {
   app.register(taskRoutes, { prefix: '/api/tasks' });
   app.register(financeRoutes, { prefix: '/api/finance' });
   app.register(knowledgeRoutes, { prefix: '/api' });
+  app.register(knowledgeRagRoutes, { prefix: '/api' });
   app.register(providerRoutes, { prefix: '/api' });
   app.register(agentRoutes, { prefix: '/api' });
   app.register(maintenanceRoutes, { prefix: '/api/maintenance' });

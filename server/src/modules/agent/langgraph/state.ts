@@ -128,6 +128,38 @@ export const AgentStateAnnotation = Annotation.Root({
     default: () => [],
     reducer: arrayAppendReducer(),
   }),
+
+  // RAG 累积搜索结果（用于引用验证和多轮融合）
+  accumulatedSearchResults: Annotation<Array<{
+    id: string;
+    documentId: string;
+    documentTitle: string;
+    headingChain?: string;
+    content: string;
+    chunkIndex: number;
+    score: number;
+    source: string;
+  }>>({
+    default: () => [],
+    reducer: (existing, newResults) => {
+      // 去重合并：按 chunk ID 去重
+      const existingIds = new Set(existing.map(r => r.id));
+      const uniqueNew = (newResults ?? []).filter(r => !existingIds.has(r.id));
+      return [...existing, ...uniqueNew];
+    },
+  }),
+
+  // 已引用的 chunk ID（用于 cite_sources 验证）
+  citedChunkIds: Annotation<string[]>({
+    default: () => [],
+    reducer: arrayAppendReducer(),
+  }),
+
+  // 搜索结果最高分数（用于 Retrieval Grader）
+  searchMaxScore: Annotation<number>({
+    default: () => 0,
+    reducer: (existing, newScore) => Math.max(existing ?? 0, newScore ?? 0),
+  }),
 });
 
 export type AgentState = typeof AgentStateAnnotation.State;

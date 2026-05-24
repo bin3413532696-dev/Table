@@ -15,6 +15,8 @@ export type ProviderDto = {
   baseUrl: string;
   apiKey: string;
   model?: string;
+  embeddingModel?: string;
+  rerankerModel?: string;
   headers: Record<string, string>;
   isActive: boolean;
   hasApiKey: boolean;
@@ -52,6 +54,8 @@ function toProviderDto(provider: {
   baseUrl: string;
   apiKeyEncrypted: string | null;
   model: string | null;
+  embeddingModel?: string | null;
+  rerankerModel?: string | null;
   headersJson: unknown;
   isActive: boolean;
   source: string;
@@ -67,6 +71,8 @@ function toProviderDto(provider: {
     baseUrl: provider.baseUrl,
     apiKey,
     model: provider.model || undefined,
+    embeddingModel: provider.embeddingModel || undefined,
+    rerankerModel: provider.rerankerModel || undefined,
     headers: toStringRecord(provider.headersJson),
     isActive: provider.isActive,
     hasApiKey: hasProviderSecret(provider.apiKeyEncrypted),
@@ -168,7 +174,9 @@ export async function createProviderForCurrentUser(input: CreateProviderInput) {
           ? encryptProviderSecret(input.apiKey)
           : null,
         model: normalizeOptionalString(input.model),
-        headersJson: input.headers,
+        embeddingModel: input.embeddingModel ? normalizeOptionalString(input.embeddingModel) : null,
+        rerankerModel: input.rerankerModel ? normalizeOptionalString(input.rerankerModel) : null,
+        headersJson: input.headers ?? {},
         isActive: shouldActivate,
         source: input.source ?? 'manual',
       },
@@ -230,6 +238,8 @@ export async function updateProviderForCurrentUser(id: string, input: UpdateProv
           ? { apiKeyEncrypted: nextApiKey ? encryptProviderSecret(nextApiKey) : existing.apiKeyEncrypted }
           : {}),
         ...(input.model !== undefined ? { model: normalizeOptionalString(input.model) } : {}),
+        ...(input.embeddingModel !== undefined ? { embeddingModel: normalizeOptionalString(input.embeddingModel) } : {}),
+        ...(input.rerankerModel !== undefined ? { rerankerModel: normalizeOptionalString(input.rerankerModel) } : {}),
         ...(input.headers !== undefined ? { headersJson: input.headers } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
         version: {

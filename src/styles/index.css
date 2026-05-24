@@ -227,29 +227,31 @@ h3, .text-title-card {
 @layer components {
   /* 页面头部 */
   .page-header {
-    @apply flex items-center gap-4 mb-10;
+    @apply flex items-center gap-3 md:gap-4 mb-8 md:mb-10;
   }
 
   .page-header-icon {
-    @apply w-12 h-12 bg-primary rounded-[10px] flex items-center justify-center;
+    @apply w-10 h-10 md:w-12 md:h-12 bg-primary rounded-lg flex items-center justify-center;
   }
 
   .page-header-icon svg {
-    @apply w-5 h-5 text-white;
+    @apply w-4 h-4 md:w-5 md:h-5 text-white;
   }
 
   .page-header-title {
-    @apply text-[28px] font-semibold text-text-primary tracking-tight;
+    @apply text-2xl md:text-3xl font-bold text-text-primary tracking-tight;
     font-family: 'Satoshi', 'Noto Sans SC', sans-serif;
   }
 
   .page-header-subtitle {
-    @apply text-sm text-text-muted mt-0.5;
+    @apply text-sm text-text-muted mt-1;
   }
 
-  /* 卡片基础样式 */
+  /* 卡片基础样式 - 添加尺寸约束和响应式 padding */
   .card {
-    @apply rounded-[14px] bg-bg-card border border-border-primary p-6;
+    @apply rounded-lg bg-bg-card border border-border-primary;
+    @apply min-w-[240px] max-w-full;
+    @apply p-4 md:p-5 lg:p-6;
     box-shadow: var(--shadow-md);
     transition: all 0.15s ease;
   }
@@ -260,13 +262,16 @@ h3, .text-title-card {
   }
 
   .card-static {
-    @apply rounded-[14px] bg-bg-card border border-border-primary p-6;
+    @apply rounded-lg bg-bg-card border border-border-primary;
+    @apply p-4 md:p-5 lg:p-6;
     box-shadow: var(--shadow-md);
   }
 
-  /* 统计卡片 */
+  /* 统计卡片 - 统一尺寸约束 */
   .stat-card {
-    @apply rounded-[14px] bg-bg-card border border-border-primary p-5;
+    @apply rounded-lg bg-bg-card border;
+    @apply min-w-[160px] max-w-[200px];
+    @apply p-4 md:p-5;
     box-shadow: var(--shadow-md);
     transition: all 0.15s ease;
   }
@@ -277,26 +282,28 @@ h3, .text-title-card {
   }
 
   .stat-card-icon {
-    @apply w-11 h-11 rounded-[10px] flex items-center justify-center;
+    @apply w-10 h-10 md:w-11 md:h-11 rounded-lg flex items-center justify-center;
   }
 
   .stat-card-icon svg {
-    @apply w-5 h-5;
+    @apply w-4 h-4 md:w-5 md:h-5;
   }
 
   .stat-card-value {
-    @apply text-3xl font-semibold;
+    @apply text-xl md:text-2xl font-bold;
     font-family: 'Geist Mono', monospace;
     font-variant-numeric: tabular-nums;
   }
 
   .stat-card-label {
-    @apply text-[13px] text-text-secondary;
+    @apply text-sm text-text-secondary font-medium;
   }
 
-  /* 输入框 */
+  /* 输入框 - 添加 min-width 和响应式 padding */
   .input {
-    @apply w-full px-4 py-3 border border-border-primary rounded-[6px];
+    @apply w-full min-w-[180px];
+    @apply px-3 py-2 md:px-4 md:py-3;
+    @apply border border-border-primary rounded-[6px];
     @apply bg-bg-card text-text-primary;
     @apply placeholder:text-text-muted;
     @apply focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary;
@@ -305,50 +312,6 @@ h3, .text-title-card {
 
   .input-error {
     @apply border-error focus:ring-error/20 focus:border-error;
-  }
-
-  /* 按钮基础 */
-  .btn {
-    @apply inline-flex items-center justify-center font-medium;
-    @apply transition-all duration-150;
-    @apply focus:outline-none focus:ring-2 focus:ring-primary/20;
-    @apply disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-
-  .btn-primary {
-    @apply bg-primary text-white;
-    @apply hover:bg-primary-700 active:bg-primary-800;
-  }
-
-  .btn-primary:hover {
-    @apply -translate-y-px;
-  }
-
-  .btn-secondary {
-    @apply bg-bg-card border border-border-primary text-text-primary;
-    @apply hover:bg-bg-tertiary hover:border-border-secondary;
-  }
-
-  .btn-ghost {
-    @apply text-primary dark:text-primary-400;
-    @apply hover:bg-primary-100 dark:hover:bg-primary/20;
-  }
-
-  .btn-danger {
-    @apply bg-error text-white;
-    @apply hover:bg-error-700;
-  }
-
-  .btn-sm {
-    @apply px-3 py-1.5 text-xs rounded-[6px] gap-1;
-  }
-
-  .btn-md {
-    @apply px-4 py-2.5 text-sm rounded-[6px] gap-1.5;
-  }
-
-  .btn-lg {
-    @apply px-6 py-3 text-base rounded-[6px] gap-2;
   }
 
   /* 空状态 */
@@ -407,5 +370,56 @@ h3, .text-title-card {
 
   .section-title-icon {
     @apply w-5 h-5 text-text-secondary;
+  }
+
+  /* ===== 布局辅助类 ===== */
+
+  /* 网格布局比例标准 */
+  .grid-stats-4 {
+    @apply grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 lg:gap-5;
+  }
+
+  .grid-stats-3 {
+    @apply grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 lg:gap-5;
+  }
+
+  .grid-content-2-1 {
+    @apply grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-5 lg:gap-6;
+  }
+
+  .grid-tools-3 {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5;
+  }
+
+  .grid-form-2 {
+    @apply grid grid-cols-1 md:grid-cols-2 gap-4;
+  }
+
+  /* 图表容器高度 - 响应式 */
+  .chart-height {
+    @apply h-48 md:h-56 lg:h-64;
+  }
+
+  /* 搜索输入框宽度 - 响应式递增 */
+  .search-input {
+    @apply w-40 sm:w-48 md:w-56 lg:w-64;
+  }
+
+  /* 侧边栏宽度 - 响应式 */
+  .sidebar-width {
+    @apply w-full lg:w-48 xl:w-56;
+  }
+
+  /* 卡片图标尺寸 */
+  .card-icon-sm {
+    @apply w-10 h-10;
+  }
+
+  .card-icon-md {
+    @apply w-12 h-12 md:w-14 md:h-14;
+  }
+
+  .card-icon-lg {
+    @apply w-14 h-14 lg:w-16 lg:h-16;
   }
 }

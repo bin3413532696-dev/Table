@@ -15,10 +15,15 @@ model User {
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   agentSessions    AgentSession[]
+  runs             AgentRun[]
   providers        ApiProvider[]
   finances         FinanceRecord[]
   knowledgeNotes   KnowledgeNote[]
   knowledgePresetTags KnowledgePresetTag[]
+  knowledgeDocuments KnowledgeDocument[]
+  knowledgeChunks KnowledgeChunk[]
+  knowledgeEmbeddingCache KnowledgeEmbeddingCache[]
+  knowledgeIndexJobs KnowledgeIndexJob[]
   tasks            Task[]
   settings         UserSetting?
 
@@ -83,6 +88,8 @@ model ApiProvider {
   baseUrl         String   @map("base_url")
   apiKeyEncrypted String?  @map("api_key_encrypted")
   model           String?
+  embeddingModel  String?  @map("embedding_model")
+  rerankerModel   String?  @map("reranker_model")
   headersJson     Json     @default("{}") @map("headers_json")
   isActive        Boolean  @default(false) @map("is_active")
   source          String   @default("manual") @map("source")
@@ -159,4 +166,147 @@ model KnowledgePresetTag {
   @@unique([userId, name])
   @@index([userId, sortOrder])
   @@map("knowledge_preset_tags")
+}
+
+// =====================================================
+// RAG 知识库模型
+// =====================================================
+
+model KnowledgeDocument {
+  id           String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String              @map("user_id") @db.Uuid
+  title        String
+  summary      String?             @default("")
+  content      String?             @default("")
+  source       String?
+  fileType     String?             @map("file_type")
+  fileSize     Int?                @default(0) @map("file_size")
+  status       String?             @default("pending")
+  tagsJson     Json?               @default("[]") @map("tags_json")
+  contentHash  String?             @map("content_hash")
+  version      Int?                @default(1)
+  createdAt    DateTime?           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime?           @default(now()) @map("updated_at") @db.Timestamptz(6)
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  chunks       KnowledgeChunk[]
+  indexJobs    KnowledgeIndexJob[]
+
+  @@index([userId, status], map: "knowledge_documents_status_idx")
+  @@index([userId])
+  @@index([userId, updatedAt(sort: Desc)], map: "knowledge_documents_user_updated_idx")
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId         String    @map("document_id") @db.Uuid
+  userId             String    @map("user_id") @db.Uuid
+  content            String
+  contentHash        String    @map("content_hash")
+  chunkIndex         Int?      @default(0) @map("chunk_index")
+  startPos           Int?      @default(0) @map("start_pos")
+  endPos             Int?      @default(0) @map("end_pos")
+  embedding          Unsupported("vector(1024)")?
+  embeddingModel     String?   @map("embedding_model")
+  createdAt          DateTime? @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime? @default(now()) @db.Timestamptz(6)
+  headingChain       String?   @map("heading_chain")
+  headingLevel       Int?      @map("heading_level")
+  embeddingDimensions Int?     @map("embedding_dimensions")
+  embeddingVersion   Int?      @default(1) @map("embedding_version")
+  document           KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user               User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([documentId, chunkIndex], map: "knowledge_chunks_document_index_idx")
+  @@index([userId])
+  @@index([embeddingVersion], map: "knowledge_chunks_embedding_version_idx")
+  @@map("knowledge_chunks")
+}
+
+model KnowledgeEmbeddingCache {
+  id            String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String              @map("user_id") @db.Uuid
+  contentHash   String              @map("content_hash")
+  embedding     Unsupported("vector(1024)")
+  embeddingModel String             @map("embedding_model")
+  createdAt     DateTime?           @default(now()) @db.Timestamptz(6)
+  expiresAt     DateTime?           @map("expires_at") @db.Timestamptz(6)
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contentHash, embeddingModel], map: "knowledge_embedding_cache_unique_idx")
+  @@index([contentHash], map: "knowledge_embedding_cache_hash_idx")
+  @@index([expiresAt], map: "knowledge_embedding_cache_expires_idx")
+  @@map("knowledge_embedding_cache")
+}
+
+model KnowledgeIndexJob {
+  id          String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String             @map("user_id") @db.Uuid
+  documentId  String?            @map("document_id") @db.Uuid
+  jobType     String             @map("job_type")
+  status      String             @default("pending")
+  progress    Int?               @default(0)
+  errorJson   Json?              @map("error_json")
+  startedAt   DateTime?          @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime?          @map("completed_at") @db.Timestamptz(6)
+  createdAt   DateTime?          @default(now()) @db.Timestamptz(6)
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document    KnowledgeDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status], map: "knowledge_index_jobs_user_status_idx")
+  @@index([documentId], map: "knowledge_index_jobs_document_idx")
+  @@map("knowledge_index_jobs")
+}
+
+// =====================================================
+// LangGraph Checkpointer 模型
+// =====================================================
+
+model Checkpoint {
+  threadId     String   @map("thread_id")
+  checkpointNs String   @default("") @map("checkpoint_ns")
+  checkpointId String   @map("checkpoint_id")
+  parentCheckpointId String? @map("parent_checkpoint_id")
+  type         String
+  checkpoint   Json
+  metadata     Json
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([threadId, checkpointNs, checkpointId])
+  @@index([threadId])
+  @@index([threadId, checkpointNs])
+  @@map("checkpoints")
+}
+
+model CheckpointBlob {
+  threadId     String
+  checkpointNs String @default("") @map("checkpoint_ns")
+  channel      String
+  version      String
+  type         String
+  blob         Bytes?
+
+  @@id([threadId, checkpointNs, channel, version])
+  @@map("checkpoint_blobs")
+}
+
+model CheckpointWrite {
+  threadId     String
+  checkpointNs String @default("") @map("checkpoint_ns")
+  checkpointId String @map("checkpoint_id")
+  channel      String
+  type         String
+  blob         Bytes
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([threadId, checkpointNs, checkpointId, channel])
+  @@index([threadId])
+  @@index([threadId, checkpointNs, checkpointId])
+  @@map("checkpoint_writes")
+}
+
+model CheckpointMigration {
+  v Int @id
+  @@map("checkpoint_migrations")
 }

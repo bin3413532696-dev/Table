@@ -26,9 +26,9 @@ const Card: React.FC<CardProps> = ({
 
   const paddingStyles = {
     none: '',
-    sm: 'p-3',
-    md: 'p-5',
-    lg: 'p-6',
+    sm: 'p-3 min-w-[240px]',
+    md: 'p-4 md:p-5 min-w-[280px]',
+    lg: 'p-5 md:p-6 min-w-[320px]',
   };
 
   const hoverStyles = hoverable

@@ -31,9 +31,12 @@ export function validateProviderUrl(baseUrl: string): void {
 
   const hostname = url.hostname.toLowerCase();
 
-  // 阻止 localhost
-  if (hostname === 'localhost' || hostname === 'localhost.localdomain') {
-    throw new Error('Provider baseUrl 不允许指向 localhost');
+  // 阻止 localhost（生产环境）
+  // 开发环境允许 localhost 以便使用本地 LLM（如 Ollama）
+  if (process.env.NODE_ENV === 'production') {
+    if (hostname === 'localhost' || hostname === 'localhost.localdomain') {
+      throw new Error('Provider baseUrl 不允许指向 localhost（生产环境）');
+    }
   }
 
   // 阻止云元数据地址
@@ -146,6 +149,7 @@ export function createStreamingChatModel(provider: ProviderConfig, model: string
 /**
  * 创建绑定了工具的 ChatModel 实例（原生 Function Calling）
  * 使用 LangChain 的 bindTools 方法绑定工具
+ * 添加 tool_choice="required" 强制模型调用工具
  */
 export function createChatModelWithTools(
   provider: ProviderConfig,
@@ -159,8 +163,18 @@ export function createChatModelWithTools(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const boundModel = (modelInstance as any);
   if (typeof boundModel.bindTools === 'function') {
-    return boundModel.bindTools(tools) as BaseChatModel;
+    // 让模型自主决定是否调用工具
+    // 使用 'auto' 而非 'required'，因为 'required' 会强制每次都调用工具
+    // 即使是简单的问候语也会触发工具调用，影响用户体验
+    console.log(`[Agent] Binding ${tools.length} tools for model ${model} (provider: ${provider.apiFormat})`);
+    const toolNames = tools.map(t => t.name).slice(0, 5).join(', ');
+    console.log(`[Agent] Tools bound: ${toolNames}${tools.length > 5 ? ` ... (+${tools.length - 5} more)` : ''}`);
+    return boundModel.bindTools(tools, { tool_choice: 'auto' }) as BaseChatModel;
   }
+
+  // 回退：记录警告，依赖文本解析
+  console.warn(`[Agent] Model ${model} (provider: ${provider.apiFormat}) does not support bindTools, falling back to text parsing`);
+  console.warn(`[Agent] Tools will be parsed from text output using regex patterns`);
   return modelInstance;
 }
 
@@ -344,6 +358,11 @@ export async function streamLlmDirect(options: StreamLlmOptions): Promise<Stream
       });
     }
   }
+
+  // 调试日志：查看 MiniMax 返回的完整结构
+  console.log('[LLM] finalResponse tool_calls:', finalResponse?.tool_calls?.length ?? 0);
+  console.log('[LLM] finalResponse additional_kwargs:', JSON.stringify(finalResponse?.additional_kwargs?.tool_calls ?? null).slice(0, 200));
+  console.log('[LLM] content length:', content.length);
 
   return { content, toolCalls };
 }

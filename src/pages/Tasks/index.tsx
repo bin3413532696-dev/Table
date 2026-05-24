@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, Circle, Plus, Trash2, Calendar, Clock, ListTodo, CheckCheck, AlertCircle, Search, SortAsc, AlertTriangle, CheckSquare, X, Flag, Edit2, Target, TrendingUp } from 'lucide-react';
+import { CheckCircle, Circle, Plus, Trash2, ListTodo, CheckCheck, AlertCircle, Search, SortAsc, AlertTriangle, CheckSquare, X, Edit2 } from 'lucide-react';
 import { taskDB, Task, createUseDB, getErrorMessage } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
-import { Button, EmptyState } from '../../components/ui';
-import { TaskItem, PriorityButtonGroup } from './components';
+import { Button, EmptyState, PageHeader, PageContent } from '../../components/ui';
+import { TaskItem, PriorityButtonGroup, TaskOverview } from './components';
+import { TaskSidebar } from './components/TaskSidebar';
 import { MESSAGES } from '../../core/messages';
 
 type FilterType = 'all' | 'pending' | 'completed';
@@ -49,7 +50,21 @@ const Tasks: React.FC = () => {
       return due < new Date(today.getFullYear(), today.getMonth(), today.getDate());
     }).length;
     const highPriority = tasks.filter(t => t.priority === 'high' && !t.completed).length;
-    return { total, completed, pending, overdue, highPriority };
+    const mediumPriority = tasks.filter(t => t.priority === 'medium' && !t.completed).length;
+    const lowPriority = tasks.filter(t => t.priority === 'low' && !t.completed).length;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const dueToday = tasks.filter(t => t.dueDate === todayStr && !t.completed).length;
+
+    const weekEnd = new Date();
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    const weekEndStr = weekEnd.toISOString().split('T')[0];
+    const dueThisWeek = tasks.filter(t => {
+      if (!t.dueDate || t.completed) return false;
+      return t.dueDate >= todayStr && t.dueDate <= weekEndStr;
+    }).length;
+
+    return { total, completed, pending, overdue, highPriority, mediumPriority, lowPriority, dueToday, dueThisWeek };
   }, [tasks]);
 
   const filteredTasks = useMemo(() => {
@@ -161,6 +176,30 @@ const Tasks: React.FC = () => {
     setShowBatchActions(false);
   }, [selectedIds, tasks]);
 
+  const handleQuickFilter = useCallback((filterType: 'high' | 'overdue' | 'today' | 'week') => {
+    setFilter('pending');
+    setShowBatchActions(false);
+    switch (filterType) {
+      case 'high':
+        setSearchQuery('');
+        setSortType('priority');
+        break;
+      case 'overdue':
+        setSearchQuery('');
+        setSortType('dueDate');
+        break;
+      case 'today':
+        const todayStr = new Date().toISOString().split('T')[0];
+        setSearchQuery('');
+        setSortType('dueDate');
+        break;
+      case 'week':
+        setSearchQuery('');
+        setSortType('dueDate');
+        break;
+    }
+  }, []);
+
   const startEdit = useCallback((task: Task) => {
     setEditingId(task.id);
     setEditTitle(task.title);
@@ -252,203 +291,182 @@ const Tasks: React.FC = () => {
   );
 
   return (
-    <div className="p-4 md:p-8 max-w-4xl mx-auto min-h-screen bg-bg-secondary">
+    <div className="p-3 md:p-6 min-h-screen bg-bg-secondary">
+      <div className="max-w-6xl mx-auto space-y-4">
       {/* 页面头部 */}
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="page-header">
-        <div className="page-header-icon">
-          <ListTodo className="w-5 h-5 text-white" />
+      <PageHeader className="mb-4">
+        <div className="page-header">
+          <div className="page-header-icon">
+            <ListTodo className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="page-header-title">任务管理</h1>
+            <p className="page-header-subtitle">高效管理你的日常任务</p>
+          </div>
         </div>
-        <div>
-          <h1 className="page-header-title">任务管理</h1>
-          <p className="page-header-subtitle">高效管理你的日常任务</p>
-        </div>
-      </motion.div>
+      </PageHeader>
 
-      {/* 统计卡片 */}
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-6">
-        <div className="stat-card group hover:border-primary/30 cursor-pointer transition-all" onClick={() => setFilter('all')}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="stat-card-icon bg-primary/10 dark:bg-primary/20">
-              <Flag className="w-4 h-4 text-primary dark:text-primary-400" />
-            </div>
-            <TrendingUp className="w-4 h-4 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
-          <p className="stat-card-value text-text-primary">{stats.total}</p>
-          <p className="stat-card-label">总任务</p>
-        </div>
-        <div className="stat-card group hover:border-success/30 cursor-pointer transition-all" onClick={() => setFilter('completed')}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="stat-card-icon bg-success/10 dark:bg-success/20">
-              <CheckCheck className="w-4 h-4 text-success dark:text-success-400" />
-            </div>
-          </div>
-          <p className="stat-card-value text-success dark:text-success-400">{stats.completed}</p>
-          <p className="stat-card-label">已完成</p>
-        </div>
-        <div className="stat-card group hover:border-warning/30 cursor-pointer transition-all" onClick={() => setFilter('pending')}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="stat-card-icon bg-warning/10 dark:bg-warning/20">
-              <AlertCircle className="w-4 h-4 text-warning dark:text-warning-400" />
-            </div>
-          </div>
-          <p className="stat-card-value text-warning dark:text-warning-400">{stats.pending}</p>
-          <p className="stat-card-label">待办</p>
-        </div>
-        <div className="stat-card group hover:border-error/30 cursor-pointer transition-all">
-          <div className="flex items-center justify-between mb-2">
-            <div className="stat-card-icon bg-error/10 dark:bg-error/20">
-              <AlertTriangle className="w-4 h-4 text-error dark:text-error-400" />
-            </div>
-          </div>
-          <p className="stat-card-value text-error dark:text-error-400">{stats.overdue}</p>
-          <p className="stat-card-label">逾期</p>
-        </div>
-      </motion.div>
+      {/* 统一的任务概览组件 */}
+      <TaskOverview 
+        stats={stats} 
+        onFilterChange={setFilter}
+      />
 
-      {batchFeedback && (
-        <div className="mb-4 rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
-          {batchFeedback}
-        </div>
-      )}
-
-      {(loadError || feedback) && (
-        <div className="mb-4 rounded-lg border border-error/20 bg-error/10 px-4 py-3 text-sm text-error">
-          {feedback || loadError}
-        </div>
-      )}
-
-      {/* 添加任务区 */}
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="card mb-6">
-        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center">
-          <input
-            type="text"
-            value={newTask}
-            onChange={(e) => setNewTask(e.target.value.slice(0, MAX_TITLE_LENGTH))}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                addTask();
-              }
-            }}
-            placeholder="输入任务内容，按 Enter 添加..."
-            className="input flex-1"
-          />
-          <div className="flex items-center gap-2 flex-wrap">
-            <PriorityButtonGroup selected={newTaskPriority} onChange={setNewTaskPriority} />
-            <input
-              type="date"
-              value={newTaskDueDate}
-              min={new Date().toISOString().split('T')[0]}
-              onChange={(e) => setNewTaskDueDate(e.target.value)}
-              className="input w-auto px-3 py-2 text-sm"
-              title="截止日期"
-            />
-            <Button variant="primary" onClick={addTask} icon={<Plus size={16} />}>添加</Button>
-          </div>
-        </div>
-        {newTask.length > 0 && (
-          <div className="flex items-center justify-between mt-2 text-xs text-text-muted">
-            <span>{stats.pending} 个待办任务</span>
-            <span>{newTask.length}/{MAX_TITLE_LENGTH}</span>
-          </div>
-        )}
-      </motion.div>
-
-      {/* 筛选和排序 */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          {selectedIds.size > 0 ? (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30">
-              <span className="text-sm text-primary font-medium">已选 {selectedIds.size} 项</span>
-              <Button variant="success" size="sm" onClick={() => handleBatchToggle(true)} icon={<CheckCircle size={14} />}>完成</Button>
-              <Button variant="ghost" size="sm" onClick={() => handleBatchToggle(false)} icon={<Circle size={14} />}>取消</Button>
-              <Button variant="danger" size="sm" onClick={() => setShowDeleteConfirm('batch')} icon={<Trash2 size={14} />}>删除</Button>
-              <button onClick={() => setSelectedIds(new Set())} className="text-sm text-text-muted hover:text-text-secondary ml-1">取消</button>
+      {/* 主内容区 - 两栏布局 */}
+      <PageContent delay={0.15} className="grid-content-2-1 gap-5">
+        {/* 任务列表区 */}
+        <div className="lg:col-span-2 space-y-3">
+          {/* 错误提示 */}
+          {(loadError || feedback) && (
+            <div className="rounded-lg border border-error/20 bg-error/10 px-4 py-3 text-sm text-error">
+              {feedback || loadError}
             </div>
-          ) : (
-            <>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="搜索任务..."
-                  className="input pl-9 pr-8 w-48 md:w-56"
-                />
-                {searchQuery && (
-                  <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-secondary">
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-              {sortedTasks.length > 0 && (
-                <Button variant={showBatchActions ? 'primary' : 'ghost'} size="sm" onClick={() => setShowBatchActions(!showBatchActions)} icon={<CheckSquare size={14} />}>批量</Button>
-              )}
-            </>
           )}
-        </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative">
-            <button onClick={() => setShowSortMenu(!showSortMenu)} className="btn btn-secondary btn-sm">
-              <SortAsc size={14} />
-              排序
-            </button>
-            <AnimatePresence>
-              {showSortMenu && (
-                <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute right-0 top-full mt-1 bg-bg-card border border-border-primary rounded-lg shadow-lg py-1 z-10 min-w-[120px]">
-                  {sortOptions.map(opt => (
-                    <button key={opt.key} onClick={() => { setSortType(opt.key); setShowSortMenu(false); }} className={`w-full px-3 py-2 text-sm text-left transition-colors ${sortType === opt.key ? 'text-primary bg-primary/10' : 'text-text-secondary hover:bg-bg-tertiary'}`}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
+          {batchFeedback && (
+            <div className="rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
+              {batchFeedback}
+            </div>
+          )}
+
+          {/* 添加任务区 */}
+          <div className="card-static">
+            <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-center">
+              <input
+                type="text"
+                value={newTask}
+                onChange={(e) => setNewTask(e.target.value.slice(0, MAX_TITLE_LENGTH))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    addTask();
+                  }
+                }}
+                placeholder="输入任务内容，按 Enter 添加..."
+                className="input flex-1"
+              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <PriorityButtonGroup selected={newTaskPriority} onChange={setNewTaskPriority} />
+                <input
+                  type="date"
+                  value={newTaskDueDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setNewTaskDueDate(e.target.value)}
+                  className="input w-auto px-3 py-2 text-sm"
+                  title="截止日期"
+                />
+                <Button variant="primary" onClick={addTask} icon={<Plus size={16} />}>添加</Button>
+              </div>
+            </div>
+            {newTask.length > 0 && (
+              <div className="flex items-center justify-between mt-2 text-xs text-text-muted">
+                <span>{stats.pending} 个待办任务</span>
+                <span>{newTask.length}/{MAX_TITLE_LENGTH}</span>
+              </div>
+            )}
           </div>
 
-          {filterButtons.map(btn => (
-            <button key={btn.key} onClick={() => setFilter(btn.key)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${filter === btn.key ? 'bg-primary text-white shadow-sm' : 'btn btn-secondary'}`}>
-              <btn.icon size={14} />
-              {btn.label}
-              <span className={`text-xs ${filter === btn.key ? 'text-white/70' : 'text-text-muted'}`}>{getFilterCount(btn.key)}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+          {/* 筛选和排序 */}
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {selectedIds.size > 0 ? (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/10 border border-primary/30">
+                  <span className="text-sm text-primary font-medium">已选 {selectedIds.size} 项</span>
+                  <Button variant="success" size="sm" onClick={() => handleBatchToggle(true)} icon={<CheckCircle size={14} />}>完成</Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleBatchToggle(false)} icon={<Circle size={14} />}>取消</Button>
+                  <Button variant="danger" size="sm" onClick={() => setShowDeleteConfirm('batch')} icon={<Trash2 size={14} />}>删除</Button>
+                  <button onClick={() => setSelectedIds(new Set())} className="text-sm text-text-muted hover:text-text-secondary ml-1">取消</button>
+                </div>
+              ) : (
+                <>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="搜索任务..."
+                      className="input pl-9 pr-8 w-44 md:w-52"
+                    />
+                    {searchQuery && (
+                      <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-text-muted hover:text-text-secondary">
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                  {sortedTasks.length > 0 && (
+                    <Button variant={showBatchActions ? 'primary' : 'ghost'} size="sm" onClick={() => setShowBatchActions(!showBatchActions)} icon={<CheckSquare size={14} />}>批量</Button>
+                  )}
+                </>
+              )}
+            </div>
 
-      {/* 任务列表 */}
-      <div className="space-y-2">
-        {sortedTasks.length === 0 ? (
-          tasks.length === 0 ? (
-            <EmptyState icon={ListTodo} title="还没有任务" description="在上方输入框添加第一个任务" />
-          ) : (
-            <EmptyState icon={filter === 'completed' ? CheckCheck : AlertCircle} title={filter === 'completed' ? '还没有已完成的任务' : searchQuery ? '未找到匹配的任务' : '没有待办任务'} description={filter === 'completed' ? '完成任务后会显示在这里' : searchQuery ? '尝试其他关键词' : '所有任务都已完成'} />
-          )
-        ) : sortedTasks.length > 20 ? (
-          <>
-            {showBatchActions && (
-              <div className="p-3 flex items-center gap-3 bg-bg-secondary rounded-lg border border-border-primary mb-2">
-                <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-primary" />
-                <span className="text-sm text-text-muted">全选 ({sortedTasks.length} 条任务)</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
+                <Button variant="secondary" size="sm" onClick={() => setShowSortMenu(!showSortMenu)} icon={<SortAsc size={14} />}>
+                  排序
+                </Button>
+                <AnimatePresence>
+                  {showSortMenu && (
+                    <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} className="absolute right-0 top-full mt-1 bg-bg-card border border-border-primary rounded-lg shadow-lg py-1 z-10 min-w-[120px]">
+                      {sortOptions.map(opt => (
+                        <button key={opt.key} onClick={() => { setSortType(opt.key); setShowSortMenu(false); }} className={`w-full px-3 py-2 text-sm text-left transition-colors ${sortType === opt.key ? 'text-primary bg-primary/10' : 'text-text-secondary hover:bg-bg-tertiary'}`}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
-            )}
-            <VirtualList<Task> items={sortedTasks} itemHeight={72} containerHeight={480} renderItem={renderTaskItem} />
-          </>
-        ) : (
-          <>
-            {showBatchActions && (
-              <div className="p-3 flex items-center gap-3 bg-bg-secondary rounded-lg border border-border-primary">
-                <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-primary" />
-                <span className="text-sm text-text-muted">全选</span>
-              </div>
-            )}
-            <AnimatePresence mode="popLayout">{sortedTasks.map((task, index) => renderTaskItem(task, index))}</AnimatePresence>
-          </>
-        )}
-      </div>
+
+              {filterButtons.map(btn => (
+                <button key={btn.key} onClick={() => setFilter(btn.key)} className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${filter === btn.key ? 'bg-primary text-white shadow-sm' : 'bg-bg-card border border-border-primary text-text-primary hover:bg-bg-tertiary'}`}>
+                  <btn.icon size={14} />
+                  {btn.label}
+                  <span className={`text-xs ${filter === btn.key ? 'text-white/70' : 'text-text-muted'}`}>{getFilterCount(btn.key)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 任务列表 */}
+          <div className="rounded-lg shadow-lg border bg-bg-card border-border-primary/80">
+            <div className="divide-y divide-border-primary min-h-[200px]">
+              {sortedTasks.length === 0 ? (
+                tasks.length === 0 ? (
+                  <EmptyState icon={ListTodo} title="还没有任务" description="在上方输入框添加第一个任务" />
+                ) : (
+                  <EmptyState icon={filter === 'completed' ? CheckCheck : AlertCircle} title={filter === 'completed' ? '还没有已完成的任务' : searchQuery ? '未找到匹配的任务' : '没有待办任务'} description={filter === 'completed' ? '完成任务后会显示在这里' : searchQuery ? '尝试其他关键词' : '所有任务都已完成'} />
+                )
+              ) : sortedTasks.length > 20 ? (
+                <>
+                  {showBatchActions && (
+                    <div className="p-2 flex items-center gap-3 bg-bg-secondary border-b border-border-primary sticky top-0 z-10">
+                      <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-primary" />
+                      <span className="text-sm text-text-muted">全选 ({sortedTasks.length} 条任务)</span>
+                    </div>
+                  )}
+                  <VirtualList<Task> items={sortedTasks} itemHeight={72} containerHeight={480} renderItem={renderTaskItem} />
+                </>
+              ) : (
+                <>
+                  {showBatchActions && (
+                    <div className="p-2 flex items-center gap-3 bg-bg-secondary border-b border-border-primary">
+                      <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 rounded border-border-primary accent-primary" />
+                      <span className="text-sm text-text-muted">全选</span>
+                    </div>
+                  )}
+                  <AnimatePresence mode="popLayout">{sortedTasks.map((task, index) => renderTaskItem(task, index))}</AnimatePresence>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* 侧边栏 */}
+        <TaskSidebar stats={stats} onQuickFilter={handleQuickFilter} />
+      </PageContent>
 
       {/* 删除确认弹窗 */}
       <AnimatePresence>
@@ -470,6 +488,7 @@ const Tasks: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 };

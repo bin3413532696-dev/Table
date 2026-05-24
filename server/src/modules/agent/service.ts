@@ -151,6 +151,10 @@ function buildEmptyRunState(run: ReturnType<typeof toAgentRunDto>, runId: string
     error: null,
     assistantTextChunks: [],
     timeline: [],
+    // 新增：RAG 累积字段
+    accumulatedSearchResults: [],
+    citedChunkIds: [],
+    searchMaxScore: 0,
   };
 }
 

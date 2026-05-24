@@ -35,6 +35,7 @@ import {
 } from '../../lib/agentApi';
 import { registeredToolNames } from '../../agent/toolMetadata';
 import { MESSAGES } from '../../core/messages';
+import { PageHeader, PageContent, defaultEasing } from '../../components/ui/PageAnimations';
 
 const settingsTabs = [
   { id: 'profile', label: '个人资料', icon: User, desc: '管理您的个人信息' },
@@ -181,7 +182,6 @@ function ProfileSettings() {
     try {
       await switchAuthSession(normalized);
       setCurrentUserId(normalized);
-      // 清空 Provider 缓存，防止旧用户数据泄露
       clearProviderCache();
       await reload();
       await refreshUserScopedData();
@@ -204,7 +204,6 @@ function ProfileSettings() {
       await clearAuthSession();
       setDevUserId(DEFAULT_USER_ID);
       setCurrentUserId(DEFAULT_USER_ID);
-      // 清空 Provider 缓存，防止旧用户数据泄露
       clearProviderCache();
       await reload();
       await refreshUserScopedData();
@@ -256,26 +255,73 @@ function ProfileSettings() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* 头像区域 */}
-      <div className="flex items-center gap-4 p-4 rounded-xl bg-bg-secondary border border-border-primary">
-        <div className="w-16 h-16 bg-gradient-to-br from-primary to-primary-600 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg">
-          {profile.name.charAt(0)}
-        </div>
-        <div>
-          <h3 className="font-semibold text-text-primary text-lg">{profile.name}</h3>
-          <p className="text-sm text-text-muted">{auth?.isDefaultUser ? '默认本地用户' : '认证用户'}</p>
+    <div className="space-y-4">
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center text-white text-xl font-bold">
+            {profile.name.charAt(0)}
+          </div>
+          <div>
+            <h4 className="font-medium text-text-primary">{profile.name}</h4>
+            <p className="text-sm text-text-muted">{auth?.isDefaultUser ? '默认本地用户' : '认证用户'}</p>
+          </div>
         </div>
       </div>
 
-      <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 space-y-4">
-        <div>
-          <h4 className="font-medium text-text-primary">开发期用户切换</h4>
-          <p className="text-sm mt-1 text-text-secondary">用于验证多用户隔离链路。现在需要先创建用户，再切换到已有用户。</p>
-        </div>
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
+          <User className="w-4 h-4" />
+          个人信息
+        </h4>
         <div className="space-y-3">
           <div>
-            <label className="block text-sm font-medium mb-2 text-text-secondary">用户 ID</label>
+            <label className="block text-sm font-medium mb-1.5 text-text-secondary">昵称</label>
+            <input
+              type="text"
+              value={profile.name}
+              onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+              maxLength={50}
+              className="input"
+            />
+            <p className="text-xs text-text-muted mt-1 text-right">{profile.name.length}/50</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1.5 text-text-secondary">邮箱</label>
+            <input
+              type="email"
+              value={profile.email}
+              onChange={(e) => { setProfile({ ...profile, email: e.target.value }); setEmailError(''); }}
+              placeholder="your@email.com"
+              className={`input ${emailError ? 'border-error focus:ring-error/20 focus:border-error' : ''}`}
+            />
+            {emailError && <p className="text-error text-xs mt-1">{emailError}</p>}
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1.5 text-text-secondary">个人简介</label>
+            <textarea
+              value={profile.bio}
+              onChange={(e) => setProfile({ ...profile, bio: e.target.value.slice(0, 200) })}
+              placeholder="介绍一下自己..."
+              rows={3}
+              className="input resize-none"
+            />
+            <p className="text-xs text-text-muted mt-1 text-right">{profile.bio.length}/200</p>
+          </div>
+          <Button variant="primary" onClick={() => void handleSave()} icon={saved ? <Check className="w-4 h-4" /> : undefined}>
+            {saved ? '已保存' : '保存设置'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
+          <Database className="w-4 h-4" />
+          开发期用户切换
+        </h4>
+        <p className="text-sm text-text-muted mb-3">用于验证多用户隔离链路。现在需要先创建用户，再切换到已有用户。</p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium mb-1.5 text-text-secondary">用户 ID</label>
             <input
               type="text"
               value={devUserId}
@@ -290,7 +336,7 @@ function ProfileSettings() {
             {userSwitchError && <p className="text-error text-xs mt-1">{userSwitchError}</p>}
           </div>
           <div>
-            <label className="block text-sm font-medium mb-2 text-text-secondary">已有用户</label>
+            <label className="block text-sm font-medium mb-1.5 text-text-secondary">已有用户</label>
             <select
               value={devUserId}
               onChange={(e) => {
@@ -311,7 +357,7 @@ function ProfileSettings() {
               {loadingUsers ? '正在读取用户列表...' : `当前可选 ${availableUsers.length} 个活动用户`}
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-2">
             <Button variant="primary" onClick={() => void handleSwitchUser(devUserId)} disabled={switchingUser}>
               {switchingUser ? '切换中...' : userSwitchSaved ? '已切换' : '切换用户'}
             </Button>
@@ -326,14 +372,15 @@ function ProfileSettings() {
         </div>
       </div>
 
-      <div className="p-4 rounded-xl bg-bg-secondary border border-border-primary space-y-4">
-        <div>
-          <h4 className="font-medium text-text-primary">创建开发期用户</h4>
-          <p className="text-sm mt-1 text-text-secondary">显式创建用户及其基线数据，避免再通过任意 UUID 隐式建号。</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
+          <Plus className="w-4 h-4" />
+          创建开发期用户
+        </h4>
+        <p className="text-sm text-text-muted mb-3">显式创建用户及其基线数据，避免再通过任意 UUID 隐式建号。</p>
+        <div className="grid-form-2 mb-3">
           <div>
-            <label className="block text-sm font-medium mb-2 text-text-secondary">用户名称</label>
+            <label className="block text-sm font-medium mb-1.5 text-text-secondary">用户名称</label>
             <input
               type="text"
               value={newUser.displayName}
@@ -346,7 +393,7 @@ function ProfileSettings() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-2 text-text-secondary">邮箱</label>
+            <label className="block text-sm font-medium mb-1.5 text-text-secondary">邮箱</label>
             <input
               type="email"
               value={newUser.email}
@@ -359,8 +406,8 @@ function ProfileSettings() {
             />
           </div>
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-2 text-text-secondary">简介</label>
+        <div className="mb-3">
+          <label className="block text-sm font-medium mb-1.5 text-text-secondary">简介</label>
           <textarea
             value={newUser.bio}
             onChange={(e) => {
@@ -372,54 +419,11 @@ function ProfileSettings() {
             placeholder="可选"
           />
         </div>
-        {createUserError && <p className="text-error text-xs">{createUserError}</p>}
-        <div className="flex flex-wrap gap-3">
-          <Button variant="primary" onClick={() => void handleCreateUser()} disabled={creatingUser}>
-            {creatingUser ? '创建中...' : createUserSaved ? '已创建' : '创建用户'}
-          </Button>
-        </div>
+        {createUserError && <p className="text-error text-xs mb-2">{createUserError}</p>}
+        <Button variant="primary" onClick={() => void handleCreateUser()} disabled={creatingUser}>
+          {creatingUser ? '创建中...' : createUserSaved ? '已创建' : '创建用户'}
+        </Button>
       </div>
-
-      {/* 表单区域 */}
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-2 text-text-secondary">昵称</label>
-          <input
-            type="text"
-            value={profile.name}
-            onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-            maxLength={50}
-            className="input"
-          />
-          <p className="text-xs text-text-muted mt-1 text-right">{profile.name.length}/50</p>
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-2 text-text-secondary">邮箱</label>
-          <input
-            type="email"
-            value={profile.email}
-            onChange={(e) => { setProfile({ ...profile, email: e.target.value }); setEmailError(''); }}
-            placeholder="your@email.com"
-            className={`input ${emailError ? 'border-error focus:ring-error/20 focus:border-error' : ''}`}
-          />
-          {emailError && <p className="text-error text-xs mt-1">{emailError}</p>}
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-2 text-text-secondary">个人简介</label>
-          <textarea
-            value={profile.bio}
-            onChange={(e) => setProfile({ ...profile, bio: e.target.value.slice(0, 200) })}
-            placeholder="介绍一下自己..."
-            rows={3}
-            className="input resize-none"
-          />
-          <p className="text-xs text-text-muted mt-1 text-right">{profile.bio.length}/200</p>
-        </div>
-      </div>
-
-      <Button variant="primary" onClick={() => void handleSave()} icon={saved ? <Check className="w-4 h-4" /> : undefined}>
-        {saved ? '已保存' : '保存设置'}
-      </Button>
     </div>
   );
 }
@@ -464,21 +468,19 @@ function SecuritySettings() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* 安全提示 */}
-      <div className="p-4 rounded-xl bg-warning/10 border border-warning/20">
+    <div className="space-y-4">
+      <div className="p-4 rounded-lg bg-warning/10 border border-warning/20">
         <div className="flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-warning shrink-0 mt-0.5" />
+          <AlertCircle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
           <div>
             <h4 className="font-medium text-text-primary">本地设置安全</h4>
-            <p className="text-sm mt-1 text-text-secondary">业务数据与知识库以服务端为准，当前浏览器仍会保存主题、PIN 等本地设置。清除浏览器数据会丢失这些设置，建议按需导出备份。</p>
+            <p className="text-sm mt-1 text-text-muted">业务数据与知识库以服务端为准，当前浏览器仍会保存主题、PIN 等本地设置。清除浏览器数据会丢失这些设置，建议按需导出备份。</p>
           </div>
         </div>
       </div>
 
-      {/* 访问密码 */}
-      <div className="p-4 rounded-xl bg-bg-secondary border border-border-primary">
-        <h4 className="font-medium text-text-primary mb-4 flex items-center gap-2">
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
           <Lock className="w-4 h-4" />
           访问密码
         </h4>
@@ -516,9 +518,8 @@ function SecuritySettings() {
         )}
       </div>
 
-      {/* 主题设置 */}
-      <div className="p-4 rounded-xl bg-bg-secondary border border-border-primary">
-        <h4 className="font-medium text-text-primary mb-4 flex items-center gap-2">
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
           {theme === 'dark' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
           外观主题
         </h4>
@@ -648,122 +649,136 @@ function DataManager() {
   };
 
   return (
-    <div className="space-y-5">
-      {/* 数据统计 */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 p-4 rounded-xl bg-bg-secondary border border-border-primary">
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-4 rounded-lg bg-bg-secondary border border-border-primary">
         <div className="text-center">
-          <p className="text-2xl font-bold text-text-primary">{stats.finance}</p>
+          <p className="text-xl font-semibold text-text-primary">{stats.finance}</p>
           <p className="text-xs text-text-muted">费用记录</p>
         </div>
         <div className="text-center">
-          <p className="text-2xl font-bold text-text-primary">{stats.tasks}</p>
+          <p className="text-xl font-semibold text-text-primary">{stats.tasks}</p>
           <p className="text-xs text-text-muted">任务</p>
         </div>
         <div className="text-center">
-          <p className="text-2xl font-bold text-text-primary">{stats.knowledgeNotes}</p>
+          <p className="text-xl font-semibold text-text-primary">{stats.knowledgeNotes}</p>
           <p className="text-xs text-text-muted">知识笔记</p>
         </div>
         <div className="text-center">
-          <p className="text-2xl font-bold text-text-primary">{stats.knowledgePresetTags}</p>
+          <p className="text-xl font-semibold text-text-primary">{stats.knowledgePresetTags}</p>
           <p className="text-xs text-text-muted">预设标签</p>
         </div>
         <div className="text-center">
-          <p className="text-2xl font-bold text-text-primary">{formatSize(stats.totalSize)}</p>
+          <p className="text-xl font-semibold text-text-primary">{formatSize(stats.totalSize)}</p>
           <p className="text-xs text-text-muted">数据大小</p>
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="text-sm font-semibold text-text-primary">业务数据（PostgreSQL）</div>
-        <button onClick={handleExportBusiness} className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors text-left group">
-          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-            <Download className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <div className="text-sm font-medium text-text-primary">导出业务数据</div>
-            <div className="text-xs text-text-muted">导出服务端任务与财务快照</div>
-          </div>
-        </button>
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
+          <Database className="w-4 h-4" />
+          业务数据（PostgreSQL）
+        </h4>
+        <div className="space-y-2">
+          <button onClick={handleExportBusiness} className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-bg-tertiary border border-border-primary transition-colors text-left group">
+            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+              <Download className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">导出业务数据</div>
+              <div className="text-xs text-text-muted">导出服务端任务与财务快照</div>
+            </div>
+          </button>
 
-        <label className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors cursor-pointer text-left group">
-          <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
-            <Upload className="w-5 h-5 text-success" />
-          </div>
-          <div>
-            <div className="text-sm font-medium text-text-primary">导入业务数据</div>
-            <div className="text-xs text-text-muted">覆盖 PostgreSQL 中的任务与财务测试数据</div>
-          </div>
-          <input
-            type="file"
-            accept=".json"
-            onChange={createImportHandler(dataManager.importBusinessData, MESSAGES.settings.importBusinessSuccess, {
-              refreshStatsAfterSuccess: true,
-            })}
-            className="hidden"
-          />
-        </label>
+          <label className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-bg-tertiary border border-border-primary transition-colors cursor-pointer text-left group">
+            <div className="w-9 h-9 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
+              <Upload className="w-4 h-4 text-success" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">导入业务数据</div>
+              <div className="text-xs text-text-muted">覆盖 PostgreSQL 中的任务与财务测试数据</div>
+            </div>
+            <input
+              type="file"
+              accept=".json"
+              onChange={createImportHandler(dataManager.importBusinessData, MESSAGES.settings.importBusinessSuccess, {
+                refreshStatsAfterSuccess: true,
+              })}
+              className="hidden"
+            />
+          </label>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="text-sm font-semibold text-text-primary">知识库数据（服务端权威）</div>
-        <button onClick={handleExportKnowledge} className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors text-left group">
-          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-            <Download className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <div className="text-sm font-medium text-text-primary">导出知识库</div>
-            <div className="text-xs text-text-muted">导出服务端知识笔记与预设标签概览</div>
-          </div>
-        </button>
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
+          <HardDrive className="w-4 h-4" />
+          知识库数据（服务端权威）
+        </h4>
+        <div className="space-y-2">
+          <button onClick={handleExportKnowledge} className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-bg-tertiary border border-border-primary transition-colors text-left group">
+            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+              <Download className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">导出知识库</div>
+              <div className="text-xs text-text-muted">导出服务端知识笔记与预设标签概览</div>
+            </div>
+          </button>
 
-        <label className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors cursor-pointer text-left group">
-          <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
-            <Upload className="w-5 h-5 text-success" />
-          </div>
-          <div>
-            <div className="text-sm font-medium text-text-primary">导入知识库</div>
-            <div className="text-xs text-text-muted">覆盖当前知识库并同步到服务端知识库</div>
-          </div>
-          <input
-            type="file"
-            accept=".json"
-            onChange={createImportHandler(dataManager.importKnowledgeData, MESSAGES.settings.importKnowledgeSuccess, {
-              refreshStatsAfterSuccess: true,
-            })}
-            className="hidden"
-          />
-        </label>
+          <label className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-bg-tertiary border border-border-primary transition-colors cursor-pointer text-left group">
+            <div className="w-9 h-9 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
+              <Upload className="w-4 h-4 text-success" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">导入知识库</div>
+              <div className="text-xs text-text-muted">覆盖当前知识库并同步到服务端知识库</div>
+            </div>
+            <input
+              type="file"
+              accept=".json"
+              onChange={createImportHandler(dataManager.importKnowledgeData, MESSAGES.settings.importKnowledgeSuccess, {
+                refreshStatsAfterSuccess: true,
+              })}
+              className="hidden"
+            />
+          </label>
+        </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="text-sm font-semibold text-text-primary">本地设置（浏览器缓存）</div>
-        <button onClick={handleExportLocalSettings} className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors text-left group">
-          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-            <Download className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <div className="text-sm font-medium text-text-primary">导出本地设置</div>
-            <div className="text-xs text-text-muted">导出个人资料、主题、通知和 PIN 缓存</div>
-          </div>
-        </button>
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+        <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
+          <SettingsIcon className="w-4 h-4" />
+          本地设置（浏览器缓存）
+        </h4>
+        <div className="space-y-2">
+          <button onClick={handleExportLocalSettings} className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-bg-tertiary border border-border-primary transition-colors text-left group">
+            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+              <Download className="w-4 h-4 text-primary" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">导出本地设置</div>
+              <div className="text-xs text-text-muted">导出个人资料、主题、通知和 PIN 缓存</div>
+            </div>
+          </button>
 
-        <label className="w-full flex items-center gap-3 p-4 rounded-xl hover:bg-bg-secondary border border-border-primary transition-colors cursor-pointer text-left group">
-          <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
-            <Upload className="w-5 h-5 text-success" />
-          </div>
-          <div>
-            <div className="text-sm font-medium text-text-primary">导入本地设置</div>
-            <div className="text-xs text-text-muted">仅恢复当前浏览器的本地设置项</div>
-          </div>
-          <input
-            type="file"
-            accept=".json"
-            onChange={createImportHandler(dataManager.importLocalSettings, MESSAGES.settings.importSettingsSuccess, {
-              reloadAfterSuccess: true,
-            })}
-            className="hidden"
-          />
-        </label>
+          <label className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-bg-tertiary border border-border-primary transition-colors cursor-pointer text-left group">
+            <div className="w-9 h-9 rounded-lg bg-success/10 flex items-center justify-center group-hover:bg-success/20 transition-colors">
+              <Upload className="w-4 h-4 text-success" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">导入本地设置</div>
+              <div className="text-xs text-text-muted">仅恢复当前浏览器的本地设置项</div>
+            </div>
+            <input
+              type="file"
+              accept=".json"
+              onChange={createImportHandler(dataManager.importLocalSettings, MESSAGES.settings.importSettingsSuccess, {
+                reloadAfterSuccess: true,
+              })}
+              className="hidden"
+            />
+          </label>
+        </div>
       </div>
 
       <AnimatePresence>
@@ -775,41 +790,60 @@ function DataManager() {
         )}
       </AnimatePresence>
 
-      {/* 危险操作 */}
-      <div className="pt-4 border-t border-border-primary space-y-2">
-        <button onClick={() => { setClearMode('all'); setShowClearConfirm(true); }} className="text-sm text-text-muted hover:text-error transition-colors flex items-center gap-2">
+      <div className="p-4 rounded-lg bg-bg-secondary border border-error/20">
+        <h4 className="font-medium text-error mb-3 flex items-center gap-2">
           <Trash2 className="w-4 h-4" />
-          重置业务数据并清空本地缓存
-        </button>
-        <button onClick={() => { setClearMode('knowledge'); setShowClearConfirm(true); }} className="text-sm text-text-muted hover:text-error transition-colors flex items-center gap-2">
-          <Trash2 className="w-4 h-4" />
-          清空知识库
-        </button>
-        <button onClick={() => { setClearMode('local'); setShowClearConfirm(true); }} className="text-sm text-text-muted hover:text-error transition-colors flex items-center gap-2">
-          <Trash2 className="w-4 h-4" />
-          清空本地设置
-        </button>
+          危险操作
+        </h4>
+        <div className="space-y-2">
+          <button onClick={() => { setClearMode('all'); setShowClearConfirm(true); }} className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-error/5 border border-border-primary transition-colors text-left group">
+            <div className="w-9 h-9 rounded-lg bg-error/10 flex items-center justify-center group-hover:bg-error/20 transition-colors">
+              <Trash2 className="w-4 h-4 text-error" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">重置业务数据并清空本地缓存</div>
+              <div className="text-xs text-text-muted">清空所有业务数据与本地缓存</div>
+            </div>
+          </button>
+          <button onClick={() => { setClearMode('knowledge'); setShowClearConfirm(true); }} className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-error/5 border border-border-primary transition-colors text-left group">
+            <div className="w-9 h-9 rounded-lg bg-error/10 flex items-center justify-center group-hover:bg-error/20 transition-colors">
+              <Trash2 className="w-4 h-4 text-error" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">清空知识库</div>
+              <div className="text-xs text-text-muted">清空服务端知识库数据</div>
+            </div>
+          </button>
+          <button onClick={() => { setClearMode('local'); setShowClearConfirm(true); }} className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-error/5 border border-border-primary transition-colors text-left group">
+            <div className="w-9 h-9 rounded-lg bg-error/10 flex items-center justify-center group-hover:bg-error/20 transition-colors">
+              <Trash2 className="w-4 h-4 text-error" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">清空本地设置</div>
+              <div className="text-xs text-text-muted">清空浏览器中的本地设置缓存</div>
+            </div>
+          </button>
+        </div>
       </div>
 
-      {/* 清空确认弹窗 */}
       <AnimatePresence>
         {showClearConfirm && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowClearConfirm(false)}>
             <motion.div initial={{ scale: 0.95 }} animate={{ scale: 1 }} exit={{ scale: 0.95 }} onClick={e => e.stopPropagation()} className="card w-full max-w-sm">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-error/10 flex items-center justify-center">
-                  <AlertCircle className="w-5 h-5 text-error" />
+                <div className="w-9 h-9 rounded-full bg-error/10 flex items-center justify-center">
+                  <AlertCircle className="w-4 h-4 text-error" />
                 </div>
-                <h3 className="text-lg font-semibold text-text-primary">确认清空</h3>
+                <h3 className="font-semibold text-text-primary">确认清空</h3>
               </div>
-              <p className="text-text-secondary mb-5 text-sm">
+              <p className="text-text-muted mb-4 text-sm">
                 {clearMode === 'all' && '此操作会重置 PostgreSQL 中的任务与财务测试数据，清空服务端知识库，并清空当前浏览器的设置缓存。'}
                 {clearMode === 'knowledge' && '此操作会清空当前知识库，并同步覆盖服务端知识数据。'}
                 {clearMode === 'local' && '此操作会清空当前浏览器中的个人资料、主题、通知和 PIN 设置。'}
               </p>
               <div className="flex gap-3">
-                <button onClick={() => setShowClearConfirm(false)} className="btn btn-secondary btn-md flex-1">取消</button>
-                <button onClick={handleClear} className="btn btn-danger btn-md flex-1">确认清空</button>
+                <Button variant="secondary" className="flex-1" onClick={() => setShowClearConfirm(false)}>取消</Button>
+                <Button variant="danger" className="flex-1" onClick={handleClear}>确认清空</Button>
               </div>
             </motion.div>
           </motion.div>
@@ -835,6 +869,7 @@ function ApiConfigSettings() {
     baseUrl: string;
     apiKey: string;
     model: string;
+    embeddingModel: string;
     headers: string;
   }>({
     name: '',
@@ -842,11 +877,11 @@ function ApiConfigSettings() {
     baseUrl: '',
     apiKey: '',
     model: '',
+    embeddingModel: '',
     headers: '',
   });
   const [editingApiKeyPreview, setEditingApiKeyPreview] = useState('');
 
-  // 人格配置状态
   const [persona, setPersona] = useState<AgentPersonaDto>({ systemPrompt: '' });
   const [loadingPersona, setLoadingPersona] = useState(false);
   const [savingPersona, setSavingPersona] = useState(false);
@@ -958,7 +993,6 @@ function ApiConfigSettings() {
     };
   }, []);
 
-  // 加载人格配置
   useEffect(() => {
     let disposed = false;
 
@@ -985,7 +1019,6 @@ function ApiConfigSettings() {
     };
   }, []);
 
-  // 预设模板
   const personaTemplates = [
     {
       name: '默认',
@@ -1033,11 +1066,6 @@ function ApiConfigSettings() {
     setPersona({ systemPrompt: personaTemplates[0].prompt });
   };
 
-  // 清空人格配置，回退到系统默认
-  const handleClearPersona = () => {
-    setPersona({ systemPrompt: '' });
-  };
-
   const handleAdd = () => {
     setEditingProvider(null);
     setEditingApiKeyPreview('');
@@ -1047,6 +1075,7 @@ function ApiConfigSettings() {
       baseUrl: getDefaultBaseUrl('openai'),
       apiKey: '',
       model: defaultModelsByFormat['openai'],
+      embeddingModel: 'text-embedding-3-small',
       headers: '',
     });
     setFetchedModels([]);
@@ -1063,6 +1092,7 @@ function ApiConfigSettings() {
       baseUrl: provider.baseUrl,
       apiKey: '',
       model: provider.model || '',
+      embeddingModel: provider.embeddingModel || '',
       headers: provider.headers ? JSON.stringify(provider.headers, null, 2) : '',
     });
     setFetchedModels([]);
@@ -1125,6 +1155,7 @@ function ApiConfigSettings() {
       hasApiKey: editingProvider?.hasApiKey,
       apiKeyPreview: editingProvider?.apiKeyPreview,
       model: formData.model,
+      embeddingModel: formData.embeddingModel,
       headers,
     };
 
@@ -1147,28 +1178,28 @@ function ApiConfigSettings() {
   const activeProvider = providers.find(p => p.isActive);
 
   return (
-    <div className="space-y-6">
-      <div className="p-4 rounded-xl bg-primary/5 border border-primary/20">
+    <div className="space-y-4">
+      <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
         <div className="flex items-start gap-3">
-          <Globe className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+          <Globe className="w-4 h-4 text-primary shrink-0 mt-0.5" />
           <div>
             <h4 className="font-medium text-text-primary">Provider 配置</h4>
-            <p className="text-sm mt-1 text-text-secondary">配置 AI Provider，激活的 Provider 将被智能体使用。</p>
+            <p className="text-sm mt-1 text-text-muted">配置 AI Provider，激活的 Provider 将被智能体使用。</p>
           </div>
         </div>
       </div>
 
       {providerError && (
-        <div className="p-4 rounded-xl bg-error/10 border border-error/20 text-sm text-error">
+        <div className="p-4 rounded-lg bg-error/10 border border-error/20 text-sm text-error">
           {providerError}
         </div>
       )}
 
       {activeProvider && (
-        <div className="p-4 rounded-xl bg-success/10 border border-success/20">
+        <div className="p-4 rounded-lg bg-success/10 border border-success/20">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-success/20 flex items-center justify-center">
-              <Power className="w-5 h-5 text-success" />
+            <div className="w-9 h-9 rounded-lg bg-success/20 flex items-center justify-center">
+              <Power className="w-4 h-4 text-success" />
             </div>
             <div className="flex-1">
               <div className="flex items-center gap-2">
@@ -1186,11 +1217,18 @@ function ApiConfigSettings() {
               </button>
             </div>
           </div>
-          {activeProvider.model && (
-            <div className="mt-3">
-              <span className="text-xs px-2 py-1 rounded-full bg-bg-secondary text-text-secondary">
-                模型: {activeProvider.model}
-              </span>
+          {(activeProvider.model || activeProvider.embeddingModel) && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {activeProvider.model && (
+                <span className="text-xs px-2 py-1 rounded-full bg-bg-secondary text-text-secondary">
+                  模型: {activeProvider.model}
+                </span>
+              )}
+              {activeProvider.embeddingModel && (
+                <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary">
+                  Embedding: {activeProvider.embeddingModel}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -1202,11 +1240,11 @@ function ApiConfigSettings() {
 
       <AnimatePresence>
         {showForm && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="p-4 rounded-xl bg-bg-secondary border border-border-primary">
-            <h4 className="font-medium text-text-primary mb-4">{editingProvider ? '编辑 Provider' : '添加 Provider'}</h4>
-            <div className="space-y-4">
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
+            <h4 className="font-medium text-text-primary mb-3">{editingProvider ? '编辑 Provider' : '添加 Provider'}</h4>
+            <div className="space-y-3">
               <div>
-                <label className="block text-sm font-medium mb-2 text-text-secondary">Provider 名称 *</label>
+                <label className="block text-sm font-medium mb-1.5 text-text-secondary">Provider 名称 *</label>
                 <input
                   type="text"
                   value={formData.name}
@@ -1217,7 +1255,7 @@ function ApiConfigSettings() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-2 text-text-secondary">API 格式</label>
+                <label className="block text-sm font-medium mb-1.5 text-text-secondary">API 格式</label>
                 <select
                   value={formData.apiFormat}
                   onChange={(e) => handleApiFormatChange(e.target.value)}
@@ -1230,7 +1268,7 @@ function ApiConfigSettings() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-2 text-text-secondary">Base URL *</label>
+                <label className="block text-sm font-medium mb-1.5 text-text-secondary">Base URL *</label>
                 <input
                   type="text"
                   value={formData.baseUrl}
@@ -1241,7 +1279,7 @@ function ApiConfigSettings() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium mb-2 text-text-secondary">API Key</label>
+                <label className="block text-sm font-medium mb-1.5 text-text-secondary">API Key</label>
                 <div className="relative">
                   <input
                     type={showApiKey ? 'text' : 'password'}
@@ -1270,7 +1308,7 @@ function ApiConfigSettings() {
               )}
 
               <div>
-                <label className="block text-sm font-medium mb-2 text-text-secondary">模型</label>
+                <label className="block text-sm font-medium mb-1.5 text-text-secondary">模型</label>
                 <select
                   value={formData.model}
                   onChange={(e) => setFormData({ ...formData, model: e.target.value })}
@@ -1291,7 +1329,19 @@ function ApiConfigSettings() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2 text-text-secondary">自定义 Headers (JSON)</label>
+                <label className="block text-sm font-medium mb-1.5 text-text-secondary">Embedding 模型</label>
+                <input
+                  type="text"
+                  value={formData.embeddingModel}
+                  onChange={(e) => setFormData({ ...formData, embeddingModel: e.target.value })}
+                  placeholder="text-embedding-3-small"
+                  className="input"
+                />
+                <p className="text-xs text-text-muted mt-1">用于RAG知识库检索的向量模型，留空则使用默认 text-embedding-3-small</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1.5 text-text-secondary">自定义 Headers (JSON)</label>
                 <textarea
                   value={formData.headers}
                   onChange={(e) => setFormData({ ...formData, headers: e.target.value })}
@@ -1301,7 +1351,7 @@ function ApiConfigSettings() {
                 />
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-2">
                 <Button variant="secondary" onClick={() => setShowForm(false)}>取消</Button>
                 <Button variant="primary" onClick={() => void handleSave()}>保存</Button>
               </div>
@@ -1310,24 +1360,24 @@ function ApiConfigSettings() {
         )}
       </AnimatePresence>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {loadingProviders ? (
           <div className="text-center py-12 text-text-muted">
             <p>正在加载 Provider 配置...</p>
           </div>
         ) : providers.length === 0 ? (
           <div className="text-center py-12 text-text-muted">
-            <Globe className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <Globe className="w-10 h-10 mx-auto mb-3 opacity-30" />
             <p>暂无 Provider 配置</p>
             <p className="text-sm mt-1">点击上方按钮添加第一个 Provider</p>
           </div>
         ) : (
           providers.map((provider) => (
-            <motion.div key={provider.id} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} className="rounded-xl bg-bg-secondary border border-border-primary overflow-hidden">
+            <motion.div key={provider.id} initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} className="rounded-lg bg-bg-secondary border border-border-primary overflow-hidden">
               <div className="p-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${provider.isActive ? 'bg-success/20' : 'bg-bg-hover'}`}>
-                    <Globe className={`w-5 h-5 ${provider.isActive ? 'text-success' : 'text-text-muted'}`} />
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${provider.isActive ? 'bg-success/20' : 'bg-bg-hover'}`}>
+                    <Globe className={`w-4 h-4 ${provider.isActive ? 'text-success' : 'text-text-muted'}`} />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
@@ -1363,11 +1413,18 @@ function ApiConfigSettings() {
                   </button>
                 </div>
               </div>
-              {provider.model && (
-                <div className="px-4 pb-4">
-                  <span className="text-xs px-2 py-1 rounded-full bg-bg-primary text-text-secondary">
-                    模型: {provider.model}
-                  </span>
+              {(provider.model || provider.embeddingModel) && (
+                <div className="px-4 pb-4 flex flex-wrap gap-2">
+                  {provider.model && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-bg-primary text-text-secondary">
+                      模型: {provider.model}
+                    </span>
+                  )}
+                  {provider.embeddingModel && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary">
+                      Embedding: {provider.embeddingModel}
+                    </span>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -1375,20 +1432,20 @@ function ApiConfigSettings() {
         )}
       </div>
 
-      <div className="p-4 rounded-xl bg-info/10 border border-info/20">
-        <h4 className="font-medium text-text-primary mb-2">使用说明</h4>
-        <ul className="text-sm text-text-secondary space-y-1">
+      <div className="p-4 rounded-lg bg-info/10 border border-info/20">
+        <h4 className="font-medium text-text-primary mb-1.5">使用说明</h4>
+        <ul className="text-sm text-text-muted space-y-1">
           <li>• 激活的 Provider 将被智能体使用</li>
           <li>• 配置模型名称后，智能体将使用指定的模型</li>
         </ul>
       </div>
 
-      <div className="p-4 rounded-xl bg-bg-secondary border border-border-primary">
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
         <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
           <SettingsIcon className="w-4 h-4" />
           可用工具
         </h4>
-        <p className="text-sm text-text-muted mb-3">
+        <p className="text-sm text-text-muted mb-2">
           当前智能体已注册 <span className="text-primary font-medium">{registeredToolNames.length}</span> 个工具
         </p>
         <div className="flex flex-wrap gap-2">
@@ -1403,23 +1460,21 @@ function ApiConfigSettings() {
         </div>
       </div>
 
-      {/* 人格配置 */}
-      <div className="p-4 rounded-xl bg-bg-secondary border border-border-primary">
+      <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">
         <h4 className="font-medium text-text-primary mb-3 flex items-center gap-2">
           <Bot className="w-4 h-4" />
           智能体人格设置
         </h4>
-        <p className="text-sm text-text-muted mb-2">
+        <p className="text-sm text-text-muted mb-3">
           自定义智能体的系统提示词，影响智能体的回复风格和行为。留空则使用默认配置。
         </p>
-        <div className="p-3 rounded-lg bg-info/10 border border-info/20 mb-4">
+        <div className="p-3 rounded-lg bg-info/10 border border-info/20 mb-3">
           <p className="text-xs text-info">
             ⚠️ 新的人格配置仅在<strong>新会话</strong>中生效。已有会话使用的是创建时的人格配置，更换人格后需点击智能体侧边栏的"新建会话"按钮开始新对话。
           </p>
         </div>
 
-        {/* 预设模板 */}
-        <div className="flex flex-wrap gap-2 mb-4">
+        <div className="flex flex-wrap gap-2 mb-3">
           {personaTemplates.map((template) => {
             const Icon = template.icon;
             return (
@@ -1435,16 +1490,14 @@ function ApiConfigSettings() {
           })}
         </div>
 
-        {/* 文本框 */}
         <textarea
           value={persona.systemPrompt}
           onChange={(e) => setPersona({ systemPrompt: e.target.value })}
           placeholder="输入自定义系统提示词..."
-          className="w-full h-64 p-3 text-sm border border-border-primary rounded-lg resize-none focus:outline-none focus:border-primary bg-bg-primary placeholder:text-text-muted"
+          className="w-full h-48 md:h-64 p-3 text-sm border border-border-primary rounded-lg resize-none focus:outline-none focus:border-primary bg-bg-primary placeholder:text-text-muted"
           disabled={loadingPersona || savingPersona}
         />
 
-        {/* 操作按钮 */}
         <div className="flex items-center justify-between mt-3">
           <p className="text-xs text-text-muted">
             最多 5000 字符，当前 {persona.systemPrompt.length} 字
@@ -1485,67 +1538,49 @@ export default function Settings() {
   };
 
   return (
-    <div className="p-4 md:p-8 max-w-6xl mx-auto min-h-screen bg-bg-secondary">
-      {/* 页面头部 */}
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="page-header">
-        <div className="page-header-icon">
-          <SettingsIcon className="w-5 h-5 text-white" />
-        </div>
-        <div>
-          <h1 className="page-header-title">设置</h1>
-          <p className="page-header-subtitle">管理您的个人工作站</p>
-        </div>
-      </motion.div>
+    <div className="p-3 md:p-6 min-h-screen bg-bg-secondary space-y-4">
+      <div className="max-w-[1000px] mx-auto">
+        <PageHeader className="page-header">
+          <div className="page-header-icon">
+            <SettingsIcon className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="page-header-title">设置</h1>
+            <p className="page-header-subtitle">管理您的个人工作站</p>
+          </div>
+        </PageHeader>
 
-      <div className="flex flex-col lg:flex-row gap-4 md:gap-6">
-        {/* 左侧 Tab 栏 */}
-        <motion.div initial={{ opacity: 0, x: -16 }} animate={{ opacity: 1, x: 0 }} className="w-full lg:w-56 flex-shrink-0">
-          <div className="card p-2 space-y-1">
+        <PageContent delay={0.1} className="space-y-4">
+          <div className="flex flex-wrap gap-2 p-1.5 rounded-lg bg-bg-card border border-border-primary shadow-sm">
             {settingsTabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all duration-200 ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-all duration-200 ${
                   activeTab === tab.id
                     ? 'bg-primary text-white shadow-sm'
-                    : 'text-text-secondary hover:bg-bg-secondary hover:text-text-primary'
+                    : 'text-text-secondary hover:bg-bg-tertiary hover:text-text-primary'
                 }`}
               >
-                <tab.icon className="w-5 h-5" />
-                <div>
-                  <span className="font-medium text-sm">{tab.label}</span>
-                </div>
+                <tab.icon className="w-4 h-4 shrink-0" />
+                <span className="font-medium text-sm">{tab.label}</span>
               </button>
             ))}
           </div>
-        </motion.div>
 
-        {/* 右侧内容区 */}
-        <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} className="flex-1 card">
           <AnimatePresence mode="wait">
-            <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-border-primary">
-                {(() => {
-                  const tab = settingsTabs.find(t => t.id === activeTab);
-                  if (!tab) return null;
-                  const Icon = tab.icon;
-                  return (
-                    <>
-                      <div className="w-10 h-10 rounded-lg bg-primary/10 dark:bg-primary/20 flex items-center justify-center">
-                        <Icon className="w-5 h-5 text-primary dark:text-primary-400" />
-                      </div>
-                      <div>
-                        <h2 className="text-lg font-semibold text-text-primary">{tabContent[activeTab].title}</h2>
-                        <p className="text-sm text-text-muted">{tabContent[activeTab].desc}</p>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
+            <motion.div 
+              key={activeTab} 
+              initial={{ opacity: 0, y: 8 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: -8 }} 
+              transition={{ duration: 0.25, ease: defaultEasing }}
+              className="rounded-lg bg-bg-card border border-border-primary shadow-sm p-4 md:p-5"
+            >
               {renderContent()}
             </motion.div>
           </AnimatePresence>
-        </motion.div>
+        </PageContent>
       </div>
     </div>
   );

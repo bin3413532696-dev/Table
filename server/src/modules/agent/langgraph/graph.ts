@@ -8,6 +8,7 @@ import { SYSTEM_PROMPT, buildToolResultPrompt } from './prompts';
 import { allTools, requiresConfirmation } from './tools';
 import { getCheckpointer } from './postgres-checkpointer';
 import { MessageManager } from './message-manager';
+import { ragConfig } from '../../knowledge-rag/config';
 
 function now() {
   return Date.now();
@@ -45,6 +46,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: str
 async function executeToolCallInternal(toolCall: ToolCall): Promise<ExecutedToolCall> {
   const tool = allTools.find((t) => t.name === toolCall.name);
   if (!tool) {
+    console.error(`[Agent Tool] Tool not found: ${toolCall.name}`);
     return {
       ...toolCall,
       result: null,
@@ -55,9 +57,23 @@ async function executeToolCallInternal(toolCall: ToolCall): Promise<ExecutedTool
     };
   }
 
+  console.log(`[Agent Tool] Executing: ${toolCall.name}`);
+  console.log(`[Agent Tool] Arguments: ${JSON.stringify(toolCall.arguments).slice(0, 200)}${JSON.stringify(toolCall.arguments).length > 200 ? '...' : ''}`);
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await (tool as any).invoke(toolCall.arguments);
+
+    // 日志结果摘要
+    if (typeof result === 'string') {
+      const preview = result.slice(0, 100);
+      console.log(`[Agent Tool] ${toolCall.name} succeeded (string result, ${result.length} chars): ${preview}...`);
+    } else if (result && typeof result === 'object') {
+      console.log(`[Agent Tool] ${toolCall.name} succeeded (object result): ${JSON.stringify(result).slice(0, 100)}...`);
+    } else {
+      console.log(`[Agent Tool] ${toolCall.name} succeeded`);
+    }
+
     return {
       ...toolCall,
       result,
@@ -66,11 +82,13 @@ async function executeToolCallInternal(toolCall: ToolCall): Promise<ExecutedTool
       createdAt: now(),
     };
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[Agent Tool] ${toolCall.name} failed: ${errorMsg}`);
     return {
       ...toolCall,
       result: null,
       success: false,
-      error: error instanceof Error ? error.message : '工具执行失败',
+      error: errorMsg,
       status: 'failed',
       createdAt: now(),
     };
@@ -130,7 +148,7 @@ async function buildMessagesNode(state: AgentState): Promise<Partial<AgentState>
   if (state.executedToolCalls.length > 0) {
     const toolResultMessage = {
       role: 'user' as const,
-      content: buildToolResultPrompt(state.executedToolCalls),
+      content: buildToolResultPrompt(state.executedToolCalls, state.searchMaxScore),
       createdAt: timestamp,
     };
     modelInputMessages.push(toolResultMessage);
@@ -158,6 +176,8 @@ async function callModelNode(state: AgentState): Promise<Partial<AgentState>> {
   lcMessages = (await messageManager.trim(lcMessages)) as typeof lcMessages;
 
   const startTs = isoNow();
+
+  console.log(`[Agent LLM] Calling model ${state.model} with ${lcMessages.length} messages`);
 
   // 关键改动：使用 invoke 而不是 stream + for await
   // LangGraph 的 streamMode: ['messages'] 会自动捕获 LLM 的 token 级输出
@@ -187,6 +207,11 @@ async function callModelNode(state: AgentState): Promise<Partial<AgentState>> {
   // 从响应中提取原生 tool_calls（如果存在）
   const nativeToolCalls = parseToolCallsFromResponse(response);
 
+  console.log(`[Agent LLM] Response length: ${responseContent.length} chars, tool_calls: ${nativeToolCalls.length}`);
+  if (nativeToolCalls.length > 0) {
+    console.log(`[Agent LLM] Native tool_calls: ${nativeToolCalls.map(tc => tc.name).join(', ')}`);
+  }
+
   return {
     messages: [{ role: 'assistant', content: responseContent, createdAt: now() }],
     assistantTextChunks: [responseContent],
@@ -207,17 +232,26 @@ async function callModelNode(state: AgentState): Promise<Partial<AgentState>> {
 async function parseToolsNode(state: AgentState): Promise<Partial<AgentState>> {
   const lastMessage = state.messages[state.messages.length - 1];
   if (!lastMessage || lastMessage.role !== 'assistant') {
+    console.log('[Agent Parser] No assistant message to parse');
     return { pendingToolCalls: [] };
   }
 
   // 如果 callModelNode 已经提取了原生 tool_calls，直接使用
   if (state.pendingToolCalls.length > 0) {
-    // 已经有原生 tool_calls，不需要文本解析
+    console.log(`[Agent Parser] Using native tool_calls from LLM: ${state.pendingToolCalls.map(tc => tc.name).join(', ')}`);
     return { pendingToolCalls: state.pendingToolCalls };
   }
 
   // 兼容模式：从文本中解析工具调用（当原生 Function Calling 不支持时）
+  console.log('[Agent Parser] No native tool_calls, attempting text parsing fallback');
   const { toolCalls } = parseToolCalls(lastMessage.content);
+
+  if (toolCalls.length > 0) {
+    console.log(`[Agent Parser] Text parsing found tool_calls: ${toolCalls.map(tc => tc.name).join(', ')}`);
+  } else {
+    console.log('[Agent Parser] No tool_calls found in text');
+  }
+
   return {
     pendingToolCalls: toolCalls,
   };
@@ -253,6 +287,11 @@ async function executeToolsNode(state: AgentState): Promise<Partial<AgentState>>
   let nextError: string | null | undefined;
   let timeline = [...state.timeline];
 
+  // 新增：累积搜索结果和引用
+  const newSearchResults: AgentState['accumulatedSearchResults'] = [];
+  const newCitedChunkIds: string[] = [];
+  let newSearchMaxScore = state.searchMaxScore ?? 0;
+
   for (const toolCall of state.pendingToolCalls) {
     if (requiresConfirmation(toolCall.name)) {
       pendingConfirmTools.push(toolCall);
@@ -286,6 +325,48 @@ async function executeToolsNode(state: AgentState): Promise<Partial<AgentState>>
     const executed = await executeToolCallInternal(toolCall);
     if (executed.success) {
       setCachedResult(toolCall.name, toolCall.arguments, executed.result);
+
+      // 新增：检测搜索工具并累积结果
+      if (toolCall.name === 'semantic_search' || toolCall.name === 'keyword_search') {
+        // 从 XML 结果中提取 chunk 信息
+        const xmlResult = executed.result as string;
+
+        // 提取原始语义最高分数（用于 Retrieval Grader）
+        const originalSemanticMaxMatch = xmlResult.match(/<original_semantic_max_score>([^<]+)<\/original_semantic_max_score>/);
+        if (originalSemanticMaxMatch) {
+          const originalSemanticScore = parseFloat(originalSemanticMaxMatch[1]);
+          // 使用原始语义分数，而非融合后分数
+          newSearchMaxScore = Math.max(newSearchMaxScore, originalSemanticScore);
+        }
+
+        const chunkMatches = xmlResult.matchAll(/<chunk id="([^"]+)">\s*<source>([^<]*)<\/source>\s*<score>([^<]*)<\/score>\s*<content>([^<]*)<\/content>\s*<\/chunk>/g);
+        for (const match of chunkMatches) {
+          const chunkId = match[1];
+          const source = match[2];
+          const score = parseFloat(match[3]);
+          const content = match[4];
+          // 提取 documentTitle 和 headingChain
+          const [docTitle, heading] = source.includes(' > ') ? source.split(' > ') : [source, undefined];
+          newSearchResults.push({
+            id: chunkId,
+            documentId: '', // 从 XML 中无法获取，但 ID 已足够用于验证
+            documentTitle: docTitle,
+            headingChain: heading,
+            content,
+            chunkIndex: 0,
+            score,
+            source: toolCall.name === 'semantic_search' ? 'semantic' : 'keyword',
+          });
+        }
+      }
+
+      // 新增：检测 cite_sources 工具并记录引用
+      if (toolCall.name === 'cite_sources') {
+        const citeResult = executed.result as { cited?: string[] };
+        if (citeResult?.cited) {
+          newCitedChunkIds.push(...citeResult.cited);
+        }
+      }
     } else if (!nextError) {
       nextStatus = 'failed';
       nextError = executed.error ?? '工具执行失败';
@@ -305,6 +386,14 @@ async function executeToolsNode(state: AgentState): Promise<Partial<AgentState>>
     ...(nextStatus ? { status: nextStatus } : {}),
     ...(nextError !== undefined ? { error: nextError } : {}),
     timeline,
+    // 新增：累积搜索结果和引用
+    accumulatedSearchResults: newSearchResults.length > 0
+      ? [...(state.accumulatedSearchResults ?? []), ...newSearchResults]
+      : state.accumulatedSearchResults,
+    citedChunkIds: newCitedChunkIds.length > 0
+      ? [...(state.citedChunkIds ?? []), ...newCitedChunkIds]
+      : state.citedChunkIds,
+    searchMaxScore: newSearchMaxScore > (state.searchMaxScore ?? 0) ? newSearchMaxScore : state.searchMaxScore,
   };
 }
 
@@ -410,6 +499,74 @@ async function finalizeNode(state: AgentState): Promise<Partial<AgentState>> {
   };
 }
 
+/**
+ * Grounding Guardrail Node（P2-G6）
+ * 验证 RAG 引用的有效性
+ * 根据 CITATION_REQUIRED_FOR_FACTS 配置决定严格程度
+ */
+async function groundingGuardrailNode(state: AgentState): Promise<Partial<AgentState>> {
+  // 检查是否使用了 RAG 搜索工具
+  const ragSearchTools = state.executedToolCalls.filter(tc =>
+    tc.name === 'semantic_search' || tc.name === 'keyword_search' || tc.name === 'search_knowledge_rag' || tc.name === 'rag_answer'
+  );
+
+  // 未使用 RAG 工具时，跳过验证
+  if (ragSearchTools.length === 0) {
+    console.log('[Agent Grounding] No RAG tools used, skipping guardrail');
+    return {};
+  }
+
+  console.log(`[Agent Grounding] RAG tools used: ${ragSearchTools.map(t => t.name).join(', ')}, searchMaxScore: ${state.searchMaxScore}`);
+
+  // rag_answer 是一体化工具，不需要单独 cite_sources 验证
+  const hasRagAnswer = ragSearchTools.some(tc => tc.name === 'rag_answer');
+
+  if (hasRagAnswer) {
+    console.log('[Agent Grounding] rag_answer tool used, skipping citation requirement (unified tool)');
+    return {};
+  }
+
+  // 检查是否调用了 cite_sources（仅对 semantic_search/keyword_search 需要）
+  const citeTools = state.executedToolCalls.filter(tc => tc.name === 'cite_sources');
+
+  // 低相关度搜索时，放宽引用要求（不强制失败）
+  const maxScore = state.searchMaxScore ?? 0;
+  const isLowQualitySearch = maxScore < ragConfig.CITATION_LOW_SCORE_THRESHOLD;
+
+  if (citeTools.length === 0) {
+    // 如果配置允许不引用，或搜索质量低，仅记录警告不阻止回答
+    if (!ragConfig.CITATION_REQUIRED_FOR_FACTS || isLowQualitySearch) {
+      console.warn(`[Agent Grounding] RAG search used without citation (maxScore: ${maxScore.toFixed(3)}, lowQuality: ${isLowQualitySearch}, required: ${ragConfig.CITATION_REQUIRED_FOR_FACTS})`);
+      // 返回空状态，允许回答继续
+      return {};
+    }
+
+    // 配置要求强制引用且搜索质量足够高，返回失败
+    console.log('[Agent Grounding] Citation required but not provided, marking as failed');
+    return {
+      error: '使用了知识库搜索但未标注引用来源。请调用 cite_sources(chunkIds) 标注引用。',
+      status: 'failed',
+    };
+  }
+
+  // 验证引用的 chunk ID 存在于累积的搜索结果中
+  const validChunkIds = new Set((state.accumulatedSearchResults ?? []).map(r => r.id));
+  const citedIds = state.citedChunkIds ?? [];
+  const invalidCitations = citedIds.filter(id => !validChunkIds.has(id));
+
+  if (invalidCitations.length > 0) {
+    console.warn(`[Agent Grounding] Invalid citations: ${invalidCitations.slice(0, 3).join(', ')}`);
+    return {
+      error: `引用的 chunk ID 不在本轮搜索结果中: ${invalidCitations.slice(0, 3).join(', ')}`,
+      status: 'failed',
+    };
+  }
+
+  // 引用验证通过
+  console.log(`[Agent Grounding] Citation validation passed: ${citedIds.length} valid citations`);
+  return {};
+}
+
 function afterParseRouter(state: AgentState): string {
   if (state.status === 'cancelled' || state.status === 'failed') return 'finalize';
   if (state.iterationCount >= MAX_ITERATIONS) return 'finalize';
@@ -425,7 +582,7 @@ function afterCheckConfirmationRouter(state: AgentState): string {
 
 function afterExecuteRouter(state: AgentState): string {
   if (state.status === 'cancelled' || state.status === 'failed') return 'finalize';
-  if (state.iterationCount >= MAX_ITERATIONS) return 'finalize';
+  if (state.iterationCount >= MAX_ITERATIONS) return 'grounding_guardrail'; // 先去 guardrail
   return 'build_messages';
 }
 
@@ -440,6 +597,7 @@ const workflow = new StateGraph(AgentStateAnnotation)
     ends: ['execute_confirmed_tool'],
   })
   .addNode('execute_confirmed_tool', executeConfirmedToolNode)
+  .addNode('grounding_guardrail', groundingGuardrailNode) // 新增
   .addNode('finalize', finalizeNode)
   .addEdge('__start__', 'init')
   .addEdge('init', 'build_messages')
@@ -449,6 +607,7 @@ const workflow = new StateGraph(AgentStateAnnotation)
   .addConditionalEdges('check_confirmation', afterCheckConfirmationRouter)
   .addConditionalEdges('execute_tools', afterExecuteRouter)
   .addConditionalEdges('execute_confirmed_tool', afterExecuteRouter)
+  .addEdge('grounding_guardrail', 'finalize') // guardrail → finalize
   .addEdge('finalize', END);
 
 export const agentGraph = workflow.compile({
@@ -544,14 +703,49 @@ export async function streamAgentGraphDirect(input: {
 
   // 直接调用LLM流式API
   const startTs = isoNow();
-  const result = await streamLlmDirect({
-    provider: input.provider,
-    model: input.model,
-    messages,
-    tools: allTools,
-    timeoutMs: LLM_TIMEOUT_MS,
-    onToken,
+
+  // 先使用 invoke 获取完整响应（包含 tool_calls）
+  // 因为 MiniMax 等模型在流式模式下 tool_calls 聚合有问题
+  const chatModel = createChatModelWithTools(input.provider, input.model, allTools);
+  const lcMessages = messages.map((m) => {
+    if (m.role === 'system') return new SystemMessage(m.content);
+    if (m.role === 'assistant') return new AIMessage(m.content);
+    return new HumanMessage(m.content);
   });
+
+  const response = await withTimeout(
+    chatModel.invoke(lcMessages),
+    LLM_TIMEOUT_MS,
+    `LLM request (${input.model})`
+  );
+
+  const responseContent =
+    typeof response.content === 'string'
+      ? response.content
+      : Array.isArray(response.content)
+        ? response.content
+            .map((part) => {
+              if (typeof part === 'string') return part;
+              if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+                return part.text;
+              }
+              return '';
+            })
+            .join('')
+        : '';
+
+  // 发送完整内容作为 token
+  if (responseContent) {
+    await onToken(responseContent);
+  }
+
+  // 从响应中提取原生 tool_calls
+  const nativeToolCalls = parseToolCallsFromResponse(response);
+
+  const result: { content: string; toolCalls: Array<{ id: string; name: string; arguments: Record<string, unknown> }> } = {
+    content: responseContent,
+    toolCalls: nativeToolCalls,
+  };
 
   const assistantMessage: ConversationMessage = {
     role: 'assistant',
@@ -560,14 +754,24 @@ export async function streamAgentGraphDirect(input: {
   };
   messages.push(assistantMessage);
 
+  // 如果原生 tool_calls 为空，尝试从文本中解析（回退机制）
+  let effectiveToolCalls = result.toolCalls;
+  if (effectiveToolCalls.length === 0 && result.content) {
+    const { toolCalls } = parseToolCalls(result.content);
+    if (toolCalls.length > 0) {
+      effectiveToolCalls = toolCalls;
+      console.log('[Agent] 从文本解析到工具调用:', toolCalls.map(tc => tc.name).join(', '));
+    }
+  }
+
   // 发送values chunk
   const partialState: Partial<AgentState> = {
     messages: [assistantMessage],
     assistantTextChunks: [result.content],
-    pendingToolCalls: result.toolCalls,
+    pendingToolCalls: effectiveToolCalls,
     timeline: [
       { type: 'llm_start', timestamp: startTs, data: { model: input.model } },
-      { type: 'llm_end', timestamp: isoNow(), data: { model: input.model, hasToolCalls: result.toolCalls.length > 0 } },
+      { type: 'llm_end', timestamp: isoNow(), data: { model: input.model, hasToolCalls: effectiveToolCalls.length > 0 } },
     ],
   };
   await onChunk({ mode: 'values', data: partialState as AgentState });
@@ -584,7 +788,7 @@ export async function streamAgentGraphDirect(input: {
     messages,
     modelInputMessages: messages,
     executedToolCalls: [],
-    pendingToolCalls: result.toolCalls,
+    pendingToolCalls: effectiveToolCalls,
     iterationCount: 0,
     inputAppended: true,
     status: 'running',
@@ -698,10 +902,20 @@ export async function streamAgentGraphDirect(input: {
       };
       messages.push(nextAssistantMessage);
 
+      // MiniMax fallback: 如果原生 tool_calls 为空，尝试从文本解析
+      let effectiveNextToolCalls = nextResult.toolCalls;
+      if (effectiveNextToolCalls.length === 0 && nextResult.content) {
+        const { toolCalls } = parseToolCalls(nextResult.content);
+        if (toolCalls.length > 0) {
+          effectiveNextToolCalls = toolCalls;
+          console.log('[Agent] 后续调用从文本解析到工具调用:', toolCalls.map(tc => tc.name).join(', '));
+        }
+      }
+
       state = {
         ...state,
         messages,
-        pendingToolCalls: nextResult.toolCalls,
+        pendingToolCalls: effectiveNextToolCalls,
         assistantTextChunks: [...(state.assistantTextChunks ?? []), nextResult.content],
       };
 
@@ -710,10 +924,16 @@ export async function streamAgentGraphDirect(input: {
   }
 
   // 最终状态
+  // finalText 应为最后一次 LLM 生成的文本内容，而非第一次
+  const assistantChunks = state.assistantTextChunks ?? [];
+  const lastAssistantText = assistantChunks.length > 0
+    ? assistantChunks[assistantChunks.length - 1]
+    : result.content;
+
   state = {
     ...state,
     status: state.error ? 'failed' : 'completed',
-    finalText: result.content,
+    finalText: lastAssistantText,
   };
 
   // 保存到checkpoint

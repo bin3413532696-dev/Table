@@ -5,7 +5,6 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { UserProvider } from './contexts/UserContext';
 import { AgentProvider } from './agent/AgentContext';
-import { AgentSidebarProvider } from './agent/AgentSidebarContext';
 import { initDB } from './db';
 import { initializeData, startAutoSync, startRealtimeSync } from './lib/dataSync';
 import './styles/index.css';
@@ -28,9 +27,7 @@ root.render(
       <ThemeProvider>
         <UserProvider>
           <AgentProvider>
-            <AgentSidebarProvider>
-              <App />
-            </AgentSidebarProvider>
+            <App />
           </AgentProvider>
         </UserProvider>
       </ThemeProvider>
