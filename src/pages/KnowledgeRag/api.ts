@@ -7,6 +7,7 @@ import type {
   SearchResponse,
   UploadResult,
   RagStats,
+  MetadataFilter,
 } from './types';
 
 const API_BASE = '/api/knowledge-rag';
@@ -25,14 +26,27 @@ async function extractErrorMessage(response: Response, defaultMessage: string): 
 export async function getDocuments(params?: {
   status?: string;
   fileType?: string;
+  tags?: string[];
   limit?: number;
   offset?: number;
+  // === 元数据过滤 ===
+  publishDateRange?: { start?: string; end?: string };
+  sourceDept?: string[];
+  securityLevel?: string;
+  businessCategory?: string[];
 }): Promise<{ items: KnowledgeDocument[]; total: number }> {
   const query = new URLSearchParams();
   if (params?.status) query.set('status', params.status);
   if (params?.fileType) query.set('fileType', params.fileType);
+  if (params?.tags && params.tags.length > 0) query.set('tags', params.tags.join(','));
   if (params?.limit) query.set('limit', params.limit.toString());
   if (params?.offset) query.set('offset', params.offset.toString());
+  // 元数据过滤
+  if (params?.publishDateRange?.start) query.set('publishDateStart', params.publishDateRange.start);
+  if (params?.publishDateRange?.end) query.set('publishDateEnd', params.publishDateRange.end);
+  if (params?.sourceDept && params.sourceDept.length > 0) query.set('sourceDept', params.sourceDept.join(','));
+  if (params?.securityLevel) query.set('securityLevel', params.securityLevel);
+  if (params?.businessCategory && params.businessCategory.length > 0) query.set('businessCategory', params.businessCategory.join(','));
 
   const response = await fetchWithAuth(`${API_BASE}/documents?${query}`);
   if (!response.ok) throw new Error(await extractErrorMessage(response, '获取文档列表失败'));

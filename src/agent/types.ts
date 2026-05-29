@@ -67,6 +67,8 @@ export interface AgentState {
   error: string | null;
   currentRunId: string | null;
   currentSessionId: string;
+  // RAG 知识检索是否启用（默认禁用）
+  ragEnabled: boolean;
 }
 
 export const MAX_HISTORY_MESSAGES = 50;

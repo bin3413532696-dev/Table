@@ -65,6 +65,25 @@ export async function listDocuments(query: ListDocumentsQuery): Promise<Document
     }));
   }
 
+  // === 元数据过滤 ===
+  if (query.publishDateRange) {
+    const { start, end } = query.publishDateRange;
+    if (start || end) {
+      where.publishDate = {};
+      if (start) where.publishDate.gte = new Date(start);
+      if (end) where.publishDate.lte = new Date(end);
+    }
+  }
+  if (query.sourceDept && query.sourceDept.length > 0) {
+    where.sourceDept = { in: query.sourceDept };
+  }
+  if (query.securityLevel) {
+    where.securityLevel = query.securityLevel;
+  }
+  if (query.businessCategory && query.businessCategory.length > 0) {
+    where.businessCategory = { in: query.businessCategory };
+  }
+
   const docs = await prisma.knowledgeDocument.findMany({
     where,
     orderBy: { updatedAt: 'desc' },
@@ -93,6 +112,25 @@ export async function listDocumentsWithCount(query: ListDocumentsQuery): Promise
         string_contains: JSON.stringify(tag),
       } as Prisma.JsonFilter,
     }));
+  }
+
+  // === 元数据过滤 ===
+  if (query.publishDateRange) {
+    const { start, end } = query.publishDateRange;
+    if (start || end) {
+      where.publishDate = {};
+      if (start) where.publishDate.gte = new Date(start);
+      if (end) where.publishDate.lte = new Date(end);
+    }
+  }
+  if (query.sourceDept && query.sourceDept.length > 0) {
+    where.sourceDept = { in: query.sourceDept };
+  }
+  if (query.securityLevel) {
+    where.securityLevel = query.securityLevel;
+  }
+  if (query.businessCategory && query.businessCategory.length > 0) {
+    where.businessCategory = { in: query.businessCategory };
   }
 
   const [docs, total] = await Promise.all([
@@ -125,7 +163,15 @@ export async function createDocument(
   input: CreateDocumentInput,
   fileContent: string,
   fileHash: string,
-  fileSize: number
+  fileSize: number,
+  metadata?: {
+    publishDate?: Date | null;
+    sourceDept?: string | null;
+    securityLevel?: string | null;
+    businessCategory?: string | null;
+    docLanguage?: string | null;
+    originalMetadata?: Record<string, unknown> | null;
+  }
 ): Promise<DocumentRecord> {
   const userId = getCurrentUserId();
   const now = new Date();
@@ -144,6 +190,13 @@ export async function createDocument(
       contentHash: fileHash,
       createdAt: now,
       updatedAt: now,
+      // 元数据字段
+      ...(metadata?.publishDate ? { publishDate: metadata.publishDate } : {}),
+      ...(metadata?.sourceDept ? { sourceDept: metadata.sourceDept } : {}),
+      ...(metadata?.securityLevel ? { securityLevel: metadata.securityLevel } : {}),
+      ...(metadata?.businessCategory ? { businessCategory: metadata.businessCategory } : {}),
+      ...(metadata?.docLanguage ? { docLanguage: metadata.docLanguage } : {}),
+      ...(metadata?.originalMetadata ? { originalMetadata: asJsonValue(metadata.originalMetadata) } : {}),
     },
   });
 
@@ -291,51 +344,56 @@ export async function createChunks(
     startPos: number;
     endPos: number;
     id?: string;
-    headingChain?: string;    // 新增
-    headingLevel?: number;    // 新增
-    embeddingDimensions?: number;  // 新增
-    embeddingVersion?: number;     // 新增
+    headingChain?: string;
+    headingLevel?: number;
+    embeddingDimensions?: number | null;
+    embeddingVersion?: number | null;
+    chunkType?: string;        // 'small' | 'parent'
+    parentId?: string | null;  // 小块关联的大块ID
   }>
 ): Promise<ChunkRecord[]> {
   const userId = getCurrentUserId();
   const now = new Date();
 
-  // 使用 $executeRaw 插入，避免 Prisma 无法处理 vector 类型的问题
-  await prisma.$transaction(
-    chunksData.map((chunk) =>
-      prisma.$executeRaw`
-        INSERT INTO knowledge_chunks (
-          id, document_id, user_id, content, content_hash,
-          chunk_index, start_pos, end_pos,
-          heading_chain, heading_level,
-          embedding_dimensions, embedding_version,
-          created_at, updated_at
-        )
-        VALUES (
-          ${chunk.id ?? crypto.randomUUID()}::uuid,
-          ${documentId}::uuid,
-          ${userId}::uuid,
-          ${chunk.content},
-          ${chunk.contentHash},
-          ${chunk.chunkIndex},
-          ${chunk.startPos},
-          ${chunk.endPos},
-          ${chunk.headingChain ?? null},
-          ${chunk.headingLevel ?? null},
-          ${chunk.embeddingDimensions ?? null},
-          ${chunk.embeddingVersion ?? 1},
-          ${now},
-          ${now}
-        )
-      `
+  if (chunksData.length === 0) return [];
+
+  // 使用单条 multi-row INSERT 提升性能，避免 N 条独立 INSERT 的解析开销
+  // Prisma.join 配合参数化查询防止 SQL 注入
+  await prisma.$executeRaw`
+    INSERT INTO knowledge_chunks (
+      id, document_id, user_id, content, content_hash,
+      chunk_index, start_pos, end_pos,
+      heading_chain, heading_level,
+      embedding_dimensions, embedding_version,
+      chunk_type, parent_id,
+      created_at, updated_at
     )
-  );
+    VALUES ${Prisma.join(chunksData.map((chunk) => Prisma.sql`(
+      ${chunk.id ?? crypto.randomUUID()}::uuid,
+      ${documentId}::uuid,
+      ${userId}::uuid,
+      ${chunk.content},
+      ${chunk.contentHash},
+      ${chunk.chunkIndex},
+      ${chunk.startPos},
+      ${chunk.endPos},
+      ${chunk.headingChain ?? null},
+      ${chunk.headingLevel ?? null},
+      ${chunk.embeddingDimensions ?? null},
+      ${chunk.embeddingVersion ?? null},
+      ${chunk.chunkType ?? 'small'},
+      ${chunk.parentId ?? null}::uuid,
+      ${now},
+      ${now}
+    )`), ',', '')}
+  `;
 
   // 查询刚创建的记录（按 chunkIndex 排序）
   const chunks = await prisma.$queryRaw<Array<any>>`
     SELECT id, document_id, user_id, content, content_hash, chunk_index, start_pos, end_pos,
            heading_chain, heading_level,
            embedding_model, embedding_dimensions, embedding_version,
+           chunk_type, parent_id,
            created_at, updated_at,
            (embedding IS NOT NULL) as has_embedding
     FROM knowledge_chunks
@@ -358,19 +416,40 @@ export async function createChunks(
     embeddingModel: row.embedding_model,
     embeddingDimensions: row.embedding_dimensions,
     embeddingVersion: row.embedding_version,
+    chunkType: row.chunk_type,
+    parentId: row.parent_id,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
   }));
 }
 
 // P4 增量索引：获取文档现有的 chunk hashes
-export async function getChunkHashes(documentId: string): Promise<string[]> {
+// chunkType 参数：可选，用于只获取特定类型的 chunk hash
+export async function getChunkHashes(documentId: string, chunkType?: string): Promise<string[]> {
   const userId = getCurrentUserId();
+  if (chunkType) {
+    const chunks = await prisma.$queryRaw<Array<{ content_hash: string }>>`
+      SELECT content_hash FROM knowledge_chunks
+      WHERE document_id = ${documentId}::uuid AND user_id = ${userId}::uuid AND chunk_type = ${chunkType}
+    `;
+    return chunks.map(c => c.content_hash);
+  }
   const chunks = await prisma.$queryRaw<Array<{ content_hash: string }>>`
     SELECT content_hash FROM knowledge_chunks
     WHERE document_id = ${documentId}::uuid AND user_id = ${userId}::uuid
   `;
   return chunks.map(c => c.content_hash);
+}
+
+// P4 增量索引：获取指定 hashes 的 chunk ID 映射
+export async function getChunkIdsByHash(documentId: string, hashes: string[]): Promise<Map<string, string>> {
+  if (hashes.length === 0) return new Map();
+  const userId = getCurrentUserId();
+  const chunks = await prisma.$queryRaw<Array<{ id: string; content_hash: string }>>`
+    SELECT id::text, content_hash FROM knowledge_chunks
+    WHERE document_id = ${documentId}::uuid AND user_id = ${userId}::uuid AND content_hash = ANY(${hashes})
+  `;
+  return new Map(chunks.map(c => [c.content_hash, c.id]));
 }
 
 // P4 增量索引：删除指定 hashes 的 chunks
@@ -392,6 +471,39 @@ export async function deleteChunksByDocument(documentId: string): Promise<void> 
   });
 }
 
+// =====================================================
+// 分层存储：小块大块架构支持
+// =====================================================
+
+// 根据小块的 parentId 列表查询大块内容（用于检索上下文扩展）
+export async function findParentChunksByIds(
+  userId: string,
+  parentIds: string[]
+): Promise<Array<{
+  id: string;
+  documentId: string;
+  content: string;
+  headingChain: string | null;
+}>> {
+  if (parentIds.length === 0) return [];
+
+  // 使用 IN 查询批量获取大块
+  const chunks = await prisma.$queryRaw<Array<any>>`
+    SELECT id::text, document_id::text, content, heading_chain
+    FROM knowledge_chunks
+    WHERE user_id = ${userId}::uuid
+      AND id = ANY(${parentIds}::uuid[])
+      AND chunk_type = 'parent'
+  `;
+
+  return chunks.map((row: any) => ({
+    id: row.id,
+    documentId: row.document_id,
+    content: row.content,
+    headingChain: row.heading_chain,
+  }));
+}
+
 export async function updateChunkEmbedding(
   chunkId: string,
   embedding: number[],
@@ -407,27 +519,31 @@ export async function updateChunkEmbedding(
   `;
 }
 
-// 批量更新 Embedding（性能优化）
+// 批量更新 Embedding（性能优化：使用临时表 + 单次 UPDATE）
 export async function updateChunkEmbeddingsBatch(
   updates: Array<{ chunkId: string; embedding: number[]; embeddingModel: string }>
 ): Promise<void> {
   if (updates.length === 0) return;
 
   const userId = getCurrentUserId();
+  const embeddingModel = updates[0].embeddingModel; // 同批次使用相同模型
 
-  // 使用事务批量更新
-  await prisma.$transaction(
-    updates.map(({ chunkId, embedding, embeddingModel }) => {
-      const embeddingStr = formatVectorForDb(embedding);
-      return prisma.$executeRaw`
-        UPDATE knowledge_chunks
-        SET embedding = ${embeddingStr}::vector,
-            embedding_model = ${embeddingModel},
-            updated_at = now()
-        WHERE id = ${chunkId}::uuid AND user_id = ${userId}::uuid
-      `;
-    })
-  );
+  // 创建临时表存储更新数据，单次 JOIN UPDATE 提升性能
+  // 避免 N 条独立 UPDATE 的解析开销
+  await prisma.$executeRaw`
+    WITH updates_temp(id, embedding_vec) AS (
+      VALUES ${Prisma.join(updates.map(({ chunkId, embedding }) => {
+        const embeddingStr = formatVectorForDb(embedding);
+        return Prisma.sql`(${chunkId}::uuid, ${embeddingStr}::vector)`;
+      }), ',', '')}
+    )
+    UPDATE knowledge_chunks c
+    SET embedding = u.embedding_vec,
+        embedding_model = ${embeddingModel},
+        updated_at = now()
+    FROM updates_temp u
+    WHERE c.id = u.id AND c.user_id = ${userId}::uuid
+  `;
 }
 
 export async function getChunksWithoutEmbedding(documentId: string): Promise<ChunkRecord[]> {
@@ -592,6 +708,19 @@ export async function findJobById(id: string): Promise<IndexJobRecord | null> {
   return toIndexJobDto(job);
 }
 
+// 获取待处理任务（用于后台队列轮询）
+export async function findPendingJobs(limit: number = 10): Promise<IndexJobRecord[]> {
+  // 不限 userId，因为队列处理器需要获取所有用户的待处理任务
+  // 实际处理时会根据 document 的 userId 进行权限检查
+  const jobs = await prisma.knowledgeIndexJob.findMany({
+    where: { status: 'pending' },
+    orderBy: { createdAt: 'asc' }, // FIFO：先入先出
+    take: limit,
+  });
+
+  return jobs.map(toIndexJobDto);
+}
+
 export async function createJob(
   documentId: string | null,
   jobType: string
@@ -645,7 +774,7 @@ export async function findStaleJobs(timeoutMinutes: number = 30): Promise<IndexJ
       status: 'running',
       startedAt: { lt: timeoutDate },
     },
-    orderBy: { createdAt: 'asc' },
+    orderBy: { id: 'asc' }, // 使用 id 排序（UUID 按时间顺序生成）
   });
 
   return staleJobs.map(toIndexJobDto);
@@ -686,6 +815,37 @@ interface SearchResultRow {
   score: number;
 }
 
+// 距离度量运算符映射
+type DistanceMetric = 'cosine' | 'euclidean' | 'inner_product';
+function getDistanceOperator(metric: DistanceMetric): string {
+  const operators: Record<DistanceMetric, string> = {
+    cosine: '<=>',        // 余弦距离
+    euclidean: '<->',     // 欧氏距离（L2）
+    inner_product: '<#>', // 内积（负值，用于排序）
+  };
+  return operators[metric] || '<=>';
+}
+
+// 根据距离度量计算相似度分数
+// cosine: 1 - distance (范围 0-1)
+// euclidean: 需归一化，返回负距离（距离越小相似度越高）
+// inner_product: 直接返回内积（越大相似度越高，需确保向量归一化）
+function calculateSimilarityScore(metric: DistanceMetric, distanceValue: number): number {
+  switch (metric) {
+    case 'cosine':
+      return 1 - distanceValue; // 余弦距离转相似度
+    case 'euclidean':
+      // L2 距离无固定范围，返回负值用于排序
+      // 实际分数计算在 SQL 中使用 -distance
+      return -distanceValue;
+    case 'inner_product':
+      // 内积直接作为相似度（归一化向量时范围 -1 到 1，非归一化时范围不定）
+      return distanceValue;
+    default:
+      return 1 - distanceValue;
+  }
+}
+
 export async function semanticSearch(
   queryEmbedding: number[],
   params: HybridSearchInput
@@ -693,20 +853,35 @@ export async function semanticSearch(
   const userId = getCurrentUserId();
   const embeddingStr = formatVectorForDb(queryEmbedding);
   const currentVersion = ragConfig.EMBEDDING_VERSION ?? 1;
+  const distanceMetric = (ragConfig.EMBEDDING_DISTANCE_METRIC || 'cosine') as DistanceMetric;
+  const distanceOp = getDistanceOperator(distanceMetric);
 
+  // 标签过滤：使用 @> 包含查询 + GIN 索引优化
   const tagFilter = params.tags && params.tags.length > 0
-    ? Prisma.sql`
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements_text(d.tags_json) tag
-          WHERE tag IN (${Prisma.join(params.tags)})
-        )
-      `
+    ? params.tags.length === 1
+      ? Prisma.sql`AND d.tags_json @> ${Prisma.sql`'["${params.tags[0]}"]'::jsonb`}`
+      : Prisma.sql`AND (${Prisma.join(params.tags.map(tag =>
+          Prisma.sql`d.tags_json @> ${Prisma.sql`'["${tag}"]'::jsonb`}`
+        ), ' OR ')})`
     : Prisma.empty;
 
   const docFilter = params.documentIds && params.documentIds.length > 0
     ? Prisma.sql`AND d.id IN (${Prisma.join(params.documentIds.map(id => Prisma.sql`${id}::uuid`))})`
     : Prisma.empty;
 
+  // 元数据过滤
+  const metadataFilter = buildMetadataFilterSQL(params);
+
+  // 构建动态 SQL 以支持不同距离度量
+  const scoreExpression = distanceMetric === 'cosine'
+    ? Prisma.sql`1 - (c.embedding ${Prisma.raw(distanceOp)} ${embeddingStr}::vector)`
+    : distanceMetric === 'inner_product'
+      ? Prisma.sql`(c.embedding ${Prisma.raw(distanceOp)} ${embeddingStr}::vector)`
+      : Prisma.sql`-(c.embedding ${Prisma.raw(distanceOp)} ${embeddingStr}::vector)`;
+
+  const orderDirection = distanceMetric === 'inner_product' ? 'DESC' : 'ASC';
+
+  // === 小块大块架构：只检索小块 ===
   const results = await prisma.$queryRaw<SearchResultRow[]>`
     SELECT
       c.id,
@@ -715,22 +890,29 @@ export async function semanticSearch(
       c.chunk_index,
       c.heading_chain,
       c.heading_level,
+      c.parent_id,
       d.title as document_title,
       d.source,
-      1 - (c.embedding <=> ${embeddingStr}::vector) as score
+      d.publish_date,
+      d.source_dept,
+      d.security_level,
+      d.business_category,
+      ${scoreExpression} as score
     FROM knowledge_chunks c
     JOIN knowledge_documents d ON c.document_id = d.id
     WHERE c.user_id = ${userId}::uuid
       AND c.embedding IS NOT NULL
       AND c.embedding_version = ${currentVersion}
+      AND c.chunk_type = 'small'
       AND d.status = 'indexed'
       ${tagFilter}
       ${docFilter}
-    ORDER BY c.embedding <=> ${embeddingStr}::vector
+      ${metadataFilter}
+    ORDER BY c.embedding ${Prisma.raw(distanceOp)} ${embeddingStr}::vector ${Prisma.raw(orderDirection)}
     LIMIT ${params.limit * 2}
   `;
 
-  return results.map((r) => ({
+  return results.map((r: any) => ({
     id: r.id,
     documentId: r.document_id,
     documentTitle: r.document_title,
@@ -740,7 +922,46 @@ export async function semanticSearch(
     score: Number(r.score),
     source: 'semantic',
     sourceInfo: r.source,
+    parentId: r.parent_id ?? undefined,
+    publishDate: r.publish_date ? new Date(r.publish_date).getTime() : null,
+    sourceDept: r.source_dept,
+    securityLevel: r.security_level,
+    businessCategory: r.business_category,
   }));
+}
+
+// 构建元数据过滤 SQL 条件
+function buildMetadataFilterSQL(params: HybridSearchInput): Prisma.Sql {
+  const conditions: Prisma.Sql[] = [];
+
+  // 发布日期范围
+  if (params.publishDateRange) {
+    if (params.publishDateRange.start) {
+      conditions.push(Prisma.sql`d.publish_date >= ${new Date(params.publishDateRange.start)}::date`);
+    }
+    if (params.publishDateRange.end) {
+      conditions.push(Prisma.sql`d.publish_date <= ${new Date(params.publishDateRange.end)}::date`);
+    }
+  }
+
+  // 来源部门
+  if (params.sourceDept && params.sourceDept.length > 0) {
+    conditions.push(Prisma.sql`d.source_dept = ANY(${params.sourceDept}::text[])`);
+  }
+
+  // 保密等级
+  if (params.securityLevel) {
+    conditions.push(Prisma.sql`d.security_level = ${params.securityLevel}`);
+  }
+
+  // 业务分类
+  if (params.businessCategory && params.businessCategory.length > 0) {
+    conditions.push(Prisma.sql`d.business_category = ANY(${params.businessCategory}::text[])`);
+  }
+
+  return conditions.length > 0
+    ? Prisma.sql`AND ${Prisma.join(conditions, ' AND ')}`
+    : Prisma.empty;
 }
 
 // 使用 pg_trgm 模糊匹配替代 tsquery
@@ -757,19 +978,26 @@ export async function keywordSearch(
 ): Promise<SearchResultDto[]> {
   const userId = getCurrentUserId();
 
+  // 标签过滤：使用 @> 包含查询 + GIN 索引优化
+  // 替代 jsonb_array_elements_text 展开，利用 jsonb_path_ops 索引
   const tagFilter = params.tags && params.tags.length > 0
-    ? Prisma.sql`
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements_text(d.tags_json) tag
-          WHERE tag IN (${Prisma.join(params.tags)})
-        )
-      `
+    ? params.tags.length === 1
+      // 单标签：d.tags_json @> '["tag"]'::jsonb（命中 jsonb_path_ops 索引）
+      ? Prisma.sql`AND d.tags_json @> ${Prisma.sql`'["${params.tags[0]}"]'::jsonb`}`
+      // 多标签：OR 组合多个 @> 条件（每个条件命中索引）
+      : Prisma.sql`AND (${Prisma.join(params.tags.map(tag =>
+          Prisma.sql`d.tags_json @> ${Prisma.sql`'["${tag}"]'::jsonb`}`
+        ), ' OR ')})`
     : Prisma.empty;
 
   const docFilter = params.documentIds && params.documentIds.length > 0
     ? Prisma.sql`AND d.id IN (${Prisma.join(params.documentIds.map(id => Prisma.sql`${id}::uuid`))})`
     : Prisma.empty;
 
+  // 元数据过滤
+  const metadataFilter = buildMetadataFilterSQL(params);
+
+  // === 小块大块架构：只检索小块 ===
   // 中文查询：使用 ILIKE ANY 匹配分词后的字符
   if (shouldUseChineseMode(query)) {
     const tokens = tokenizeChinese(query);
@@ -787,8 +1015,13 @@ export async function keywordSearch(
         c.chunk_index,
         c.heading_chain,
         c.heading_level,
+        c.parent_id,
         d.title as document_title,
         d.source,
+        d.publish_date,
+        d.source_dept,
+        d.security_level,
+        d.business_category,
         (
           SELECT COUNT(*)::float FROM unnest(${patterns}::text[]) p
           WHERE c.content ILIKE p
@@ -796,15 +1029,17 @@ export async function keywordSearch(
       FROM knowledge_chunks c
       JOIN knowledge_documents d ON c.document_id = d.id
       WHERE c.user_id = ${userId}::uuid
+        AND c.chunk_type = 'small'
         AND d.status = 'indexed'
         AND c.content ILIKE ANY (${patterns}::text[])
         ${tagFilter}
         ${docFilter}
+        ${metadataFilter}
       ORDER BY score DESC
       LIMIT ${params.limit * 2}
     `;
 
-    return results.map((r) => ({
+    return results.map((r: any) => ({
       id: r.id,
       documentId: r.document_id,
       documentTitle: r.document_title,
@@ -814,6 +1049,11 @@ export async function keywordSearch(
       score: Number(r.score),
       source: 'keyword',
       sourceInfo: r.source,
+      parentId: r.parent_id ?? undefined,
+      publishDate: r.publish_date ? new Date(r.publish_date).getTime() : null,
+      sourceDept: r.source_dept,
+      securityLevel: r.security_level,
+      businessCategory: r.business_category,
     }));
   }
 
@@ -826,21 +1066,28 @@ export async function keywordSearch(
       c.chunk_index,
       c.heading_chain,
       c.heading_level,
+      c.parent_id,
       d.title as document_title,
       d.source,
+      d.publish_date,
+      d.source_dept,
+      d.security_level,
+      d.business_category,
       similarity(c.content, ${query}) as score
     FROM knowledge_chunks c
     JOIN knowledge_documents d ON c.document_id = d.id
     WHERE c.user_id = ${userId}::uuid
+      AND c.chunk_type = 'small'
       AND d.status = 'indexed'
       AND c.content % ${query}
       ${tagFilter}
       ${docFilter}
+      ${metadataFilter}
     ORDER BY score DESC
     LIMIT ${params.limit * 2}
   `;
 
-  return results.map((r) => ({
+  return results.map((r: any) => ({
     id: r.id,
     documentId: r.document_id,
     documentTitle: r.document_title,
@@ -850,12 +1097,26 @@ export async function keywordSearch(
     score: Number(r.score),
     source: 'keyword',
     sourceInfo: r.source,
+    parentId: r.parent_id ?? undefined,
+    publishDate: r.publish_date ? new Date(r.publish_date).getTime() : null,
+    sourceDept: r.source_dept,
+    securityLevel: r.security_level,
+    businessCategory: r.business_category,
   }));
 }
 
 // =====================================================
-// BM25 全文检索（tsvector + tsquery）
+// BM25 全文检索（tsvector + tsquery）+ 分数归一化
 // =====================================================
+
+/**
+ * BM25 分数归一化
+ * ts_rank_cd 返回无固定范围的分数，使用 Sigmoid 函数归一化到 0-1
+ * 公式: score_normalized = 1 / (1 + exp(-k * (score_raw - offset)))
+ * 参数选择：k=0.3, offset=1.0 使典型分数范围 (0-10) 映射到合理区间
+ */
+const BM25_NORMALIZATION_K = 0.3;
+const BM25_NORMALIZATION_OFFSET = 1.0;
 
 export async function bm25Search(
   query: string,
@@ -863,25 +1124,28 @@ export async function bm25Search(
 ): Promise<SearchResultDto[]> {
   const userId = getCurrentUserId();
 
+  // 标签过滤：使用 @> 包含查询 + GIN 索引优化
   const tagFilter = params.tags && params.tags.length > 0
-    ? Prisma.sql`
-        AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements_text(d.tags_json) tag
-          WHERE tag IN (${Prisma.join(params.tags)})
-        )
-      `
+    ? params.tags.length === 1
+      ? Prisma.sql`AND d.tags_json @> ${Prisma.sql`'["${params.tags[0]}"]'::jsonb`}`
+      : Prisma.sql`AND (${Prisma.join(params.tags.map(tag =>
+          Prisma.sql`d.tags_json @> ${Prisma.sql`'["${tag}"]'::jsonb`}`
+        ), ' OR ')})`
     : Prisma.empty;
 
   const docFilter = params.documentIds && params.documentIds.length > 0
     ? Prisma.sql`AND d.id IN (${Prisma.join(params.documentIds.map(id => Prisma.sql`${id}::uuid`))})`
     : Prisma.empty;
 
-  // 构建查询词：按空格和标点分词，使用 OR 连接
+  // 元数据过滤
+  const metadataFilter = buildMetadataFilterSQL(params);
+
   const queryTerms = query.split(/[，。；：！？\s+]/).filter(t => t.length > 0);
   if (queryTerms.length === 0) return [];
 
   const tsqueryStr = queryTerms.join(' | ');
 
+  // 使用 Sigmoid 归一化 BM25 分数
   const results = await prisma.$queryRaw<SearchResultRow[]>`
     SELECT
       c.id,
@@ -892,7 +1156,14 @@ export async function bm25Search(
       c.heading_level,
       d.title as document_title,
       d.source,
-      ts_rank_cd(c.content_tsvector, to_tsquery('simple', ${tsqueryStr}), 32) as score
+      d.publish_date,
+      d.source_dept,
+      d.security_level,
+      d.business_category,
+      1.0 / (1.0 + exp(-${BM25_NORMALIZATION_K} * (
+        ts_rank_cd(c.content_tsvector, to_tsquery('simple', ${tsqueryStr}), 32)
+        - ${BM25_NORMALIZATION_OFFSET}
+      ))) as score
     FROM knowledge_chunks c
     JOIN knowledge_documents d ON c.document_id = d.id
     WHERE c.user_id = ${userId}::uuid
@@ -901,11 +1172,12 @@ export async function bm25Search(
       AND c.content_tsvector @@ to_tsquery('simple', ${tsqueryStr})
       ${tagFilter}
       ${docFilter}
+      ${metadataFilter}
     ORDER BY score DESC
     LIMIT ${params.limit * 2}
   `;
 
-  return results.map((r) => ({
+  return results.map((r: any) => ({
     id: r.id,
     documentId: r.document_id,
     documentTitle: r.document_title,
@@ -915,6 +1187,10 @@ export async function bm25Search(
     score: Number(r.score),
     source: 'keyword' as const,
     sourceInfo: r.source,
+    publishDate: r.publish_date ? new Date(r.publish_date).getTime() : null,
+    sourceDept: r.source_dept,
+    securityLevel: r.security_level,
+    businessCategory: r.business_category,
   }));
 }
 

@@ -48,6 +48,7 @@ export const createAgentRunSchema = z.object({
   inputText: z.string().trim().min(1).max(20000),
   model: z.string().max(200).optional().default('default'), // 放宽验证，允许空字符串
   sessionId: z.string().uuid().optional(), // 可选，首次对话时后端自动创建
+  ragEnabled: z.boolean().optional().default(false), // RAG 知识检索是否启用
   systemPrompt: z.string().trim().max(5000).optional(), // 可选，临时覆盖用户默认人格
   initialMessages: z
     .array(

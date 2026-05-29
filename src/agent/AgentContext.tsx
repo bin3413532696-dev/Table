@@ -28,7 +28,8 @@ type AgentAction =
   | { type: 'NEW_SESSION'; payload?: string }
   | { type: 'SET_ERROR'; payload: string | null }
   | { type: 'LOAD_HISTORY'; payload: { messages: AgentMessage[]; runId: string; sessionId: string | null } }
-  | { type: 'UPDATE_SESSION_ID'; payload: string };
+  | { type: 'UPDATE_SESSION_ID'; payload: string }
+  | { type: 'SET_RAG_ENABLED'; payload: boolean };
 
 interface ActiveRequestState {
   controller: AbortController;
@@ -41,6 +42,10 @@ interface ActiveRequestState {
 }
 
 const SESSION_ID_KEY = 'agent_session_id';
+const RAG_ENABLED_KEY = 'agent_rag_enabled';
+
+/** Throttle interval for streaming content updates. */
+const STREAM_THROTTLE_MS = 80;
 
 function getStoredSessionId(): string {
   if (typeof window === 'undefined') {
@@ -54,9 +59,22 @@ function getStoredSessionId(): string {
   return crypto.randomUUID();
 }
 
+function getStoredRagEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return false;  // 默认禁用
+  }
+  return localStorage.getItem(RAG_ENABLED_KEY) === 'true';
+}
+
 function storeSessionId(sessionId: string) {
   if (typeof window !== 'undefined') {
     localStorage.setItem(SESSION_ID_KEY, sessionId);
+  }
+}
+
+function storeRagEnabled(enabled: boolean) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(RAG_ENABLED_KEY, String(enabled));
   }
 }
 
@@ -114,6 +132,7 @@ const initialState: AgentState = {
   error: null,
   currentRunId: null,
   currentSessionId: getStoredSessionId(),
+  ragEnabled: getStoredRagEnabled(),  // RAG 知识检索默认禁用
 };
 
 function agentReducer(state: AgentState, action: AgentAction): AgentState {
@@ -209,6 +228,9 @@ function agentReducer(state: AgentState, action: AgentAction): AgentState {
     case 'UPDATE_SESSION_ID':
       storeSessionId(action.payload);
       return { ...state, currentSessionId: action.payload };
+    case 'SET_RAG_ENABLED':
+      storeRagEnabled(action.payload);
+      return { ...state, ragEnabled: action.payload };
     default:
       return state;
   }
@@ -226,6 +248,7 @@ interface AgentContextType {
   selectModel: (model: string) => void;
   loadHistoryRun: (run: AgentRunDetailDto) => void;
   loadHistorySession: (session: AgentSessionDetailDto) => void;
+  toggleRag: () => void;  // 切换 RAG 知识检索开关
 }
 
 const AgentContext = createContext<AgentContextType | null>(null);
@@ -233,6 +256,49 @@ const AgentContext = createContext<AgentContextType | null>(null);
 export function AgentProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(agentReducer, initialState);
   const activeRequestRef = useRef<ActiveRequestState | null>(null);
+
+  // 流式节流机制：减少高频 dispatch 导致的渲染压力
+  const pendingChunksRef = useRef<{ messageId: string; chunks: string[] }>({ messageId: '', chunks: [] });
+  const throttleTimerRef = useRef<number | null>(null);
+
+  // 节流后的批量更新
+  const flushStreamingChunks = useCallback(() => {
+    if (throttleTimerRef.current) {
+      clearTimeout(throttleTimerRef.current);
+      throttleTimerRef.current = null;
+    }
+    const pending = pendingChunksRef.current;
+    if (pending.chunks.length > 0) {
+      dispatch({
+        type: 'APPEND_STREAMING_CONTENT',
+        payload: {
+          messageId: pending.messageId,
+          chunk: pending.chunks.join(''),
+        },
+      });
+      pending.chunks = [];
+    }
+  }, []);
+
+  // 节流添加 chunk
+  const throttledAppendChunk = useCallback((messageId: string, chunk: string) => {
+    const pending = pendingChunksRef.current;
+    // 新消息ID时先flush旧的
+    if (pending.messageId !== messageId && pending.chunks.length > 0) {
+      flushStreamingChunks();
+    }
+    pending.messageId = messageId;
+    pending.chunks.push(chunk);
+    // 设置节流定时器
+    if (!throttleTimerRef.current) {
+      throttleTimerRef.current = window.setTimeout(flushStreamingChunks, STREAM_THROTTLE_MS);
+    }
+  }, [flushStreamingChunks]);
+
+  // 强制flush（流结束时）
+  const forceFlushChunks = useCallback(() => {
+    flushStreamingChunks();
+  }, [flushStreamingChunks]);
 
   const handleRuntimeUnavailable = useCallback((error: unknown) => {
     dispatch({ type: 'SET_CONNECTED', payload: false });
@@ -293,9 +359,16 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
           const latestSession = sessionList.items[0];
           const detail = await fetchAgentSessionDetail(latestSession.id);
           if (detail.messages && detail.messages.length > 0) {
-            // 过滤掉系统消息，不显示给用户
+            // 过滤掉系统消息和工具消息，不显示给用户
+            // 1. role 为 'system' 或 'tool' 的消息直接过滤
+            // 2. content 包含工具执行结果标识的也过滤（兼容旧数据）
             const messages: AgentMessage[] = detail.messages
-              .filter((msg) => msg.role !== 'system')
+              .filter((msg) => {
+                if (msg.role === 'system' || msg.role === 'tool') return false;
+                // 兼容旧数据：通过内容特征过滤工具结果消息
+                if (msg.role === 'user' && msg.content.startsWith('以下是工具执行结果')) return false;
+                return true;
+              })
               .map((msg, index) => ({
                 id: msg.id || `msg-${index}`,
                 role: msg.role,
@@ -414,8 +487,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     if (event.type === 'run_update') {
       if (event.run && event.run.status === 'waiting_confirmation') {
-        // 等待确认时，将streaming内容合并到messages
+        // 等待确认时，先 flush 节流中的内容，然后合并到 messages
         if (requestState) {
+          forceFlushChunks();
           dispatch({
             type: 'FINALIZE_STREAMING',
             payload: {
@@ -432,8 +506,9 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
     if (event.type === 'run_completed') {
       if (event.run) {
-        // 流式完成，将streaming内容合并到messages
+        // 流式完成，先 flush 节流中的内容，然后合并到 messages
         if (requestState) {
+          forceFlushChunks();
           dispatch({
             type: 'FINALIZE_STREAMING',
             payload: {
@@ -448,7 +523,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // 处理新的 token 事件：直接发送token级内容
+    // 处理新的 token 事件：使用节流机制减少高频 dispatch
     if (event.type === 'token' && event.token) {
       const token = event.token;
 
@@ -456,14 +531,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         requestState.content += token;
       }
 
-      // 流式输出优化：使用 APPEND_STREAMING_CONTENT 避免高频 messages 数组重建
-      dispatch({
-        type: 'APPEND_STREAMING_CONTENT',
-        payload: {
-          messageId: assistantMessageId,
-          chunk: token,
-        },
-      });
+      // 节流合并：多个 token 合为一个 dispatch
+      throttledAppendChunk(assistantMessageId, token);
       return;
     }
 
@@ -498,16 +567,10 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         requestState.content += textChunk;
       }
 
-      // 流式输出优化：使用 APPEND_STREAMING_CONTENT 避免高频 messages 数组重建
-      dispatch({
-        type: 'APPEND_STREAMING_CONTENT',
-        payload: {
-          messageId: assistantMessageId,
-          chunk: textChunk,
-        },
-      });
+      // 节流合并：多个 chunk 合为一个 dispatch
+      throttledAppendChunk(assistantMessageId, textChunk);
     }
-  }, [applyRunResultToAssistantMessage]);
+  }, [applyRunResultToAssistantMessage, throttledAppendChunk, forceFlushChunks]);
 
   useEffect(() => {
     const handleConfigChanged = () => {
@@ -538,6 +601,15 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, [state.currentSessionId]);
 
+  // 清理节流定时器
+  useEffect(() => {
+    return () => {
+      if (throttleTimerRef.current) {
+        clearTimeout(throttleTimerRef.current);
+      }
+    };
+  }, []);
+
   const sendMessage = useCallback(async (content: string) => {
     if (state.isProcessing || !state.isConnected) {
       return;
@@ -566,7 +638,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     // 添加空的助手消息作为占位符
     dispatch({ type: 'ADD_MESSAGE', payload: assistantMessage });
 
-    // 初始化 streamingContent
+    // 初始化 streamingContent（直接dispatch，不走节流，确保立即显示占位）
     dispatch({
       type: 'APPEND_STREAMING_CONTENT',
       payload: { messageId: assistantMessage.id, chunk: '' },
@@ -589,9 +661,11 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         inputText: string;
         model: string;
         sessionId?: string;
+        ragEnabled?: boolean;
       } = {
         inputText: content,
         model: state.selectedModel || 'default',
+        ragEnabled: state.ragEnabled,
       };
       if (isValidUuid) {
         requestBody.sessionId = state.currentSessionId;
@@ -616,7 +690,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         arguments: execution.arguments,
       }));
 
-      // 流式完成，将最终内容合并到messages
+      // 流式完成，先flush节流内容，然后合并到messages
+      forceFlushChunks();
       dispatch({
         type: 'FINALIZE_STREAMING',
         payload: {
@@ -629,6 +704,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       if (requestState.canceled || requestState.controller.signal.aborted) {
         if (!requestState.stopHandled && activeRequestRef.current === requestState) {
+          forceFlushChunks();
           dispatch({
             type: 'FINALIZE_STREAMING',
             payload: {
@@ -642,6 +718,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      forceFlushChunks();
       dispatch({
         type: 'FINALIZE_STREAMING',
         payload: {
@@ -660,7 +737,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: 'SET_PROCESSING', payload: false });
       }
     }
-  }, [applyRunResultToAssistantMessage, state.currentSessionId, state.isConnected, state.isProcessing, state.selectedModel]);
+  }, [applyRunResultToAssistantMessage, state.currentSessionId, state.isConnected, state.isProcessing, state.selectedModel, forceFlushChunks, state.ragEnabled]);
 
   const stopThinking = useCallback(() => {
     const activeRequest = activeRequestRef.current;
@@ -743,10 +820,22 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'SELECT_MODEL', payload: model });
   }, []);
 
+  const toggleRag = useCallback(() => {
+    const newValue = !state.ragEnabled;
+    dispatch({ type: 'SET_RAG_ENABLED', payload: newValue });
+  }, [state.ragEnabled]);
+
   const loadHistoryRun = useCallback((run: AgentRunDetailDto) => {
-    // 过滤掉系统消息，不显示给用户
+    // 过滤掉系统消息和工具消息，不显示给用户
+    // 1. role 为 'system' 或 'tool' 的消息直接过滤
+    // 2. content 包含工具执行结果标识的也过滤（兼容旧数据）
     const messages: AgentMessage[] = run.messages
-      .filter((msg) => msg.role !== 'system')
+      .filter((msg) => {
+        if (msg.role === 'system' || msg.role === 'tool') return false;
+        // 兼容旧数据：通过内容特征过滤工具结果消息
+        if (msg.role === 'user' && msg.content.startsWith('以下是工具执行结果')) return false;
+        return true;
+      })
       .map((msg, index) => ({
         id: msg.id || `msg-${index}`,
         role: msg.role,
@@ -766,10 +855,12 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     const messages: AgentMessage[] = [];
 
     if (session.messages && session.messages.length > 0) {
-      // 从 checkpoint 加载的完整对话历史（过滤掉系统消息）
+      // 从 checkpoint 加载的完整对话历史（过滤掉系统消息和工具消息）
       for (const msg of session.messages) {
-        // 过滤掉系统消息，不显示给用户
-        if (msg.role === 'system') continue;
+        // 过滤掉系统消息和工具消息，不显示给用户
+        if (msg.role === 'system' || msg.role === 'tool') continue;
+        // 兼容旧数据：通过内容特征过滤工具结果消息
+        if (msg.role === 'user' && msg.content.startsWith('以下是工具执行结果')) continue;
         messages.push({
           id: msg.id || `msg-${messages.length}`,
           role: msg.role,
@@ -816,7 +907,8 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     selectModel,
     loadHistoryRun,
     loadHistorySession,
-  }), [state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, newSession, checkConnection, selectModel, loadHistoryRun, loadHistorySession]);
+    toggleRag,
+  }), [state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, newSession, checkConnection, selectModel, loadHistoryRun, loadHistorySession, toggleRag]);
 
   return <AgentContext.Provider value={value}>{children}</AgentContext.Provider>;
 }

@@ -15,9 +15,11 @@ import {
   deleteChunksByDocument,
   deleteChunksByHash,      // 新增
   getChunkHashes,          // 新增
+  getChunkIdsByHash,       // 新增：获取已存在 chunks 的真实 ID
   getChunksWithoutEmbedding,
   updateChunkEmbedding,
   updateChunkEmbeddingsBatch,
+  findEmbeddingCacheBatch, // 新增
   listJobs,
   findJobById,
   createJob,
@@ -29,12 +31,21 @@ import {
   listChunksWithCount,
   getChunkById,            // 新增：用于 chunk_read 工具
 } from './repository';
-import { parseDocument, getFileType, computeFileHash, cleanTextContent, computeContentHash } from './indexing/document-parser';
-import { chunkDocument, getChunkStats, CHUNK_STRATEGIES } from './indexing/chunker';
+import { parseDocument, getFileType, computeFileHash, computeContentHash } from './indexing/document-parser';
+import {
+  chunkDocument,
+  chunkDocumentHierarchical,
+  getChunkStats,
+  getHierarchicalChunkStats,
+  CHUNK_STRATEGIES,
+  type HierarchicalChunkResult,
+} from './indexing/chunker';
 import { embedChunks, embedQuery, createEmbedder } from './indexing/embedder';
 import { jobQueue } from './indexing/job-queue';
 import { hybridSearch, buildLLMContext, formatContextForAgent } from './retrieval';
 import { ragConfig } from './config';
+import { extractMetadata } from './indexing/metadata-extractor';
+import { cleanDocumentText, getParseQualityLevel } from './indexing/text-cleaner';
 import type { SearchResultDto } from './dto';
 import type {
   CreateDocumentInput,
@@ -108,9 +119,28 @@ export async function uploadDocument(
 
   // 解析文件
   const parseResult = await parseDocument(filePath, fileType);
-  const cleanedContent = cleanTextContent(parseResult.content);
+  const { cleanedText, qualityScore, stats: cleaningStats } = cleanDocumentText(parseResult.content);
 
-  // 创建文档记录
+  // 解析质量日志
+  const parseQualityLevel = getParseQualityLevel(qualityScore);
+  console.log(`[文档解析] ${docId}: 质量=${parseQualityLevel} (${qualityScore.toFixed(2)}), `
+              + `原始=${cleaningStats.originalLength}字符, 清洗后=${cleaningStats.cleanedLength}字符, `
+              + `移除=${cleaningStats.removedChars}字符`);
+
+  if (cleaningStats.headerFooterLines > 0 || cleaningStats.pageNumbersRemoved > 0) {
+    console.log(`[文档解析] ${docId}: 移除页眉页脚=${cleaningStats.headerFooterLines}行, 页码=${cleaningStats.pageNumbersRemoved}处`);
+  }
+
+  // 提取元数据（使用 LLM 分类）
+  const extractedMetadata = await extractMetadata({
+    title: title ?? parseResult.metadata.title ?? file.filename,
+    content: cleanedText,
+    parseResult,
+    filename: file.filename,
+    useLlm: true,
+  });
+
+  // 创建文档记录（包含元数据）
   const input: CreateDocumentInput = {
     title: title ?? parseResult.metadata.title ?? file.filename,
     fileType,
@@ -118,18 +148,31 @@ export async function uploadDocument(
     tags: tags ?? [],
   };
 
-  const doc = await createDocument(input, cleanedContent, fileHash, buffer.length);
+  const doc = await createDocument(
+    input,
+    cleanedText,
+    fileHash,
+    buffer.length,
+    {
+      publishDate: extractedMetadata.publishDate,
+      sourceDept: extractedMetadata.sourceDept,
+      securityLevel: extractedMetadata.securityLevel,
+      businessCategory: extractedMetadata.businessCategory,
+      docLanguage: extractedMetadata.docLanguage,
+      originalMetadata: parseResult.metadata,
+    }
+  );
 
   // 创建索引任务
   const job = await createJob(doc.id, 'full_index');
 
   // 执行索引（异步）
-  executeIndexingAsync(doc.id, job.id, filePath, fileType, cleanedContent).catch((error) => {
+  executeIndexingAsync(doc.id, job.id, filePath, fileType, cleanedText).catch((error) => {
     console.error(`索引任务失败 [${doc.id}]:`, error);
     // 错误已通过 jobQueue.markFailed 记录到数据库，前端可通过轮询获取状态
   });
 
-  return { document: doc, job };
+  return { document: doc, job, metadata: extractedMetadata, cleaningStats, parseQuality: parseQualityLevel };
 }
 
 export async function updateDocumentService(id: string, input: UpdateDocumentInput) {
@@ -184,44 +227,61 @@ async function executeIndexingAsync(
     await jobQueue.markRunning(jobId);
     await updateDocumentStatus(documentId, 'processing');
 
-    // 分块（传递 fileType 以选择合适的分块策略）
+    // 分块（使用分层chunking：小块大块架构）
     await jobQueue.updateProgress(jobId, 10);
-    const chunks = await chunkDocument(content, fileType);
+    const hierarchicalResult = await chunkDocumentHierarchical(content, fileType);
 
-    if (chunks.length === 0) {
+    if (hierarchicalResult.childChunks.length === 0) {
       throw new Error('文档内容无法分块');
     }
 
     // 分片质量监控：记录统计信息
-    const stats = getChunkStats(chunks);
-    console.log(`[索引监控] 文档 ${documentId}: ${stats.count} chunks, 平均 ${stats.avgLength} 字符, 范围 [${stats.minLength}, ${stats.maxLength}]`);
-    if (stats.minLength < 100) {
-      console.warn(`[索引警告] 存在极小 chunk (${stats.minLength} 字符)，可能影响检索质量`);
-    }
-    if (stats.maxLength > strategy.chunkSize * 2) {
-      console.warn(`[索引警告] 存在超大 chunk (${stats.maxLength} 字符)，可能超出 embedding 限制`);
-    }
+    const stats = getHierarchicalChunkStats(hierarchicalResult);
+    console.log(`[索引监控] 文档 ${documentId}: ${stats.parentCount} 大块, ${stats.childCount} 小块, `
+                + `大块平均 ${stats.avgParentLength} 字符, 小块平均 ${stats.avgChildLength} 字符`);
 
     // P4 增量索引：基于 content hash 判断是否需要更新
-    const existingHashes = await getChunkHashes(documentId);
-    const newChunkHashes = chunks.map(c => c.contentHash);
+    // 只检查小块的 hash（小块用于检索，需要精确匹配）
+    const existingHashes = await getChunkHashes(documentId, 'small');  // 只获取小块的 hash
+    const newChildHashes = hierarchicalResult.childChunks.map(c => c.contentHash);
 
-    // 需要新增的 chunks
-    const chunksToInsert = chunks.filter(c => !existingHashes.includes(c.contentHash));
-    // 需要删除的 chunks（不再存在的）
-    const hashesToDelete = existingHashes.filter(h => !newChunkHashes.includes(h));
+    // 需要新增的小块
+    const childChunksToInsert = hierarchicalResult.childChunks.filter(c => !existingHashes.includes(c.contentHash));
+    // 需要删除的小块（不再存在的）
+    const hashesToDelete = existingHashes.filter(h => !newChildHashes.includes(h));
 
-    console.log(`[增量索引] 新增 ${chunksToInsert.length} chunks, 删除 ${hashesToDelete.length} chunks`);
+    console.log(`[增量索引] 新增 ${childChunksToInsert.length} 小块, 删除 ${hashesToDelete.length} 小块`);
 
-    // 删除不再存在的 chunks
+    // 删除不再存在的小块（同时删除关联的大块）
     if (hashesToDelete.length > 0) {
       await deleteChunksByHash(documentId, hashesToDelete);
     }
 
-    // 创建新分块（包含 headingChain 和 embedding 信息）
+    // 存储大块（parent chunks）
+    await jobQueue.updateProgress(jobId, 15);
+    const parentChunksToInsert = hierarchicalResult.parentChunks.map(p => ({
+      id: p.id,
+      content: p.content,
+      contentHash: p.contentHash,
+      chunkIndex: p.chunkIndex,
+      startPos: p.startPos,
+      endPos: p.endPos,
+      headingChain: p.headingChain,
+      headingLevel: p.headingLevel,
+      chunkType: 'parent',
+      parentId: null,
+      // 大块不生成 embedding，以下字段为 null
+      embeddingDimensions: null,
+      embeddingVersion: null,
+    }));
+
+    await createChunks(documentId, parentChunksToInsert);
+    console.log(`[索引] 创建 ${parentChunksToInsert.length} 个大块`);
+
+    // 存储小块（child chunks），关联大块
     await jobQueue.updateProgress(jobId, 20);
-    if (chunksToInsert.length > 0) {
-      await createChunks(documentId, chunksToInsert.map(c => ({
+    if (childChunksToInsert.length > 0) {
+      await createChunks(documentId, childChunksToInsert.map(c => ({
         id: c.id,
         content: c.content,
         contentHash: c.contentHash,
@@ -230,37 +290,97 @@ async function executeIndexingAsync(
         endPos: c.endPos,
         headingChain: c.headingChain,
         headingLevel: c.headingLevel,
+        chunkType: 'small',
+        parentId: c.parentId,  // 关联大块
         embeddingDimensions: ragConfig.EMBEDDING_DIMENSIONS,
         embeddingVersion: ragConfig.EMBEDDING_VERSION ?? 1,
       })));
     }
+    console.log(`[索引] 创建 ${childChunksToInsert.length} 个小块`);
 
-    // 生成 Embedding（只对新 chunks）
+    // === 处理 embedding（只为小块生成）===
+    // 1. 新小块需要 embedding
+    // 2. 已存在的小块如果没有 embedding 也需要补充（优先使用缓存）
     await jobQueue.updateProgress(jobId, 30);
-    if (chunksToInsert.length > 0) {
+
+    // 收集所有需要写入 embedding 的数据
+    const embeddingUpdates: Array<{ chunkId: string; embedding: number[]; embeddingModel: string }> = [];
+
+    // 新小块：需要生成 embedding
+    const newChunksToEmbed = childChunksToInsert.map(c => ({
+      content: c.content,
+      contentHash: c.contentHash,
+      chunkId: c.id,
+    }));
+
+    // 现有小块但无 embedding（通过缓存查询判断）
+    const existingChildChunks = hierarchicalResult.childChunks.filter(c =>
+      existingHashes.includes(c.contentHash) && !childChunksToInsert.some(nc => nc.id === c.id)
+    );
+
+    if (existingChildChunks.length > 0) {
+      // 获取已存在小块的真实数据库 ID
+      const existingHashesToProcess = existingChildChunks.map(c => c.contentHash);
+      const dbChunkIdMap = await getChunkIdsByHash(documentId, existingHashesToProcess);
+
+      // 检查这些小块是否已有 embedding 缓存
+      const cacheMap = await findEmbeddingCacheBatch(
+        existingHashesToProcess,
+        ragConfig.EMBEDDING_MODEL
+      );
+
+      for (const c of existingChildChunks) {
+        const dbChunkId = dbChunkIdMap.get(c.contentHash);
+        if (!dbChunkId) {
+          console.warn(`[索引] 未找到小块的数据库 ID: ${c.contentHash}`);
+          continue;
+        }
+
+        const cached = cacheMap.get(c.contentHash);
+        if (cached) {
+          // 有缓存：直接使用缓存的 embedding
+          embeddingUpdates.push({
+            chunkId: dbChunkId,
+            embedding: cached,
+            embeddingModel: ragConfig.EMBEDDING_MODEL,
+          });
+        } else {
+          // 无缓存：需要生成 embedding
+          newChunksToEmbed.push({
+            content: c.content,
+            contentHash: c.contentHash,
+            chunkId: dbChunkId,
+          });
+        }
+      }
+    }
+
+    // 生成所有需要新 embedding 的小块
+    if (newChunksToEmbed.length > 0) {
+      console.log(`[索引] 需要生成 embedding 的小块: ${newChunksToEmbed.length} 个`);
       const embedder = await createEmbedder();
-      const embeddingResults = await embedder.embedChunksBatch(chunksToInsert.map(c => ({
-        content: c.content,
-        contentHash: c.contentHash,
-      })));
+      const embeddingResults = await embedder.embedChunksBatch(
+        newChunksToEmbed.map(c => ({ content: c.content, contentHash: c.contentHash }))
+      );
 
-      // 存储 Embedding
+      // 构建 contentHash -> chunkId 的映射
+      const newChunkMap = new Map(newChunksToEmbed.map(c => [c.contentHash, c.chunkId]));
+      for (const result of embeddingResults) {
+        const chunkId = newChunkMap.get(result.contentHash);
+        if (chunkId) {
+          embeddingUpdates.push({
+            chunkId,
+            embedding: result.embedding,
+            embeddingModel: ragConfig.EMBEDDING_MODEL,
+          });
+        }
+      }
+    }
+
+    // 写入所有 embedding（新生成 + 从缓存获取）
+    if (embeddingUpdates.length > 0) {
+      console.log(`[索引] 写入 embedding: ${embeddingUpdates.length} 个`);
       await jobQueue.updateProgress(jobId, 70);
-      const chunkMap = new Map(chunksToInsert.map(c => [c.contentHash, c]));
-      const embeddingUpdates = embeddingResults
-        .map(result => {
-          const chunk = chunkMap.get(result.contentHash);
-          if (chunk) {
-            return {
-              chunkId: chunk.id,
-              embedding: result.embedding,
-              embeddingModel: ragConfig.EMBEDDING_MODEL,
-            };
-          }
-          return null;
-        })
-        .filter((u): u is NonNullable<typeof u> => u !== null);
-
       await updateChunkEmbeddingsBatch(embeddingUpdates);
     }
 

@@ -2,6 +2,9 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Agent 流式动画样式 */
+@import './streaming.css';
+
 * {
   margin: 0;
   padding: 0;

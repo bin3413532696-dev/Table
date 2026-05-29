@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, memo, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback, memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bot, X, Send, Loader2, AlertCircle, Trash2, CheckCircle, XCircle, Square, History, ChevronLeft, Clock, ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -13,6 +13,8 @@ import {
   createAgentSession,
   type AgentSessionDto,
 } from '../../lib/agentApi';
+import { useSmartScroll } from '../../hooks/useSmartScroll';
+import { NewMessageButton } from './NewMessageButton';
 
 const SIDEBAR_WIDTH = 384;
 
@@ -31,9 +33,9 @@ const MessageItem = memo(function MessageItem({ message, streamingContent, expan
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}
+      className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''} message-fade-in`}
     >
       <div
         className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
@@ -48,7 +50,7 @@ const MessageItem = memo(function MessageItem({ message, streamingContent, expan
           isUser
             ? 'bg-white text-text-primary border border-border-primary'
             : 'bg-bg-secondary border border-border-primary'
-        }`}
+        } ${streamingContent ? 'streaming-border' : ''}`}
       >
         <div className={`prose prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-1 ${isUser ? '' : 'dark:prose-invert'}`}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
@@ -113,6 +115,13 @@ export const AgentSidebar: React.FC = () => {
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // 智能滚动系统
+  const { handleScroll, scrollToBottom, scrollState } = useSmartScroll(scrollContainerRef, {
+    scrollMode: 'near-bottom',
+    isProcessing: state.isProcessing,
+  });
 
   // 响应式检测
   useEffect(() => {
@@ -126,25 +135,14 @@ export const AgentSidebar: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 流式输出优化：使用异步滚动，避免阻塞绘制
+  // 流式输出优化：使用智能滚动系统替代固定定时器
   useEffect(() => {
     if (showHistory) return;
-
-    // 使用 requestAnimationFrame 避免阻塞
-    const scrollToBottom = () => {
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      });
-    };
-
-    // 只在isProcessing变化时自动滚动（减少滚动频率）
-    if (state.isProcessing) {
-      scrollToBottom();
-      // 每500ms检查一次滚动，比每个chunk滚动更合理
-      const timer = setInterval(scrollToBottom, 500);
-      return () => clearInterval(timer);
+    // streamingContent 变化时触发滚动检查（已由 useSmartScroll 内部处理）
+    if (state.streamingContent && scrollState.userNearBottom) {
+      scrollToBottom(true);
     }
-  }, [showHistory, state.isProcessing, state.streamingContent]);
+  }, [showHistory, state.streamingContent, scrollState.userNearBottom, scrollToBottom]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || state.isProcessing) return;
@@ -400,7 +398,18 @@ export const AgentSidebar: React.FC = () => {
         </AnimatePresence>
 
         {/* 消息区域 */}
-        <div className={`flex-1 overflow-auto p-3 space-y-3 ${showHistory ? 'hidden' : ''}`}>
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className={`flex-1 overflow-auto p-3 space-y-3 ${showHistory ? 'hidden' : ''}`}
+          style={{ overscrollBehavior: 'contain' }}
+        >
+          {/* 新消息提示按钮 */}
+          <NewMessageButton
+            visible={scrollState.newMessagesBelow}
+            onClick={() => scrollToBottom(true)}
+          />
+
           {messagesToRender.length === 0 && (
             <div className="h-full flex items-center justify-center text-center text-text-muted text-sm">
               <div>
@@ -421,9 +430,14 @@ export const AgentSidebar: React.FC = () => {
             />
           ))}
 
+          {/* 思考状态指示器 - 三点动画 */}
           {state.isProcessing && !state.streamingContent && (
             <div className="flex items-center gap-2 text-text-muted text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <div className="reading-indicator" aria-hidden="true">
+                <span className="reading-indicator__dot" />
+                <span className="reading-indicator__dot" />
+                <span className="reading-indicator__dot" />
+              </div>
               <span>思考中...</span>
             </div>
           )}

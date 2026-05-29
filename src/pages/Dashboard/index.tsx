@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Send, Loader2, AlertCircle, CheckCircle, XCircle, Square, ChevronDown, ChevronRight, Sparkles, CheckSquare, BookOpen, Wallet, Calendar, History, Plus, Trash2, Menu, X, Clock } from 'lucide-react';
+import { Bot, Send, Loader2, AlertCircle, CheckCircle, XCircle, Square, ChevronDown, ChevronRight, Sparkles, CheckSquare, BookOpen, Wallet, Calendar, History, Plus, Trash2, Menu, X, Clock, Database } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAgent } from '../../agent/AgentContext';
@@ -143,11 +143,13 @@ function getSessionStatus(session: AgentSessionDto): string {
 }
 
 export default function Dashboard() {
-  const { state, sendMessage, stopThinking, confirmAction, rejectAction, newSession, loadHistorySession } = useAgent();
+  const { state, sendMessage, stopThinking, confirmAction, rejectAction, newSession, loadHistorySession, toggleRag } = useAgent();
   const [input, setInput] = useState('');
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
+  const [inputAreaHeight, setInputAreaHeight] = useState(88);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputAreaRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   // 会话历史管理
@@ -181,6 +183,37 @@ export default function Dashboard() {
       return () => clearTimeout(timer);
     }
   }, []);
+
+  // 监听输入框区域高度变化，动态调整padding
+  useEffect(() => {
+    const updateInputHeight = () => {
+      if (inputAreaRef.current) {
+        const height = inputAreaRef.current.offsetHeight;
+        setInputAreaHeight(height);
+      }
+    };
+
+    // 立即更新并延迟再次更新，确保获取正确的高度
+    updateInputHeight();
+    const timer = setTimeout(updateInputHeight, 100);
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateInputHeight();
+      // 当高度变化时，如果用户没有向上滚动，保持滚动到底部
+      if (isAutoScrollRef.current) {
+        scrollToBottom();
+      }
+    });
+
+    if (inputAreaRef.current) {
+      resizeObserver.observe(inputAreaRef.current);
+    }
+
+    return () => {
+      clearTimeout(timer);
+      resizeObserver.disconnect();
+    };
+  }, [state.isProcessing, state.confirmationRequest, scrollToBottom]);
 
   // 消息或状态变化时滚动
   useEffect(() => {
@@ -218,7 +251,15 @@ export default function Dashboard() {
     setInput('');
     await sendMessage(message);
     inputRef.current?.focus();
-  }, [input, state.isProcessing, sendMessage]);
+    // 发送后再次确保滚动到底部和输入框高度更新
+    setTimeout(() => {
+      if (inputAreaRef.current) {
+        const height = inputAreaRef.current.offsetHeight;
+        setInputAreaHeight(height);
+        scrollToBottom();
+      }
+    }, 150);
+  }, [input, state.isProcessing, sendMessage, scrollToBottom]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -426,7 +467,7 @@ export default function Dashboard() {
         </div>
 
         {/* 消息区域 */}
-        <div ref={scrollAreaRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto pb-24" style={{ overscrollBehavior: 'y contain' }}>
+        <div ref={scrollAreaRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto" style={{ overscrollBehavior: 'y contain', paddingBottom: `${inputAreaHeight + 32}px` }}>
           {!hasMessages ? (
             <div className="h-full flex items-center justify-center p-6">
               <motion.div
@@ -546,7 +587,7 @@ export default function Dashboard() {
               exit={{ opacity: 0, y: 10, scale: 0.98 }}
               transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
               className="fixed left-0 right-0 z-10 px-4 sm:px-6 py-3 border-t border-warning/20 bg-warning/5 backdrop-blur-md"
-              style={{ bottom: '88px' }}
+              style={{ bottom: `${inputAreaHeight}px` }}
             >
               <div className="max-w-3xl mx-auto flex items-start gap-2.5">
                 <div className="w-8 h-8 rounded-full bg-warning/10 flex items-center justify-center shrink-0">
@@ -588,55 +629,80 @@ export default function Dashboard() {
         )}
 
         {/* 输入区域 */}
-        <div className="fixed bottom-0 left-0 right-0 z-20 px-4 sm:px-6 lg:px-16 xl:px-32 py-4 bg-bg-card backdrop-blur-xl border-t border-border-primary">
-          <div className="max-w-4xl mx-auto flex gap-2.5 items-end">
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                e.target.style.height = 'auto';
-                e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder="试着对我说点什么..."
-              className="flex-1 resize-none border border-border-primary rounded-xl px-4 py-3 text-sm bg-bg-card focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-text-muted/60 transition-all duration-200"
-              style={{ minHeight: '44px', maxHeight: '150px' }}
-              disabled={!state.isConnected || state.isProcessing || !!state.confirmationRequest}
-            />
-            {state.isProcessing && (
+        <div ref={inputAreaRef} className="fixed bottom-0 left-0 right-0 z-20 px-4 sm:px-6 lg:px-16 xl:px-32 py-4 bg-bg-card/80 backdrop-blur-xl border-t border-border-primary/50 shadow-[0_-4px_24px_rgba(0,0,0,0.06)]">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex items-end gap-3 p-1.5 bg-bg-secondary/60 rounded-2xl border border-border-primary/30 shadow-sm">
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  e.target.style.height = 'auto';
+                  e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
+                  setTimeout(() => {
+                    if (inputAreaRef.current) {
+                      const height = inputAreaRef.current.offsetHeight;
+                      setInputAreaHeight(height);
+                      if (isAutoScrollRef.current) {
+                        scrollToBottom();
+                      }
+                    }
+                  }, 50);
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder="试着对我说点什么..."
+                className="flex-1 resize-none bg-transparent px-4 py-2.5 text-sm text-text-primary focus:outline-none placeholder:text-text-muted/50 transition-all duration-200"
+                style={{ minHeight: '40px', maxHeight: '150px' }}
+                disabled={!state.isConnected || state.isProcessing || !!state.confirmationRequest}
+              />
+              {state.isProcessing && (
+                <motion.button
+                  initial={{ scale: 0.85, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.85, opacity: 0 }}
+                  onClick={stopThinking}
+                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-error/20 text-error bg-error/8 hover:bg-error/15 transition-all duration-200 text-sm"
+                  title="中断"
+                >
+                  <Square className="w-4 h-4" />
+                  <span className="hidden sm:inline">停止</span>
+                </motion.button>
+              )}
               <motion.button
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                onClick={stopThinking}
-                className="flex items-center gap-1.5 px-3.5 py-3 border border-error/30 text-error rounded-xl hover:bg-error/10 transition-colors duration-150 text-sm active:scale-95"
-                title="中断"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={toggleRag}
+                className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl transition-all duration-200 text-sm ${
+                  state.ragEnabled
+                    ? 'bg-success/15 text-success border border-success/25 shadow-[0_2px_8px_rgba(22,163,74,0.15)]'
+                    : 'bg-bg-tertiary text-text-muted border border-border-primary/50 hover:border-border-secondary hover:text-text-secondary'
+                }`}
+                title={state.ragEnabled ? '禁用知识库检索' : '启用知识库检索'}
               >
-                <Square className="w-4 h-4" />
-                <span className="hidden sm:inline">停止</span>
+                <Database className="w-4 h-4" />
               </motion.button>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleSend}
+                disabled={!input.trim() || state.isProcessing || !state.isConnected || !!state.confirmationRequest}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-gradient-to-r from-primary to-primary-dark text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-primary/25 active:shadow-md active:shadow-primary/15 transition-all duration-200"
+              >
+                <Send className="w-4 h-4" />
+                <span className="hidden sm:inline font-medium">发送</span>
+              </motion.button>
+            </div>
+            {state.isProcessing && state.streamingContent && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center gap-2 mt-2 text-xs text-text-muted/70"
+              >
+                <Sparkles className="w-3 h-3 animate-pulse text-primary/60" />
+                <span>正在生成回复...</span>
+              </motion.div>
             )}
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={handleSend}
-              disabled={!input.trim() || state.isProcessing || !state.isConnected || !!state.confirmationRequest}
-              className="px-5 py-3 bg-primary text-white rounded-xl disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary-dark transition-colors duration-150 shadow-sm hover:shadow-md active:shadow-sm"
-            >
-              <Send className="w-5 h-5" />
-            </motion.button>
           </div>
-          {state.isProcessing && state.streamingContent && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="max-w-4xl mx-auto flex items-center gap-2 mt-2 text-xs text-text-muted"
-            >
-              <Sparkles className="w-3 h-3 animate-pulse" />
-              <span>正在输出...</span>
-            </motion.div>
-          )}
         </div>
       </div>
     </div>

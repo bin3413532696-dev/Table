@@ -24,6 +24,8 @@ const ragConfigSchema = z.object({
   EMBEDDING_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   EMBEDDING_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(3),
   EMBEDDING_VERSION: z.coerce.number().int().positive().default(1),
+  // 距离度量配置：cosine（余弦）、euclidean（欧氏/L2）、inner_product（内积）
+  EMBEDDING_DISTANCE_METRIC: z.enum(['cosine', 'euclidean', 'inner_product']).default('cosine'),
   // 注：CHUNK_SIZE/CHUNK_OVERLAP 已移除，分块参数在 chunker.ts CHUNK_STRATEGIES 中按文件类型配置
 
   // 搜索配置
@@ -73,6 +75,11 @@ const ragConfigSchema = z.object({
   CITATION_MAX_CHUNKS: z.coerce.number().int().min(1).max(20).default(10),
   CITATION_REQUIRED_FOR_FACTS: envBoolean.default(true),
   CITATION_LOW_SCORE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.4),
+
+  // OCR 服务配置
+  OCR_SERVICE_URL: z.string().default('http://localhost:8001'),
+  OCR_ENABLED: envBoolean.default(true),
+  OCR_TIMEOUT_MS: z.coerce.number().int().positive().default(120000),
 });
 
 type RagConfig = z.infer<typeof ragConfigSchema>;
@@ -86,6 +93,7 @@ function loadRagConfig(): RagConfig {
     EMBEDDING_TIMEOUT_MS: process.env.EMBEDDING_TIMEOUT_MS,
     EMBEDDING_MAX_RETRIES: process.env.EMBEDDING_MAX_RETRIES,
     EMBEDDING_VERSION: process.env.EMBEDDING_VERSION,
+    EMBEDDING_DISTANCE_METRIC: process.env.EMBEDDING_DISTANCE_METRIC,
     CHUNK_SIZE: process.env.CHUNK_SIZE,
     CHUNK_OVERLAP: process.env.CHUNK_OVERLAP,
     SEARCH_FUSION_WEIGHT: process.env.SEARCH_FUSION_WEIGHT,
@@ -118,6 +126,9 @@ function loadRagConfig(): RagConfig {
     CITATION_MAX_CHUNKS: process.env.CITATION_MAX_CHUNKS,
     CITATION_REQUIRED_FOR_FACTS: process.env.CITATION_REQUIRED_FOR_FACTS,
     CITATION_LOW_SCORE_THRESHOLD: process.env.CITATION_LOW_SCORE_THRESHOLD,
+    OCR_SERVICE_URL: process.env.OCR_SERVICE_URL,
+    OCR_ENABLED: process.env.OCR_ENABLED,
+    OCR_TIMEOUT_MS: process.env.OCR_TIMEOUT_MS,
   };
 
   return ragConfigSchema.parse(env);

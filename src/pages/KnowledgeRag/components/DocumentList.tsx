@@ -1,5 +1,6 @@
 import React from 'react';
 import { FileText, Trash2, RefreshCw, Loader2 } from 'lucide-react';
+import { MetadataBadges } from '../../Knowledge/components/MetadataFilter';
 import type { KnowledgeDocument } from '../types';
 
 interface DocumentListProps {
@@ -60,6 +61,7 @@ export function DocumentList({ documents, onDelete, onReindex, onSelect }: Docum
                   : `${(doc.fileSize / 1024).toFixed(1)} KB`}
                 {doc.source && ` · ${doc.source}`}
               </p>
+              <MetadataBadges doc={doc} />
             </div>
           </div>
 

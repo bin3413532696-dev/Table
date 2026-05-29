@@ -8,6 +8,10 @@ export type DocumentStatus = z.infer<typeof documentStatusEnum>;
 export const fileTypeEnum = z.enum(['pdf', 'md', 'txt', 'markdown']);
 export type FileType = z.infer<typeof fileTypeEnum>;
 
+// 保密等级枚举
+export const securityLevelEnum = z.enum(['public', 'internal', 'confidential', 'secret']);
+export type SecurityLevel = z.infer<typeof securityLevelEnum>;
+
 // 索引任务类型
 export const jobTypeEnum = z.enum(['full_index', 'reindex']);
 export type JobType = z.infer<typeof jobTypeEnum>;
@@ -39,14 +43,29 @@ export const updateDocumentSchema = z.object({
 });
 export type UpdateDocumentInput = z.infer<typeof updateDocumentSchema>;
 
+// 辅助函数：将逗号分隔的字符串转换为数组
+const commaSeparatedToArray = z.string().transform((val) => val.split(',').map(s => s.trim()).filter(s => s.length > 0));
+
 // 文档查询参数
 export const listDocumentsQuerySchema = z.object({
   status: documentStatusEnum.optional(),
   fileType: fileTypeEnum.optional(),
-  tags: z.array(z.string().max(50)).max(10).optional(),
+  tags: commaSeparatedToArray.pipe(z.array(z.string().max(50)).max(10)).optional(),
+  // === 元数据过滤 ===
+  publishDateStart: z.string().optional(),
+  publishDateEnd: z.string().optional(),
+  sourceDept: commaSeparatedToArray.pipe(z.array(z.string().max(50)).max(10)).optional(),
+  securityLevel: securityLevelEnum.optional(),
+  businessCategory: commaSeparatedToArray.pipe(z.array(z.string().max(50)).max(10)).optional(),
+  // === 分页 ===
   limit: z.coerce.number().int().positive().max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
-});
+}).transform((data) => ({
+  ...data,
+  publishDateRange: data.publishDateStart || data.publishDateEnd
+    ? { start: data.publishDateStart, end: data.publishDateEnd }
+    : undefined,
+}));
 export type ListDocumentsQuery = z.infer<typeof listDocumentsQuerySchema>;
 
 // 搜索请求
@@ -70,6 +89,14 @@ export const hybridSearchSchema = z.object({
   // 新增：MMR 多样性后处理
   enableMmr: z.boolean().default(false),
   mmrLambda: z.coerce.number().min(0).max(1).optional(),
+  // === 元数据过滤 ===
+  publishDateRange: z.object({
+    start: z.string().optional(),
+    end: z.string().optional(),
+  }).optional(),
+  sourceDept: z.array(z.string().max(50)).max(10).optional(),
+  securityLevel: securityLevelEnum.optional(),
+  businessCategory: z.array(z.string().max(50)).max(10).optional(),
 });
 export type HybridSearchInput = z.infer<typeof hybridSearchSchema>;
 

@@ -71,6 +71,77 @@ ${RAG_CITATION_RULES}
 5. 知识库问答推荐用 rag_answer，一步完成检索和引用
 6. 用户请求查询时，必须先调用工具，不能只口头承诺`;
 
+const TOOL_CALL_RULES_NO_RAG = `【工具调用强制规则】
+1. 调用工具后立即停止输出，等待工具返回结果
+2. 收到工具结果后，才能开始回答用户问题
+3. 绝对禁止：只说"我来帮你..."而不实际调用工具
+4. 绝对禁止：在调用工具后继续输出文字（会导致工具调用被忽略）`;
+
+// 无 RAG 工具的查询工具描述
+const QUERY_TOOLS_DESC_NO_RAG = `查询工具（可直接调用）：
+- query_tasks(completed?, priority?, limit?) - 查询任务
+- get_task_stats() - 任务统计
+- query_finance(type?, category?, startDate?, endDate?, limit?) - 查询财务
+- get_finance_stats() - 財务统计
+- search_knowledge(query?, tags?, limit?) - 搜索知识库笔记（关键词）`;
+
+// 无 RAG 的工具提示部分
+const TOOL_PROMPT_SECTION_NO_RAG = `${QUERY_TOOLS_DESC_NO_RAG}
+${WRITE_TOOLS_DESC}
+
+${TOOL_FORMAT}`;
+
+// 无 RAG 的系统提示词
+const SYSTEM_PROMPT_NO_RAG = `你是个人工作站智能助手。可用工具：
+
+${TOOL_PROMPT_SECTION_NO_RAG}
+
+${TOOL_CALL_RULES_NO_RAG}
+
+规则：
+1. 查询直接执行，写操作需确认
+2. 缺参数时询问用户，勿猜测
+3. 用简体中文回复，简洁直接
+4. 结果基于工具返回，勿编造
+5. 用户请求查询时，必须先调用工具，不能只口头承诺`;
+
+/**
+ * 根据用户配置构建有效的系统提示词
+ * @param userPrompt 用户自定义提示词（可选）
+ * @param ragEnabled 是否启用 RAG 知识检索
+ */
+export function buildEffectiveSystemPrompt(userPrompt?: string, ragEnabled: boolean = false): string {
+  // 用户提供了自定义提示词
+  if (userPrompt && userPrompt.trim().length > 0) {
+    // 如果用户提示词中已包含 RAG 工具说明，不做额外处理
+    // 否则根据 ragEnabled 补充或移除 RAG 工具说明
+    const hasRagTools = userPrompt.includes('rag_answer') || userPrompt.includes('semantic_search');
+
+    if (ragEnabled && !hasRagTools) {
+      // 启用 RAG 但用户提示词中没有 RAG 工具，补充
+      return `${userPrompt}
+
+【补充：知识库检索工具】
+${QUERY_TOOLS_DESC}
+
+${RAG_CITATION_RULES}`;
+    }
+
+    if (!ragEnabled && hasRagTools) {
+      // 禁用 RAG 但用户提示词中有 RAG 工具，移除相关部分
+      // 使用简单策略：添加提示说明本次不使用 RAG
+      return `${userPrompt}
+
+【注意】本次对话不启用知识库文档检索功能，请勿调用 rag_answer、semantic_search、keyword_search 等文档检索工具。`;
+    }
+
+    return userPrompt;
+  }
+
+  // 使用默认提示词
+  return ragEnabled ? SYSTEM_PROMPT : SYSTEM_PROMPT_NO_RAG;
+}
+
 /**
  * 构建工具结果提示
  */

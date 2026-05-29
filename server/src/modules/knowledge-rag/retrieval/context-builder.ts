@@ -255,7 +255,12 @@ export function buildLLMContext(
   let totalTokens = 0;
 
   for (const result of results) {
-    const snippet = result.content.slice(0, 500);
+    // === 小块大块架构：优先使用大块内容 ===
+    // parentContent 是大块的完整内容，提供丰富上下文
+    // content 是小块的命中点内容，用于展示来源
+    const fullContent = result.parentContent ?? result.content;
+    const snippet = fullContent.slice(0, 1500);  // 大块内容更长（1500字）
+    const displaySnippet = result.content.slice(0, 300);  // 小块用于展示命中点
     const snippetTokens = estimateTokens(snippet);
 
     // 构建完整路径（文档标题 > 章节路径）
@@ -274,7 +279,7 @@ export function buildLLMContext(
       documentTitle: result.documentTitle,
       headingChain: result.headingChain,
       chunkIndex: result.chunkIndex,
-      snippet,
+      snippet: displaySnippet,  // 展示小块命中点
     });
 
     if (format === 'markdown') {

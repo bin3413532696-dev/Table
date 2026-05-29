@@ -62,6 +62,32 @@ export function createApp() {
       return;
     }
 
+    // GET 请求：检查并设置 CSRF cookie（如果不存在）
+    if (request.method === 'GET') {
+      const cookieHeader = request.headers.cookie;
+      let hasCsrfCookie = false;
+      if (cookieHeader) {
+        const cookies = cookieHeader.split(';');
+        for (const cookie of cookies) {
+          const [name] = cookie.trim().split('=');
+          if (name === CSRF_COOKIE_NAME) {
+            hasCsrfCookie = true;
+            break;
+          }
+        }
+      }
+
+      // 如果没有 CSRF cookie，生成一个并设置
+      if (!hasCsrfCookie) {
+        const csrfToken = generateCsrfToken();
+        const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+        reply.header(
+          'Set-Cookie',
+          `${CSRF_COOKIE_NAME}=${csrfToken}; Path=/; SameSite=Lax${secureFlag}`
+        );
+      }
+    }
+
     const shouldSkipBaseline =
       request.method === 'GET' && request.url.startsWith('/api/agent/health');
 

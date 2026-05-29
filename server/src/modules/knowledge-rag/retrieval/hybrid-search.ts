@@ -1,4 +1,4 @@
-import { semanticSearch, keywordSearch, bm25Search, getChunkEmbeddingsBatch } from '../repository';
+import { semanticSearch, keywordSearch, bm25Search, getChunkEmbeddingsBatch, findParentChunksByIds } from '../repository';
 import { fuseResults, crossEncoderRerank } from './reranker';
 import { mmrRerank } from './mmr';
 import { embedQuery } from '../indexing/embedder';
@@ -6,6 +6,7 @@ import { preprocessQuery } from './query-preprocessor';
 import type { HybridSearchInput } from '../schema';
 import type { SearchResultDto } from '../dto';
 import { ragConfig } from '../config';
+import { getCurrentUserId } from '../../../shared/user-context';
 
 // 混合搜索结果
 export interface HybridSearchResult {
@@ -112,7 +113,7 @@ export async function hybridSearch(params: HybridSearchInput): Promise<HybridSea
   // 对于 reranked 结果，使用独立的 reranker threshold
   const rerankerThreshold = params.rerankerThreshold ?? ragConfig.RERANKER_MIN_SCORE ?? 0.3;
 
-  const results = fusedResults
+  const filteredResults = fusedResults
     .filter(r => {
       // reranked 结果使用 reranker threshold
       if (r.source === 'reranked') {
@@ -122,6 +123,32 @@ export async function hybridSearch(params: HybridSearchInput): Promise<HybridSea
       return r.score >= params.threshold;
     })
     .slice(0, params.limit);
+
+  // === 小块大块架构：查询关联的大块内容 ===
+  // 收集所有小块的 parentId
+  const parentIds = filteredResults
+    .filter(r => r.parentId)
+    .map(r => r.parentId!)
+    .filter(id => id !== null);
+
+  // 批量查询大块
+  let parentContentMap: Map<string, string> = new Map();
+  if (parentIds.length > 0) {
+    try {
+      const userId = getCurrentUserId();
+      const parentChunks = await findParentChunksByIds(userId, parentIds);
+      parentContentMap = new Map(parentChunks.map(p => [p.id, p.content]));
+    } catch (error) {
+      console.warn('[检索] 查询大块内容失败:', error);
+    }
+  }
+
+  // 将大块内容添加到搜索结果
+  const results = filteredResults.map(r => ({
+    ...r,
+    parentContent: r.parentId ? parentContentMap.get(r.parentId) : undefined,
+    chunkType: 'small',
+  }));
 
   return {
     results,

@@ -12,6 +12,14 @@ export interface KnowledgeDocument {
   tags: string[];
   contentHash: string | null;
   version: number;
+  // === 元数据字段 ===
+  publishDate: number | null;
+  sourceDept: string | null;
+  securityLevel: string | null;
+  businessCategory: string | null;
+  docLanguage: string | null;
+  parseQuality: string | null;
+  hasOcr: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -56,10 +64,26 @@ export interface SearchResult {
   score: number;
   source: 'semantic' | 'keyword' | 'hybrid';
   sourceInfo: string | null;
+  // === 元数据字段 ===
+  publishDate: number | null;
+  sourceDept: string | null;
+  securityLevel: string | null;
+  businessCategory: string | null;
 }
 
 // 搜索模式
 export type SearchMode = 'hybrid' | 'semantic' | 'keyword';
+
+// 保密等级枚举
+export type SecurityLevel = 'public' | 'internal' | 'confidential' | 'secret';
+
+// 元数据过滤参数
+export interface MetadataFilter {
+  publishDateRange?: { start?: string; end?: string };
+  sourceDept?: string[];
+  securityLevel?: SecurityLevel;
+  businessCategory?: string[];
+}
 
 // 搜索输入
 export interface SearchInput {
@@ -70,6 +94,11 @@ export interface SearchInput {
   limit?: number;
   threshold?: number;
   fusionWeight?: number;
+  // === 元数据过滤 ===
+  publishDateRange?: { start?: string; end?: string };
+  sourceDept?: string[];
+  securityLevel?: SecurityLevel;
+  businessCategory?: string[];
 }
 
 // 搜索结果响应

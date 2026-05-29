@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { FileText, RefreshCw, Database, BarChart3, Loader2, Brain } from 'lucide-react';
 import { DocumentUploader } from '../../KnowledgeRag/components/DocumentUploader';
 import { DocumentList } from '../../KnowledgeRag/components/DocumentList';
@@ -6,8 +6,9 @@ import { DocumentDetail } from '../../KnowledgeRag/components/DocumentDetail';
 import { HybridSearchBar } from '../../KnowledgeRag/components/HybridSearchBar';
 import { SearchResults } from '../../KnowledgeRag/components/SearchResults';
 import { IndexProgress } from '../../KnowledgeRag/components/IndexProgress';
+import { MetadataFilter } from './MetadataFilter';
 import * as ragApi from '../../KnowledgeRag/api';
-import type { KnowledgeDocument, SearchResult, SearchMode, RagStats } from '../../KnowledgeRag/types';
+import type { KnowledgeDocument, SearchResult, SearchMode, RagStats, MetadataFilter as MetadataFilterType } from '../../KnowledgeRag/types';
 
 type RagViewMode = 'documents' | 'search';
 
@@ -23,12 +24,90 @@ export function RagSection({ onFeedback }: RagSectionProps) {
   const [stats, setStats] = React.useState<RagStats | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [selectedDoc, setSelectedDoc] = React.useState<KnowledgeDocument | null>(null);
+  const [metadataFilters, setMetadataFilters] = React.useState<MetadataFilterType>({});
 
-  // 加载文档列表
-  const loadDocuments = React.useCallback(async () => {
+  // 防抖：取消之前的请求，延迟执行
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const DEBOUNCE_DELAY = 300; // 300ms 防抖延迟
+
+  // 加载文档列表（带防抖和请求取消）
+  const loadDocumentsDebounced = React.useCallback(async (filters: MetadataFilterType) => {
+    // 取消之前的请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    // 清除之前的防抖计时器
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // 创建新的 AbortController
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    // 防抖延迟执行
+    debounceTimerRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const result = await ragApi.getDocuments({
+          limit: 50,
+          publishDateRange: filters.publishDateRange,
+          sourceDept: filters.sourceDept,
+          securityLevel: filters.securityLevel,
+          businessCategory: filters.businessCategory,
+        });
+        // 检查请求是否被取消
+        if (!abortController.signal.aborted) {
+          setDocuments(result.items);
+        }
+      } catch (err) {
+        // 忽略取消错误
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
+        console.error('加载文档失败:', err);
+        if (!abortController.signal.aborted) {
+          onFeedback?.('error', '加载文档失败');
+        }
+      } finally {
+        if (!abortController.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    }, DEBOUNCE_DELAY);
+  }, [onFeedback]);
+
+  // 当 metadataFilters 变化时，触发防抖加载
+  useEffect(() => {
+    loadDocumentsDebounced(metadataFilters);
+    // 清理函数：组件卸载或下一次调用前取消请求
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [metadataFilters, loadDocumentsDebounced]);
+
+  // 初始加载统计
+  useEffect(() => {
+    ragApi.getStats().then(setStats).catch(err => console.error('加载统计失败:', err));
+  }, []);
+
+  // 立即刷新文档列表（不带防抖，用于手动操作）
+  const refreshDocuments = async () => {
     setLoading(true);
     try {
-      const result = await ragApi.getDocuments({ limit: 50 });
+      const result = await ragApi.getDocuments({
+        limit: 50,
+        publishDateRange: metadataFilters.publishDateRange,
+        sourceDept: metadataFilters.sourceDept,
+        securityLevel: metadataFilters.securityLevel,
+        businessCategory: metadataFilters.businessCategory,
+      });
       setDocuments(result.items);
     } catch (err) {
       console.error('加载文档失败:', err);
@@ -36,28 +115,22 @@ export function RagSection({ onFeedback }: RagSectionProps) {
     } finally {
       setLoading(false);
     }
-  }, [onFeedback]);
+  };
 
-  // 加载统计
-  const loadStats = React.useCallback(async () => {
+  // 刷新统计
+  const refreshStats = async () => {
     try {
       const result = await ragApi.getStats();
       setStats(result);
     } catch (err) {
       console.error('加载统计失败:', err);
     }
-  }, []);
-
-  // 初始化加载
-  React.useEffect(() => {
-    loadDocuments();
-    loadStats();
-  }, [loadDocuments, loadStats]);
+  };
 
   // 上传成功后刷新
   const handleUploadSuccess = () => {
-    loadDocuments();
-    loadStats();
+    refreshDocuments();
+    refreshStats();
     onFeedback?.('success', '文档上传成功，正在索引');
   };
 
@@ -66,8 +139,8 @@ export function RagSection({ onFeedback }: RagSectionProps) {
     if (!confirm('确定删除此文档？')) return;
     try {
       await ragApi.deleteDocument(id);
-      loadDocuments();
-      loadStats();
+      refreshDocuments();
+      refreshStats();
       onFeedback?.('success', '文档已删除');
     } catch (err) {
       console.error('删除失败:', err);
@@ -79,7 +152,7 @@ export function RagSection({ onFeedback }: RagSectionProps) {
   const handleReindex = async (id: string) => {
     try {
       await ragApi.triggerIndex(id, true);
-      loadDocuments();
+      refreshDocuments();
       onFeedback?.('success', '已触发重新索引');
     } catch (err) {
       console.error('重新索引失败:', err);
@@ -88,7 +161,7 @@ export function RagSection({ onFeedback }: RagSectionProps) {
   };
 
   // 搜索
-  const handleSearch = async (params: { query: string; mode: SearchMode }) => {
+  const handleSearch = async (params: { query: string; mode: SearchMode; metadataFilters?: MetadataFilterType }) => {
     setLoading(true);
     try {
       const result = await ragApi.search({
@@ -96,6 +169,10 @@ export function RagSection({ onFeedback }: RagSectionProps) {
         mode: params.mode,
         limit: 20,
         threshold: 0.3,
+        publishDateRange: params.metadataFilters?.publishDateRange,
+        sourceDept: params.metadataFilters?.sourceDept,
+        securityLevel: params.metadataFilters?.securityLevel,
+        businessCategory: params.metadataFilters?.businessCategory,
       });
       setSearchResults(result.results);
       setSearchTimeMs(result.searchTimeMs);
@@ -117,7 +194,7 @@ export function RagSection({ onFeedback }: RagSectionProps) {
             <h2 className="font-semibold text-gray-900">RAG 知识库</h2>
           </div>
           <button
-            onClick={() => { loadDocuments(); loadStats(); }}
+            onClick={() => { refreshDocuments(); refreshStats(); }}
             className="p-1.5 hover:bg-gray-200 rounded"
             title="刷新"
           >
@@ -175,6 +252,12 @@ export function RagSection({ onFeedback }: RagSectionProps) {
             {/* Upload */}
             <DocumentUploader onUploadSuccess={handleUploadSuccess} disabled={loading} />
 
+            {/* Metadata Filter */}
+            <MetadataFilter
+              filters={metadataFilters}
+              onChange={setMetadataFilters}
+            />
+
             {/* Document List */}
             <div className="bg-white rounded-lg border p-4">
               <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
@@ -200,7 +283,16 @@ export function RagSection({ onFeedback }: RagSectionProps) {
 
         {viewMode === 'search' && (
           <div className="space-y-4">
-            <HybridSearchBar onSearch={handleSearch} disabled={loading} />
+            {/* Metadata Filter */}
+            <MetadataFilter
+              filters={metadataFilters}
+              onChange={setMetadataFilters}
+            />
+
+            <HybridSearchBar
+              onSearch={(params) => handleSearch({ ...params, metadataFilters })}
+              disabled={loading}
+            />
 
             <div className="bg-white rounded-lg border p-4">
               {loading ? (
@@ -243,7 +335,7 @@ export function RagSection({ onFeedback }: RagSectionProps) {
         <div key={doc.id} className="fixed bottom-4 right-4 z-40">
           <IndexProgress
             documentId={doc.id}
-            onComplete={() => { loadDocuments(); loadStats(); }}
+            onComplete={() => { refreshDocuments(); refreshStats(); }}
           />
         </div>
       ))}

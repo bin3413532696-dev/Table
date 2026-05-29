@@ -11,6 +11,7 @@ export interface ApiProvider {
   apiKeyPreview?: string;
   model?: string;
   embeddingModel?: string;
+  rerankerModel?: string;
   headers?: Record<string, string>;
   createdAt?: string;
   updatedAt?: string;
@@ -108,6 +109,7 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
           ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
           model: provider.model || '',
           embeddingModel: provider.embeddingModel || '',
+          rerankerModel: provider.rerankerModel || '',
           headers: provider.headers || {},
           isActive: provider.isActive,
         }),
@@ -129,6 +131,7 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
       apiKeyChanged ||
       (existing.model || '') !== (provider.model || '') ||
       (existing.embeddingModel || '') !== (provider.embeddingModel || '') ||
+      (existing.rerankerModel || '') !== (provider.rerankerModel || '') ||
       JSON.stringify(existing.headers || {}) !== JSON.stringify(provider.headers || {}) ||
       existing.isActive !== provider.isActive;
 
@@ -148,6 +151,7 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
         ...(provider.apiKey ? { apiKey: provider.apiKey } : {}),
         model: provider.model || '',
         embeddingModel: provider.embeddingModel || '',
+        rerankerModel: provider.rerankerModel || '',
         headers: provider.headers || {},
         isActive: provider.isActive,
       }),

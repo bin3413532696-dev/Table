@@ -4,7 +4,7 @@ import type { AgentState, ToolCall, ExecutedToolCall, TimelineEvent, Conversatio
 import { AgentStateAnnotation, MAX_ITERATIONS } from './state';
 import { createStreamingChatModel, createChatModelWithTools, streamLlmDirect } from './chatModel';
 import { parseToolCalls, getCachedResult, setCachedResult, parseToolCallsFromResponse } from './parser';
-import { SYSTEM_PROMPT, buildToolResultPrompt } from './prompts';
+import { SYSTEM_PROMPT, buildToolResultPrompt, buildEffectiveSystemPrompt } from './prompts';
 import { allTools, requiresConfirmation } from './tools';
 import { getCheckpointer } from './postgres-checkpointer';
 import { MessageManager } from './message-manager';
@@ -62,7 +62,28 @@ async function executeToolCallInternal(toolCall: ToolCall): Promise<ExecutedTool
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (tool as any).invoke(toolCall.arguments);
+    const rawResult = await (tool as any).invoke(toolCall.arguments);
+
+    // LangChain tool.invoke 返回值可能包含 value 或 content 字段
+    // 需要提取实际结果值
+    let result: unknown;
+    if (rawResult && typeof rawResult === 'object') {
+      // 检查是否有 value 字段（LangChain StructuredTool 格式）
+      if ('value' in rawResult) {
+        result = rawResult.value;
+      } else if ('content' in rawResult && typeof rawResult.content === 'string') {
+        // ToolMessage 格式
+        result = rawResult.content;
+      } else if ('textContent' in rawResult && typeof rawResult.textContent === 'string') {
+        // 另一种格式
+        result = rawResult.textContent;
+      } else {
+        // 直接使用对象作为结果（如 rag_answer 返回的结构化对象）
+        result = rawResult;
+      }
+    } else {
+      result = rawResult;
+    }
 
     // 日志结果摘要
     if (typeof result === 'string') {
@@ -147,12 +168,18 @@ async function buildMessagesNode(state: AgentState): Promise<Partial<AgentState>
   const modelInputMessages = [...existingMessages, ...newMessages];
   if (state.executedToolCalls.length > 0) {
     const toolResultMessage = {
+      role: 'tool' as const,  // 工具结果消息标记为 tool 角色，前端会过滤掉不显示
+      content: buildToolResultPrompt(state.executedToolCalls, state.searchMaxScore),
+      createdAt: timestamp,
+    };
+    // 将工具结果作为 user 消息发送给模型（LangChain 要求）
+    const modelToolMessage = {
       role: 'user' as const,
       content: buildToolResultPrompt(state.executedToolCalls, state.searchMaxScore),
       createdAt: timestamp,
     };
-    modelInputMessages.push(toolResultMessage);
-    // 将工具结果消息也添加到 newMessages，确保保存到 checkpoint
+    modelInputMessages.push(modelToolMessage);
+    // checkpoint 中保存 tool 角色，便于前端过滤
     newMessages.push(toolResultMessage);
   }
 
@@ -676,17 +703,31 @@ export async function streamAgentGraphDirect(input: {
   threadId: string;
   userId: string;
   systemPrompt?: string;
+  ragEnabled?: boolean;  // RAG 知识检索开关
   onToken: (token: string) => Promise<void> | void;
   onChunk: (chunk: AgentGraphStreamChunk) => Promise<void> | void;
 }): Promise<AgentState> {
   const { onToken, onChunk } = input;
 
+  // 恢复现有 checkpoint 状态（获取历史消息）
+  const existingSnapshot = await agentGraph.getState({
+    configurable: { thread_id: input.threadId },
+  });
+  const existingMessages = (existingSnapshot?.values?.messages as ConversationMessage[] | undefined) || [];
+
   // 构建消息（复制 buildMessagesNode 的逻辑）
   const timestamp = now();
   const messages: ConversationMessage[] = [];
 
-  // System prompt
-  messages.push({ role: 'system', content: input.systemPrompt || SYSTEM_PROMPT, createdAt: timestamp });
+  // System prompt: 根据 ragEnabled 决定是否包含 RAG 工具说明
+  const effectivePrompt = buildEffectiveSystemPrompt(input.systemPrompt, input.ragEnabled ?? false);
+  // 只在无历史消息时添加 system prompt
+  if (existingMessages.length === 0) {
+    messages.push({ role: 'system', content: effectivePrompt, createdAt: timestamp });
+  }
+
+  // 添加历史消息
+  messages.push(...existingMessages);
 
   // Initial messages
   const normalizedInitialMessages = input.initialMessages
@@ -696,7 +737,10 @@ export async function streamAgentGraphDirect(input: {
       content: m.content,
       createdAt: timestamp,
     }));
-  messages.push(...normalizedInitialMessages);
+  // 只在对话刚开始时添加 initialMessages
+  if (existingMessages.length <= 1 && normalizedInitialMessages.length > 0) {
+    messages.push(...normalizedInitialMessages);
+  }
 
   // User input
   messages.push({ role: 'user', content: input.inputText, createdAt: timestamp });
@@ -877,13 +921,20 @@ export async function streamAgentGraphDirect(input: {
 
     // 如果有工具执行结果，再次调用LLM
     if (accumulated.length > 0 && (state.iterationCount ?? 0) < MAX_ITERATIONS) {
-      // 构建工具结果消息
+      // 构建工具结果消息 - checkpoint 中保存 tool 角色，便于前端过滤
       const toolResultMessage: ConversationMessage = {
-        role: 'user',
+        role: 'tool',
         content: buildToolResultPrompt(accumulated),
         createdAt: now(),
       };
       messages.push(toolResultMessage);
+
+      // 构建发送给模型的消息（LangChain 要求 user 角色）
+      const modelInputMessage: ConversationMessage = {
+        role: 'user',
+        content: buildToolResultPrompt(accumulated),
+        createdAt: now(),
+      };
 
       // 再次调用LLM
       const nextResult = await streamLlmDirect({

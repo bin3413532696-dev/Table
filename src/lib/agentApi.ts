@@ -4,7 +4,7 @@ export type AgentRunStatus = 'pending' | 'running' | 'waiting_confirmation' | 'c
 
 export interface AgentRunMessageDto {
   id: string;
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';  // tool 角色前端会过滤掉不显示
   content: string;
   createdAt?: number;
 }
@@ -253,6 +253,7 @@ export async function streamAgentRun(
     inputText: string;
     model: string;
     sessionId?: string; // 可选，首次对话时后端自动创建
+    ragEnabled?: boolean; // RAG 知识检索是否启用
     initialMessages?: Array<{
       role: 'user' | 'assistant' | 'system' | 'tool';
       content: string;

@@ -483,6 +483,7 @@ async function streamAgentRunRecordImpl(
       threadId,
       userId,
       systemPrompt: effectiveSystemPrompt,
+      ragEnabled: input.ragEnabled ?? false,  // RAG 知识检索开关
       // token级流式回调：直接发送token到前端
       onToken: async (token) => {
         await emit({ type: 'token', token });

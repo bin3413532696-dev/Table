@@ -1,6 +1,13 @@
-import { OpenAIEmbeddings } from '@langchain/openai';
 import { findEmbeddingCacheBatch, storeEmbeddingCache } from '../repository';
 import { ragConfig } from '../config';
+import {
+  createEmbeddingGenerator,
+  embeddingConfigFromProvider,
+  IEmbeddingGenerator,
+  EmbeddingModelConfig,
+  validateEmbeddingConfig,
+} from './embedding-providers';
+import { validateEmbeddingDimensions } from '../dto';
 
 // =====================================================
 // Query Embedding 缓存（内存缓存，避免重复 API 调用）
@@ -127,26 +134,29 @@ async function withRetry<T>(
   throw new Error(`${operationName} 失败，已重试 ${maxRetries} 次: ${lastError?.message}`);
 }
 
-// Embedding 生成器类
+// Embedding 生成器类（使用抽象层）
 export class KnowledgeEmbedder {
-  private embeddings: OpenAIEmbeddings;
+  private generator: IEmbeddingGenerator;
   private embeddingModel: string;
   private dimensions: number;
   private timeoutMs: number;
   private maxRetries: number;
 
-  constructor(apiKey: string, baseUrl?: string, embeddingModel?: string) {
-    this.embeddingModel = embeddingModel || ragConfig.EMBEDDING_MODEL;
-    this.dimensions = ragConfig.EMBEDDING_DIMENSIONS;
-    this.timeoutMs = ragConfig.EMBEDDING_TIMEOUT_MS;
-    this.maxRetries = ragConfig.EMBEDDING_MAX_RETRIES;
+  constructor(config: EmbeddingModelConfig) {
+    this.embeddingModel = config.model;
+    this.dimensions = config.dimensions;
+    this.timeoutMs = config.timeoutMs ?? ragConfig.EMBEDDING_TIMEOUT_MS;
+    this.maxRetries = config.maxRetries ?? ragConfig.EMBEDDING_MAX_RETRIES;
 
-    this.embeddings = new OpenAIEmbeddings({
-      model: this.embeddingModel,
-      dimensions: this.dimensions,
-      apiKey,
-      configuration: baseUrl ? { baseURL: baseUrl } : undefined,
-    });
+    // 验证配置
+    if (!validateEmbeddingConfig(config.model, config.dimensions)) {
+      console.warn(`[KnowledgeEmbedder] 模型配置验证失败: model=${config.model}, dimensions=${config.dimensions}`);
+    }
+
+    // 使用抽象层创建生成器
+    this.generator = createEmbeddingGenerator(config);
+
+    console.log(`[KnowledgeEmbedder] 初始化完成: model=${config.model}, dimensions=${config.dimensions}, provider=${config.provider}`);
   }
 
   // 生成查询 Embedding（带超时和重试，优先使用缓存）
@@ -160,9 +170,9 @@ export class KnowledgeEmbedder {
 
     // 缓存未命中，调用 API
     console.log(`[Embedding] Query cache miss: "${query.slice(0, 30)}..." (${this.embeddingModel})`);
-    const embedding = await withRetry(
+    const result = await withRetry(
       () => withTimeout(
-        this.embeddings.embedQuery(query),
+        this.generator.embedSingle(query),
         this.timeoutMs,
         'embedQuery'
       ),
@@ -170,10 +180,13 @@ export class KnowledgeEmbedder {
       'embedQuery'
     );
 
-    // 存入缓存
-    setQueryEmbeddingToCache(query, this.embeddingModel, embedding);
+    // 验证维度
+    validateEmbeddingDimensions(result.embedding);
 
-    return embedding;
+    // 存入缓存
+    setQueryEmbeddingToCache(query, this.embeddingModel, result.embedding);
+
+    return result.embedding;
   }
 
   // 批量生成文档 Embedding（带缓存检查，优化为批量查询）
@@ -183,7 +196,7 @@ export class KnowledgeEmbedder {
     const results: Array<{ contentHash: string; embedding: number[] }> = [];
     const uncachedChunks: Array<{ index: number; content: string; contentHash: string }> = [];
 
-    // 批量查询缓存（优化：一次性查询所有contentHash）
+    // 批量查询缓存
     const contentHashes = chunks.map(c => c.contentHash);
     const cacheMap = await findEmbeddingCacheBatch(contentHashes, this.embeddingModel);
 
@@ -199,12 +212,12 @@ export class KnowledgeEmbedder {
       }
     }
 
-    // 批量生成未缓存的 Embedding（带超时和重试）
+    // 批量生成未缓存的 Embedding
     if (uncachedChunks.length > 0) {
       const batchContents = uncachedChunks.map(c => c.content);
-      const newEmbeddings = await withRetry(
+      const newResults = await withRetry(
         () => withTimeout(
-          this.embeddings.embedDocuments(batchContents),
+          this.generator.embedBatch(batchContents),
           this.timeoutMs,
           'embedDocuments'
         ),
@@ -214,7 +227,10 @@ export class KnowledgeEmbedder {
 
       for (let j = 0; j < uncachedChunks.length; j++) {
         const { index, contentHash } = uncachedChunks[j];
-        const embedding = newEmbeddings[j];
+        const embedding = newResults[j].embedding;
+
+        // 验证维度
+        validateEmbeddingDimensions(embedding);
 
         results[index] = { contentHash, embedding };
 
@@ -241,6 +257,11 @@ export class KnowledgeEmbedder {
 
     return allResults;
   }
+
+  // 获取模型信息
+  getModelInfo() {
+    return this.generator.getModelInfo();
+  }
 }
 
 // 创建 Embedding 生成器（复用 Provider 系统）
@@ -249,6 +270,7 @@ export async function createEmbedder(): Promise<KnowledgeEmbedder> {
   let apiKey = ragConfig.EMBEDDING_API_KEY;
   let baseUrl = ragConfig.EMBEDDING_BASE_URL;
   let embeddingModel: string | undefined;
+  let providerType: string | undefined;
 
   // 如果没有单独配置，尝试使用默认 Provider
   if (!apiKey) {
@@ -259,6 +281,7 @@ export async function createEmbedder(): Promise<KnowledgeEmbedder> {
       apiKey = provider.apiKey ?? '';
       baseUrl = provider.baseUrl;
       embeddingModel = provider.embeddingModel;
+      providerType = provider.apiFormat; // 使用 apiFormat 作为 provider 类型
     }
   }
 
@@ -266,7 +289,15 @@ export async function createEmbedder(): Promise<KnowledgeEmbedder> {
     throw new Error('未配置 Embedding API Key，请在环境变量或 Provider 设置中配置');
   }
 
-  return new KnowledgeEmbedder(apiKey, baseUrl, embeddingModel);
+  // 使用抽象层配置
+  const config = embeddingConfigFromProvider(
+    apiKey,
+    baseUrl,
+    embeddingModel,
+    providerType
+  );
+
+  return new KnowledgeEmbedder(config);
 }
 
 // 便捷函数

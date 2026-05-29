@@ -2,6 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import pdfParse from 'pdf-parse';
 import crypto from 'crypto';
+import { ragConfig } from '../config';
+import { processWithOCR, isOCRServiceAvailable, assembleOCRText } from './ocr-client';
 
 // 解析结果
 export interface ParseResult {
@@ -11,6 +13,7 @@ export interface ParseResult {
     author?: string;
     pageCount?: number;
     wordCount?: number;
+    hasOcr?: boolean;
   };
 }
 
@@ -74,22 +77,6 @@ function getMimeType(extension: string): string {
   return mimeTypes[ext] ?? 'application/octet-stream';
 }
 
-// 解析 PDF 文件
-async function parsePDF(filePath: string): Promise<ParseResult> {
-  const buffer = await fs.readFile(filePath);
-  const data = await pdfParse(buffer);
-
-  return {
-    content: data.text,
-    metadata: {
-      title: data.info?.Title,
-      author: data.info?.Author,
-      pageCount: data.numpages,
-      wordCount: data.text.split(/\s+/).filter(Boolean).length,
-    },
-  };
-}
-
 // 解析 Markdown 文件
 async function parseMarkdown(filePath: string): Promise<ParseResult> {
   const content = await fs.readFile(filePath, 'utf-8');
@@ -133,6 +120,58 @@ export async function parseDocument(filePath: string, fileType: string): Promise
     default:
       throw new Error(`Unsupported file type: ${fileType}`);
   }
+}
+
+// 解析 PDF 文件（带 OCR 检测）
+async function parsePDF(filePath: string): Promise<ParseResult> {
+  const buffer = await fs.readFile(filePath);
+  const data = await pdfParse(buffer);
+
+  // 快速提取结果
+  const fastResult: ParseResult = {
+    content: data.text,
+    metadata: {
+      title: data.info?.Title,
+      author: data.info?.Author,
+      pageCount: data.numpages,
+      wordCount: data.text.split(/\s+/).filter(Boolean).length,
+    },
+  };
+
+  // 检测是否可能是扫描件
+  const avgCharsPerPage = data.text.length / (data.numpages || 1);
+  const possibleScan = avgCharsPerPage < 100;
+
+  // 如果可能是扫描件且 OCR 服务可用，尝试 OCR
+  if (possibleScan && ragConfig.OCR_ENABLED) {
+    try {
+      const ocrAvailable = await isOCRServiceAvailable();
+      if (ocrAvailable) {
+        console.log(`[OCR] 检测到可能扫描件 (每页${Math.round(avgCharsPerPage)}字符)，启动 OCR`);
+
+        const ocrResult = await processWithOCR(filePath);
+
+        if (ocrResult.metadata.hasOcr && ocrResult.textBlocks.length > 0) {
+          // OCR 成功，使用 OCR 结果
+          const ocrContent = assembleOCRText(ocrResult);
+
+          return {
+            content: ocrContent,
+            metadata: {
+              ...fastResult.metadata,
+              hasOcr: true,
+              wordCount: ocrContent.split(/\s+/).filter(Boolean).length,
+            },
+          };
+        }
+      }
+    } catch (error) {
+      // OCR 失败，降级到快速提取结果
+      console.warn('[OCR] OCR 处理失败，使用 pdf-parse 结果:', error instanceof Error ? error.message : error);
+    }
+  }
+
+  return fastResult;
 }
 
 // 清理文本内容

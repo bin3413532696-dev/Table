@@ -207,7 +207,7 @@ function extractChunkContent(chunk: AIMessageChunk): string {
 export interface StreamLlmOptions {
   provider: ProviderConfig;
   model: string;
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  messages: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string }>;
   tools?: DynamicStructuredTool[];
   timeoutMs?: number;
   onToken: (token: string) => Promise<void> | void;

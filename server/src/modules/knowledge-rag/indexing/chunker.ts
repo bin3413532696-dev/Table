@@ -481,3 +481,250 @@ export function getChunkStats(chunks: ChunkResult[]): {
     belowMinCount: 0, // 合并后不应有极小 chunk
   };
 }
+
+// =====================================================
+// 小块大块架构 (Parent-Child Chunking)
+// =====================================================
+
+// 分层分块策略
+export interface HierarchicalChunkStrategy {
+  parentChunkSize: number;    // 大块大小（1500-2000字）
+  parentOverlap: number;      // 大块重叠
+  childChunkSize: number;     // 小块大小（200-300字）
+  childOverlap: number;       // 小块重叠
+  minChildSize: number;       // 小块最小大小
+  separators: string[];       // 分隔符优先级
+}
+
+// 按文件类型定义的分层策略
+export const HIERARCHICAL_STRATEGIES: Record<string, HierarchicalChunkStrategy> = {
+  pdf: {
+    parentChunkSize: 1800,
+    parentOverlap: 200,
+    childChunkSize: 250,
+    childOverlap: 50,
+    minChildSize: 100,
+    separators: ['\n\n', '\n', '。', '.', '！', '!', '？', '?', ' ', ''],
+  },
+  md: {
+    parentChunkSize: 1200,
+    parentOverlap: 150,
+    childChunkSize: 200,
+    childOverlap: 40,
+    minChildSize: 80,
+    separators: ['\n\n# ', '\n\n## ', '\n\n### ', '\n\n#### ', '\n\n', '\n', '。', '.', ' ', ''],
+  },
+  txt: {
+    parentChunkSize: 1500,
+    parentOverlap: 200,
+    childChunkSize: 250,
+    childOverlap: 50,
+    minChildSize: 100,
+    separators: ['\n\n', '\n', '。', '.', '！', '!', '？', '?', ' ', ''],
+  },
+};
+
+const DEFAULT_HIERARCHICAL_STRATEGY = HIERARCHICAL_STRATEGIES.txt;
+
+// 大块结果（用于生成上下文）
+export interface ParentChunkResult extends ChunkResult {
+  chunkType: 'parent';
+  childCount: number;  // 包含的小块数量
+}
+
+// 分层分块结果
+export interface HierarchicalChunkResult {
+  parentChunks: ParentChunkResult[];           // 大块列表
+  childChunks: (ChunkResult & { parentId: string; chunkType: 'small' })[];  // 小块列表（关联大块）
+}
+
+/**
+ * 分层分块文档内容（小块大块架构）
+ *
+ * 流程：
+ * 1. 先生成大块（parent chunks），大小 1500-2000字
+ * 2. 在每个大块边界内生成小块（child chunks），大小 200-300字
+ * 3. 小块关联大块（parentId），小块用于检索，大块用于生成
+ *
+ * @param content 文档内容
+ * @param fileType 文件类型
+ * @returns 分层分块结果
+ */
+export async function chunkDocumentHierarchical(
+  content: string,
+  fileType?: string
+): Promise<HierarchicalChunkResult> {
+  const strategy = fileType
+    ? HIERARCHICAL_STRATEGIES[fileType] ?? DEFAULT_HIERARCHICAL_STRATEGY
+    : DEFAULT_HIERARCHICAL_STRATEGY;
+
+  // Step 1: 生成大块（parent chunks）
+  let parentRawChunks: { content: string; startPos: number; endPos: number }[];
+
+  // Markdown 特殊处理：按一级标题切分
+  if (fileType === 'md' && content.includes('\n\n# ')) {
+    const h1Separator = '\n\n# ';
+    const h1Chunks = splitBySeparator(content, h1Separator);
+
+    parentRawChunks = [];
+    for (const h1Chunk of h1Chunks) {
+      if (h1Chunk.content.length > strategy.parentChunkSize) {
+        const subChunks = splitTextRecursive(
+          h1Chunk.content,
+          strategy.separators.slice(1),
+          strategy.parentChunkSize,
+          strategy.parentOverlap
+        );
+        for (const sub of subChunks) {
+          parentRawChunks.push({
+            content: sub.content,
+            startPos: h1Chunk.startPos + sub.startPos,
+            endPos: h1Chunk.startPos + sub.endPos,
+          });
+        }
+      } else {
+        parentRawChunks.push(h1Chunk);
+      }
+    }
+  } else {
+    parentRawChunks = splitTextRecursive(
+      content,
+      strategy.separators,
+      strategy.parentChunkSize,
+      strategy.parentOverlap
+    );
+  }
+
+  // 过滤空块并生成大块结果
+  const parentChunks: ParentChunkResult[] = parentRawChunks
+    .filter(chunk => chunk.content.trim().length > 0)
+    .map((chunk, index) => {
+      const originalContent = chunk.content;
+
+      // 提取标题链
+      let headingChain: string | undefined;
+      let headingLevel: number | undefined;
+      if (fileType === 'md') {
+        const heading = extractHeadingChainAtPosition(content, chunk.startPos, chunk.endPos);
+        if (heading) {
+          headingChain = heading.chain;
+          headingLevel = heading.level;
+        }
+      }
+
+      const enhancedContent = headingChain
+        ? `[${headingChain}] ${originalContent}`
+        : originalContent;
+
+      return {
+        id: crypto.randomUUID(),
+        content: enhancedContent,
+        originalContent,
+        contentHash: computeHash(originalContent),
+        chunkIndex: index,
+        startPos: chunk.startPos,
+        endPos: chunk.endPos,
+        headingChain,
+        headingLevel,
+        chunkType: 'parent',
+        childCount: 0,  // 后面更新
+      };
+    });
+
+  // Step 2: 在每个大块内生成小块
+  const childChunks: (ChunkResult & { parentId: string; chunkType: 'small' })[] = [];
+
+  for (const parentChunk of parentChunks) {
+    // 在大块边界内切分小块
+    const childRawChunks = splitTextRecursive(
+      parentChunk.originalContent,
+      strategy.separators,
+      strategy.childChunkSize,
+      strategy.childOverlap
+    );
+
+    // 过滤空块并生成小块结果
+    const parentChildChunks = childRawChunks
+      .filter(chunk => chunk.content.trim().length > 0)
+      .map((chunk, childIndex) => {
+        const originalContent = chunk.content;
+
+        // 小块继承大块的标题链（可选增强）
+        const enhancedContent = parentChunk.headingChain
+          ? `[${parentChunk.headingChain}] ${originalContent}`
+          : originalContent;
+
+        return {
+          id: crypto.randomUUID(),
+          content: enhancedContent,
+          originalContent,
+          contentHash: computeHash(originalContent),
+          chunkIndex: childIndex,  // 在大块内的序号
+          startPos: parentChunk.startPos + chunk.startPos,  // 相对文档的位置
+          endPos: parentChunk.startPos + chunk.endPos,
+          headingChain: parentChunk.headingChain,
+          headingLevel: parentChunk.headingLevel,
+          parentId: parentChunk.id,
+          chunkType: 'small' as const,
+        };
+      });
+
+    // 合并过小的小块
+    const mergedChildChunks: (ChunkResult & { parentId: string; chunkType: 'small' })[] = [];
+    for (const child of parentChildChunks) {
+      const lastChild = mergedChildChunks[mergedChildChunks.length - 1];
+
+      if (
+        child.originalContent.length < strategy.minChildSize &&
+        lastChild &&
+        lastChild.content.length + child.content.length < strategy.childChunkSize * 1.5
+      ) {
+        // 合并到上一小块
+        lastChild.content = lastChild.content + '\n' + child.content;
+        lastChild.originalContent = lastChild.originalContent + '\n' + child.originalContent;
+        lastChild.endPos = child.endPos;
+        lastChild.contentHash = computeHash(lastChild.originalContent);
+      } else {
+        child.chunkIndex = mergedChildChunks.length;
+        mergedChildChunks.push(child);
+      }
+    }
+
+    // 更新大块的 childCount
+    parentChunk.childCount = mergedChildChunks.length;
+
+    // 添加小块到总列表
+    childChunks.push(...mergedChildChunks);
+  }
+
+  return {
+    parentChunks,
+    childChunks,
+  };
+}
+
+// 获取分层分块统计
+export function getHierarchicalChunkStats(result: HierarchicalChunkResult): {
+  parentCount: number;
+  childCount: number;
+  avgParentLength: number;
+  avgChildLength: number;
+  minChildLength: number;
+  maxChildLength: number;
+} {
+  const parentLengths = result.parentChunks.map(p => p.originalContent.length);
+  const childLengths = result.childChunks.map(c => c.originalContent.length);
+
+  return {
+    parentCount: result.parentChunks.length,
+    childCount: result.childChunks.length,
+    avgParentLength: parentLengths.length > 0
+      ? Math.round(parentLengths.reduce((a, b) => a + b, 0) / parentLengths.length)
+      : 0,
+    avgChildLength: childLengths.length > 0
+      ? Math.round(childLengths.reduce((a, b) => a + b, 0) / childLengths.length)
+      : 0,
+    minChildLength: childLengths.length > 0 ? Math.min(...childLengths) : 0,
+    maxChildLength: childLengths.length > 0 ? Math.max(...childLengths) : 0,
+  };
+}

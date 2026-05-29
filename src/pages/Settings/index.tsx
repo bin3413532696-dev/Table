@@ -870,6 +870,7 @@ function ApiConfigSettings() {
     apiKey: string;
     model: string;
     embeddingModel: string;
+    rerankerModel: string;
     headers: string;
   }>({
     name: '',
@@ -878,6 +879,7 @@ function ApiConfigSettings() {
     apiKey: '',
     model: '',
     embeddingModel: '',
+    rerankerModel: '',
     headers: '',
   });
   const [editingApiKeyPreview, setEditingApiKeyPreview] = useState('');
@@ -1076,6 +1078,7 @@ function ApiConfigSettings() {
       apiKey: '',
       model: defaultModelsByFormat['openai'],
       embeddingModel: 'text-embedding-3-small',
+      rerankerModel: '',
       headers: '',
     });
     setFetchedModels([]);
@@ -1093,6 +1096,7 @@ function ApiConfigSettings() {
       apiKey: '',
       model: provider.model || '',
       embeddingModel: provider.embeddingModel || '',
+      rerankerModel: provider.rerankerModel || '',
       headers: provider.headers ? JSON.stringify(provider.headers, null, 2) : '',
     });
     setFetchedModels([]);
@@ -1156,6 +1160,7 @@ function ApiConfigSettings() {
       apiKeyPreview: editingProvider?.apiKeyPreview,
       model: formData.model,
       embeddingModel: formData.embeddingModel,
+      rerankerModel: formData.rerankerModel,
       headers,
     };
 
@@ -1217,7 +1222,7 @@ function ApiConfigSettings() {
               </button>
             </div>
           </div>
-          {(activeProvider.model || activeProvider.embeddingModel) && (
+          {(activeProvider.model || activeProvider.embeddingModel || activeProvider.rerankerModel) && (
             <div className="mt-3 flex flex-wrap gap-2">
               {activeProvider.model && (
                 <span className="text-xs px-2 py-1 rounded-full bg-bg-secondary text-text-secondary">
@@ -1227,6 +1232,11 @@ function ApiConfigSettings() {
               {activeProvider.embeddingModel && (
                 <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary">
                   Embedding: {activeProvider.embeddingModel}
+                </span>
+              )}
+              {activeProvider.rerankerModel && (
+                <span className="text-xs px-2 py-1 rounded-full bg-warning/10 text-warning">
+                  Reranker: {activeProvider.rerankerModel}
                 </span>
               )}
             </div>
@@ -1341,6 +1351,18 @@ function ApiConfigSettings() {
               </div>
 
               <div>
+                <label className="block text-sm font-medium mb-1.5 text-text-secondary">Reranker 模型</label>
+                <input
+                  type="text"
+                  value={formData.rerankerModel}
+                  onChange={(e) => setFormData({ ...formData, rerankerModel: e.target.value })}
+                  placeholder="如: rerank-v3.5"
+                  className="input"
+                />
+                <p className="text-xs text-text-muted mt-1">用于RAG检索重排序的模型，需服务端支持 Cohere /rerank API 格式</p>
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium mb-1.5 text-text-secondary">自定义 Headers (JSON)</label>
                 <textarea
                   value={formData.headers}
@@ -1413,7 +1435,7 @@ function ApiConfigSettings() {
                   </button>
                 </div>
               </div>
-              {(provider.model || provider.embeddingModel) && (
+              {(provider.model || provider.embeddingModel || provider.rerankerModel) && (
                 <div className="px-4 pb-4 flex flex-wrap gap-2">
                   {provider.model && (
                     <span className="text-xs px-2 py-1 rounded-full bg-bg-primary text-text-secondary">
@@ -1423,6 +1445,11 @@ function ApiConfigSettings() {
                   {provider.embeddingModel && (
                     <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary">
                       Embedding: {provider.embeddingModel}
+                    </span>
+                  )}
+                  {provider.rerankerModel && (
+                    <span className="text-xs px-2 py-1 rounded-full bg-warning/10 text-warning">
+                      Reranker: {provider.rerankerModel}
                     </span>
                   )}
                 </div>

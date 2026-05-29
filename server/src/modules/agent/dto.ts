@@ -12,7 +12,7 @@ export type AgentSessionDto = {
 export type AgentSessionDetailDto = AgentSessionDto & {
   messages: Array<{
     id: string;
-    role: 'user' | 'assistant' | 'system';
+    role: 'user' | 'assistant' | 'system' | 'tool';  // tool 角色前端会过滤掉不显示
     content: string;
     createdAt?: number;
   }>;
@@ -44,7 +44,7 @@ export type AgentRunDetailDto = AgentRunListItemDto & {
   status: RunStatus;
   messages: Array<{
     id: string;
-    role: 'user' | 'assistant' | 'system';
+    role: 'user' | 'assistant' | 'system' | 'tool';  // tool 角色前端会过滤掉不显示
     content: string;
     createdAt?: number;
   }>;

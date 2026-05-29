@@ -13,7 +13,7 @@ export type ProviderConfig = {
 };
 
 export type ConversationMessage = {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';  // tool 角色用于工具执行结果，前端会过滤掉不显示
   content: string;
   createdAt?: number;
 };

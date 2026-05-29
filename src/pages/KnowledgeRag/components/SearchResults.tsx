@@ -1,5 +1,6 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
+import { MetadataBadges } from '../../Knowledge/components/MetadataFilter';
 import type { SearchResult } from '../types';
 
 interface SearchResultsProps {
@@ -61,7 +62,9 @@ export function SearchResults({ results, searchTimeMs, onOpenDocument }: SearchR
             </div>
           </div>
 
-          <p className="text-sm text-gray-700 line-clamp-3">
+          <MetadataBadges doc={result} />
+
+          <p className="text-sm text-gray-700 line-clamp-3 mt-2">
             {result.content}
           </p>
         </div>
