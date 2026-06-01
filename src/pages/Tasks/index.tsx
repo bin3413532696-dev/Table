@@ -1,23 +1,25 @@
 import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle, Circle, Plus, Trash2, ListTodo, CheckCheck, AlertCircle, Search, SortAsc, AlertTriangle, CheckSquare, X, Edit2 } from 'lucide-react';
-import { taskDB, Task, createUseDB, getErrorMessage } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
 import { Button, EmptyState, PageHeader, PageContent } from '../../components/ui';
 import { TaskItem, PriorityButtonGroup, TaskOverview } from './components';
 import { TaskSidebar } from './components/TaskSidebar';
 import { MESSAGES } from '../../core/messages';
+import type { Task } from '../../core/types';
+import { getErrorMessage } from '../../lib/api/client';
+import { taskApi } from '../../lib/api/tasks';
+import { useCollectionData } from '../../lib/useCollectionData';
 
 type FilterType = 'all' | 'pending' | 'completed';
 type SortType = 'created' | 'priority' | 'dueDate' | 'title';
 export type PriorityType = 'low' | 'medium' | 'high';
 
 const MAX_TITLE_LENGTH = 100;
-const useDB = createUseDB(React);
 
 const Tasks: React.FC = () => {
-  const { data: tasksData, loading, error: loadError } = useDB(() => taskDB.getAll(), ['tasks']);
+  const { data: tasksData, loading, error: loadError } = useCollectionData(() => taskApi.getAll(), ['tasks']);
   const tasks = tasksData ?? [];
 
   const [newTask, setNewTask] = useState('');
@@ -36,6 +38,8 @@ const Tasks: React.FC = () => {
   const [showSortMenu, setShowSortMenu] = useState(false);
   const [batchFeedback, setBatchFeedback] = useState<string>('');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isAdding, setIsAdding] = useState(false);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -102,8 +106,10 @@ const Tasks: React.FC = () => {
     const trimmedTitle = newTask.trim().slice(0, MAX_TITLE_LENGTH);
     if (!trimmedTitle) return;
     try {
+      setIsAdding(true);
       setFeedback(null);
-      await taskDB.add({
+      setSuccessMessage(null);
+      const created = await taskApi.add({
         title: trimmedTitle,
         completed: false,
         priority: newTaskPriority,
@@ -114,19 +120,28 @@ const Tasks: React.FC = () => {
       setNewTask('');
       setNewTaskPriority('medium');
       setNewTaskDueDate('');
+      setFilter('all');
+      setSearchQuery('');
+      setSortType('created');
+      setShowBatchActions(false);
+      setSelectedIds(new Set());
+      setSuccessMessage(`已添加任务：${created.title}`);
     } catch (error) {
       setFeedback(getErrorMessage(error, MESSAGES.tasks.saveFailed));
+    } finally {
+      setIsAdding(false);
     }
   }, [newTask, newTaskPriority, newTaskDueDate]);
 
   const toggleTask = useCallback(async (id: string) => {
     try {
       setFeedback(null);
+      setSuccessMessage(null);
       const task = tasks.find((item) => item.id === id);
       if (!task || task.version === undefined) {
         throw new Error(MESSAGES.common.versionConflict);
       }
-      await taskDB.update(id, {
+      await taskApi.update(id, {
         completed: !task.completed,
         version: task.version,
       });
@@ -139,7 +154,8 @@ const Tasks: React.FC = () => {
   const deleteTask = useCallback(async (id: string) => {
     try {
       setFeedback(null);
-      await taskDB.delete(id);
+      setSuccessMessage(null);
+      await taskApi.delete(id);
       setShowDeleteConfirm(null);
       setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
     } catch (error) {
@@ -148,7 +164,7 @@ const Tasks: React.FC = () => {
   }, []);
 
   const handleBatchDelete = useCallback(async () => {
-    const results = await Promise.allSettled([...selectedIds].map(id => taskDB.delete(id)));
+    const results = await Promise.allSettled([...selectedIds].map(id => taskApi.delete(id)));
     const failedCount = results.filter((result) => result.status === 'rejected').length;
     if (failedCount > 0) {
       setBatchFeedback(`批量删除完成，但有 ${failedCount} 项删除失败。`);
@@ -163,7 +179,7 @@ const Tasks: React.FC = () => {
   const handleBatchToggle = useCallback(async (complete: boolean) => {
     const results = await Promise.allSettled([...selectedIds].map(id => {
       const task = tasks.find(t => t.id === id);
-      if (task && task.completed !== complete) return taskDB.toggle(id);
+      if (task && task.completed !== complete) return taskApi.toggle(id);
       return Promise.resolve();
     }));
     const failedCount = results.filter((result) => result.status === 'rejected').length;
@@ -212,11 +228,12 @@ const Tasks: React.FC = () => {
     if (!trimmedTitle || !editingId) return;
     try {
       setFeedback(null);
+      setSuccessMessage(null);
       const version = tasks.find((task) => task.id === editingId)?.version;
       if (version === undefined) {
         throw new Error(MESSAGES.common.versionConflict);
       }
-      await taskDB.update(editingId, {
+      await taskApi.update(editingId, {
         title: trimmedTitle,
         priority: editPriority,
         dueDate: editDueDate || undefined,
@@ -323,6 +340,12 @@ const Tasks: React.FC = () => {
             </div>
           )}
 
+          {successMessage && (
+            <div className="rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">
+              {successMessage}
+            </div>
+          )}
+
           {batchFeedback && (
             <div className="rounded-lg border border-warning/20 bg-warning/10 px-4 py-3 text-sm text-warning">
               {batchFeedback}
@@ -337,7 +360,7 @@ const Tasks: React.FC = () => {
                 value={newTask}
                 onChange={(e) => setNewTask(e.target.value.slice(0, MAX_TITLE_LENGTH))}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (e.key === 'Enter' && !e.shiftKey && !isAdding) {
                     e.preventDefault();
                     addTask();
                   }
@@ -355,7 +378,14 @@ const Tasks: React.FC = () => {
                   className="input w-auto px-3 py-2 text-sm"
                   title="截止日期"
                 />
-                <Button variant="primary" onClick={addTask} icon={<Plus size={16} />}>添加</Button>
+                <Button
+                  variant="primary"
+                  onClick={addTask}
+                  icon={<Plus size={16} />}
+                  loading={isAdding}
+                >
+                  添加
+                </Button>
               </div>
             </div>
             {newTask.length > 0 && (

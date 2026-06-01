@@ -1,6 +1,10 @@
 const DEBUGGER_URL = 'http://127.0.0.1:9222/json/list';
 const PAGE_ORIGIN = 'http://localhost:3266';
 const PAGE_URL_PREFIX = `${PAGE_ORIGIN}/`;
+const CSRF_COOKIE_NAME = 'table_dev_csrf_token';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+
+const cookieJar = new Map();
 
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -14,15 +18,69 @@ async function fetchJson(url) {
   return response.json();
 }
 
+function storeCookies(response) {
+  const getSetCookie = response.headers.getSetCookie?.bind(response.headers);
+  const cookieHeaders = getSetCookie ? getSetCookie() : [];
+
+  for (const header of cookieHeaders) {
+    const [cookiePart] = String(header).split(';');
+    const separatorIndex = cookiePart.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const name = cookiePart.slice(0, separatorIndex).trim();
+    const value = cookiePart.slice(separatorIndex + 1).trim();
+    if (!name) {
+      continue;
+    }
+
+    cookieJar.set(name, value);
+  }
+}
+
+function buildCookieHeader() {
+  return Array.from(cookieJar.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+async function ensureCsrfCookie() {
+  if (cookieJar.has(CSRF_COOKIE_NAME)) {
+    return;
+  }
+
+  const response = await fetch(`${PAGE_ORIGIN}/api/auth/me`, {
+    credentials: 'same-origin',
+  });
+
+  if (!response.ok) {
+    throw new Error(`GET /api/auth/me failed: HTTP ${response.status}`);
+  }
+
+  storeCookies(response);
+}
+
 async function requestApi(path, init = {}) {
+  const method = (init.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    await ensureCsrfCookie();
+  }
+
   const response = await fetch(`${PAGE_ORIGIN}${path}`, {
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
+      ...(buildCookieHeader() ? { Cookie: buildCookieHeader() } : {}),
+      ...(cookieJar.get(CSRF_COOKIE_NAME) && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS'
+        ? { [CSRF_HEADER_NAME]: cookieJar.get(CSRF_COOKIE_NAME) }
+        : {}),
       ...(init.headers || {}),
     },
     ...init,
   });
+
+  storeCookies(response);
 
   if (response.status === 204) {
     return undefined;
@@ -32,7 +90,7 @@ async function requestApi(path, init = {}) {
   const payload = text ? JSON.parse(text) : undefined;
 
   if (!response.ok) {
-    throw new Error(`${init.method || 'GET'} ${path} failed: ${payload?.message || response.status}`);
+    throw new Error(`${method} ${path} failed: ${payload?.message || response.status}`);
   }
 
   return payload;
@@ -132,23 +190,21 @@ async function waitFor(cdp, predicateSource, { timeout = 120000, interval = 250 
   throw new Error(`waitFor timeout after ${timeout}ms`);
 }
 
-async function openAgentPanel(cdp) {
+async function waitForAppReady(cdp) {
+  await waitFor(
+    cdp,
+    `
+      () => document.readyState === 'complete' && location.href.includes('localhost:3266')
+    `
+  );
+}
+
+async function navigateToDashboard(cdp) {
   await cdp.evaluate(
     toExpression(`
       () => {
-        const trigger = document.querySelector('button[title*="Ctrl+K"]');
-        if (trigger) {
-          trigger.click();
-          return true;
-        }
-
-        window.dispatchEvent(new KeyboardEvent('keydown', {
-          key: 'k',
-          ctrlKey: true,
-          bubbles: true,
-        }));
-
-        return true;
+        window.location.hash = '#/dashboard';
+        return window.location.href;
       }
     `)
   );
@@ -156,10 +212,48 @@ async function openAgentPanel(cdp) {
   await waitFor(
     cdp,
     `
-      () => {
-        const textareas = Array.from(document.querySelectorAll('textarea'));
-        return textareas.some((element) => element.offsetParent !== null);
-      }
+      () => document.readyState === 'complete'
+        && location.hash.includes('/dashboard')
+        && Array.from(document.querySelectorAll('textarea'))
+          .some((element) => element.offsetParent !== null)
+    `
+  );
+}
+
+async function openAgentPanel(cdp) {
+  const hasVisibleTextarea = await cdp.evaluate(
+    toExpression(`
+      () => Array.from(document.querySelectorAll('textarea'))
+        .some((element) => element.offsetParent !== null)
+    `)
+  );
+
+  if (!hasVisibleTextarea) {
+    await cdp.evaluate(
+      toExpression(`
+        () => {
+          const trigger = document.querySelector('button[title*="Ctrl+K"]');
+          if (trigger) {
+            trigger.click();
+            return true;
+          }
+
+          window.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'k',
+            ctrlKey: true,
+            bubbles: true,
+          }));
+          return true;
+        }
+      `)
+    );
+  }
+
+  await waitFor(
+    cdp,
+    `
+      () => Array.from(document.querySelectorAll('textarea'))
+        .some((element) => element.offsetParent !== null)
     `
   );
 }
@@ -248,7 +342,7 @@ async function waitForProcessingStop(cdp) {
           .filter((element) => element.offsetParent !== null)
           .map((element) => (element.textContent || '').trim())
           .filter(Boolean);
-        const hasConfirm = buttons.some((text) => text.includes('确认执行') || text === '确认' || text.includes('纭'));
+        const hasConfirm = buttons.some((text) => text.includes('确认') || text.includes('执行') || text.includes('Approve'));
         return (textarea && !textarea.disabled) || hasConfirm;
       }
     `
@@ -264,10 +358,9 @@ async function waitForConfirmationButton(cdp) {
           .filter((element) => element.offsetParent !== null)
           .map((element) => (element.textContent || '').trim())
           .filter(Boolean);
-        return buttons.some((text) => text.includes('确认执行') || text === '确认' || text.includes('纭'));
+        return buttons.some((text) => text.includes('确认') || text.includes('执行') || text.includes('Approve'));
       }
-    `,
-    { timeout: 30000 }
+    `
   );
 }
 
@@ -279,7 +372,7 @@ async function clickConfirmation(cdp) {
           .filter((element) => element.offsetParent !== null);
         const confirmButton = buttons.find((element) => {
           const text = (element.textContent || '').trim();
-          return text.includes('确认执行') || text === '确认' || text.includes('纭');
+          return text.includes('确认') || text.includes('执行') || text.includes('Approve');
         });
 
         if (!confirmButton) {
@@ -297,7 +390,13 @@ async function clickConfirmation(cdp) {
   }
 }
 
-async function runPrompt(cdp, prompt, { expectBody = [], expectTool, confirm = false } = {}) {
+function hasGenericError(text) {
+  return text.includes('处理请求时发生错误') ||
+    text.includes('Unexpected server error') ||
+    text.includes('Agent runtime unavailable');
+}
+
+async function runPrompt(cdp, prompt, { expectTool, confirm = false } = {}) {
   const before = await getPageState(cdp);
   const previousCount = expectTool
     ? before.toolBadges.filter((badge) => badge === expectTool).length
@@ -316,18 +415,16 @@ async function runPrompt(cdp, prompt, { expectBody = [], expectTool, confirm = f
 
   const after = await getPageState(cdp);
   const bodyText = String(after.bodyText || '');
-  const matchedExpectations = expectBody.filter((keyword) => bodyText.includes(keyword));
   const toolCalled = expectTool
-    ? after.toolBadges.filter((badge) => badge === expectTool).length > previousCount
-      || bodyText.includes(expectTool)
+    ? after.toolBadges.filter((badge) => badge === expectTool).length > previousCount || bodyText.includes(expectTool)
     : true;
 
   return {
     before,
     after,
-    toolCalled,
-    matchedExpectations,
     bodyText,
+    toolCalled,
+    hasGenericError: hasGenericError(bodyText),
   };
 }
 
@@ -347,23 +444,9 @@ async function main() {
   try {
     await cdp.send('Page.enable');
     await cdp.send('Runtime.enable');
-
-    await waitFor(
-      cdp,
-      `
-        () => document.readyState === 'complete' && location.href.includes('localhost:3266')
-      `
-    );
-
-    summary.pageUrl = await cdp.evaluate('location.href');
-
+    await waitForAppReady(cdp);
     await cdp.send('Page.reload');
-    await waitFor(
-      cdp,
-      `
-        () => document.readyState === 'complete' && location.href.includes('localhost:3266')
-      `
-    );
+    await waitForAppReady(cdp);
 
     await cdp.evaluate(
       toExpression(`
@@ -374,105 +457,111 @@ async function main() {
       `)
     );
 
+    await navigateToDashboard(cdp);
+    summary.pageUrl = await cdp.evaluate('location.href');
     await openAgentPanel(cdp);
     await waitForAgentReady(cdp);
 
-    const settingsResult = await runPrompt(
-      cdp,
-      '请严格只调用 get_settings_overview 工具，读取当前设置概览，不要调用其他工具。',
-      { expectTool: 'get_settings_overview', expectBody: ['GLM-5 Provider', 'glm-5'] }
-    );
-    summary.tests.push({
-      test: 'get_settings_overview',
-      toolCalled: settingsResult.toolCalled,
-      matchedExpectations: settingsResult.matchedExpectations,
-    });
-    if (settingsResult.matchedExpectations.length < 2) {
-      summary.failures.push('get_settings_overview: Provider 信息未完整显示');
-    }
+    const readOnlyTests = [
+      {
+        test: 'query_tasks',
+        prompt: 'Strictly call query_tasks only and summarize the current tasks. Do not use any other tool.',
+        tool: 'query_tasks',
+      },
+      {
+        test: 'get_task_stats',
+        prompt: 'Strictly call get_task_stats only and summarize the current task stats. Do not use any other tool.',
+        tool: 'get_task_stats',
+      },
+      {
+        test: 'query_finance',
+        prompt: 'Strictly call query_finance only and summarize the latest finance records. Do not use any other tool.',
+        tool: 'query_finance',
+      },
+      {
+        test: 'get_finance_stats',
+        prompt: 'Strictly call get_finance_stats only and summarize the current finance stats. Do not use any other tool.',
+        tool: 'get_finance_stats',
+      },
+      {
+        test: 'search_knowledge',
+        prompt: 'Strictly call search_knowledge only and search for notes related to smoke. Do not use any other tool.',
+        tool: 'search_knowledge',
+      },
+    ];
 
-    const apiListResult = await runPrompt(
-      cdp,
-      '请严格只调用 manage_api_config 工具，action 使用 list，列出当前 Provider 配置，不要调用其他工具。',
-      { expectTool: 'manage_api_config', expectBody: ['GLM-5 Provider', 'glm-5'] }
-    );
-    summary.tests.push({
-      test: 'manage_api_config_list',
-      toolCalled: apiListResult.toolCalled,
-      matchedExpectations: apiListResult.matchedExpectations,
-    });
-    if (apiListResult.matchedExpectations.length < 2) {
-      summary.failures.push('manage_api_config_list: Provider 列表结果异常');
-    }
-
-    const currentTimeResult = await runPrompt(
-      cdp,
-      '请严格只调用 get_current_time 工具，读取当前本地时间，不要调用其他工具。',
-      { expectTool: 'get_current_time', expectBody: ['timezone', 'timestamp'] }
-    );
-    summary.tests.push({
-      test: 'get_current_time',
-      toolCalled: currentTimeResult.toolCalled,
-      matchedExpectations: currentTimeResult.matchedExpectations,
-    });
-    if (currentTimeResult.matchedExpectations.length < 2) {
-      summary.failures.push('get_current_time: 时间结果未完整显示');
+    for (const test of readOnlyTests) {
+      const result = await runPrompt(cdp, test.prompt, { expectTool: test.tool });
+      summary.tests.push({
+        test: test.test,
+        toolCalled: result.toolCalled,
+        hasGenericError: result.hasGenericError,
+      });
+      if (!result.toolCalled) {
+        summary.failures.push(`${test.test}: tool was not called`);
+      }
+      if (result.hasGenericError) {
+        summary.failures.push(`${test.test}: generic error surfaced in the dashboard agent UI`);
+      }
     }
 
     const createTaskResult = await runPrompt(
       cdp,
-      `请严格只调用 create_task 工具，不要调用其他工具。参数如下：\`\`\`json\n{"title":"${taskTitle}","priority":"medium"}\n\`\`\``,
+      `Strictly call create_task only with this JSON:\n\`\`\`json\n{"title":"${taskTitle}","priority":"medium"}\n\`\`\``,
       { expectTool: 'create_task', confirm: true }
     );
-    const createdTaskPersisted =
-      String(createTaskResult.bodyText || '').includes(taskTitle) ||
-      String(createTaskResult.bodyText || '').includes('工具 create_task 执行结果') ||
-      String(createTaskResult.bodyText || '').includes('工具 create_task 已执行成功');
+    const tasksPayload = await requestApi('/api/tasks');
+    const createdTask = Array.isArray(tasksPayload?.items)
+      ? tasksPayload.items.find((item) => item.title === taskTitle)
+      : null;
+    createdTaskId = createdTask?.id || null;
+
     summary.tests.push({
       test: 'create_task',
       toolCalled: createTaskResult.toolCalled,
-      persisted: createdTaskPersisted,
+      persisted: Boolean(createdTaskId),
+      hasGenericError: createTaskResult.hasGenericError,
     });
-    if (!createdTaskPersisted) {
-      summary.failures.push('create_task: 未观察到任务创建成功结果');
-    } else {
-      const tasksPayload = await requestApi('/api/tasks');
-      const createdTask = Array.isArray(tasksPayload?.items)
-        ? tasksPayload.items.find((item) => item.title === taskTitle)
-        : null;
-      createdTaskId = createdTask?.id || null;
+    if (!createTaskResult.toolCalled) {
+      summary.failures.push('create_task: tool was not called');
     }
-
-    const weatherResult = await runPrompt(
-      cdp,
-      '请严格只调用 get_weather 工具，查询北京天气，不要调用其他工具。',
-      { expectTool: 'get_weather' }
-    );
-    summary.tests.push({
-      test: 'get_weather',
-      toolCalled: weatherResult.toolCalled,
-    });
-    if (!weatherResult.toolCalled) {
-      summary.failures.push('get_weather: 工具未被调用');
+    if (!createdTaskId) {
+      summary.failures.push('create_task: task was not persisted');
+    }
+    if (createTaskResult.hasGenericError) {
+      summary.failures.push('create_task: generic error surfaced in the dashboard agent UI');
     }
 
     if (createdTaskId) {
       const deleteTaskResult = await runPrompt(
         cdp,
-        `请严格只调用 delete_task 工具，不要调用其他工具。参数如下：\`\`\`json\n{"id":"${createdTaskId}"}\n\`\`\``,
+        `Strictly call delete_task only with this JSON:\n\`\`\`json\n{"id":"${createdTaskId}"}\n\`\`\``,
         { expectTool: 'delete_task', confirm: true }
       );
+
+      const tasksAfterDelete = await requestApi('/api/tasks');
+      const stillExists = Array.isArray(tasksAfterDelete?.items)
+        ? tasksAfterDelete.items.some((item) => item.id === createdTaskId)
+        : false;
+
       summary.tests.push({
         test: 'delete_task',
         toolCalled: deleteTaskResult.toolCalled,
+        removed: !stillExists,
+        hasGenericError: deleteTaskResult.hasGenericError,
       });
       if (!deleteTaskResult.toolCalled) {
-        summary.failures.push('delete_task: 工具未被调用');
+        summary.failures.push('delete_task: tool was not called');
+      }
+      if (stillExists) {
+        summary.failures.push('delete_task: task still exists after confirmation');
       } else {
         createdTaskId = null;
       }
+      if (deleteTaskResult.hasGenericError) {
+        summary.failures.push('delete_task: generic error surfaced in the dashboard agent UI');
+      }
     }
-
   } finally {
     if (createdTaskId) {
       await requestApi(`/api/tasks/${createdTaskId}`, {

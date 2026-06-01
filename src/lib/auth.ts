@@ -4,6 +4,13 @@ export const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
 export const CSRF_COOKIE_NAME = 'table_dev_csrf_token';
 export const CSRF_HEADER_NAME = 'x-csrf-token';
 
+let csrfBootstrapPromise: Promise<void> | null = null;
+
+function methodRequiresCsrf(method?: string): boolean {
+  const normalized = method?.toUpperCase() ?? 'GET';
+  return normalized !== 'GET' && normalized !== 'HEAD' && normalized !== 'OPTIONS';
+}
+
 export type AuthMeResponse = {
   data: {
     user: {
@@ -17,7 +24,7 @@ export type AuthMeResponse = {
     };
     auth: {
       userIdHeader: string;
-      source: 'default' | 'header' | 'session';
+      source: 'default' | 'header' | 'signed_session' | 'missing';
       isDefaultUser: boolean;
       devSessionCookie: string;
     };
@@ -91,24 +98,57 @@ function getCsrfTokenFromCookie(): string | null {
   return null;
 }
 
-export function buildAuthenticatedHeaders(headers?: HeadersInit): Headers {
+async function ensureCsrfCookie(): Promise<void> {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  if (getCsrfTokenFromCookie()) {
+    return;
+  }
+
+  if (!csrfBootstrapPromise) {
+    csrfBootstrapPromise = (async () => {
+      const response = await fetch('/api/auth/me', {
+        credentials: 'same-origin',
+        headers: buildAuthenticatedHeaders(undefined, 'GET'),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to initialize auth context: HTTP ${response.status}`);
+      }
+    })().finally(() => {
+      csrfBootstrapPromise = null;
+    });
+  }
+
+  await csrfBootstrapPromise;
+}
+
+export function buildAuthenticatedHeaders(headers?: HeadersInit, method?: string): Headers {
   const next = new Headers(headers);
   // 认证通过签名 Cookie 完成，不再需要 x-user-id 头
 
   // 添加 CSRF Token 到请求头（用于非 GET 请求的验证）
-  const csrfToken = getCsrfTokenFromCookie();
-  if (csrfToken) {
-    next.set(CSRF_HEADER_NAME, csrfToken);
+  if (methodRequiresCsrf(method)) {
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      next.set(CSRF_HEADER_NAME, csrfToken);
+    }
   }
 
   return next;
 }
 
 export async function fetchWithAuth(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (methodRequiresCsrf(init?.method)) {
+    await ensureCsrfCookie();
+  }
+
   return fetch(input, {
     ...init,
     credentials: 'same-origin',
-    headers: buildAuthenticatedHeaders(init?.headers),
+    headers: buildAuthenticatedHeaders(init?.headers, init?.method),
   });
 }
 

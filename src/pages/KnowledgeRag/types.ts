@@ -62,7 +62,7 @@ export interface SearchResult {
   content: string;
   chunkIndex: number;
   score: number;
-  source: 'semantic' | 'keyword' | 'hybrid';
+  source: 'semantic' | 'keyword' | 'hybrid' | 'reranked';
   sourceInfo: string | null;
   // === 元数据字段 ===
   publishDate: number | null;
@@ -94,6 +94,13 @@ export interface SearchInput {
   limit?: number;
   threshold?: number;
   fusionWeight?: number;
+  enableRerank?: boolean;
+  rerankerThreshold?: number;
+  enableQueryPreprocess?: boolean;
+  enableExpansion?: boolean;
+  enableRewrite?: boolean;
+  enableMmr?: boolean;
+  mmrLambda?: number;
   // === 元数据过滤 ===
   publishDateRange?: { start?: string; end?: string };
   sourceDept?: string[];
@@ -108,6 +115,9 @@ export interface SearchResponse {
   keywordCount: number;
   queryEmbeddingTimeMs: number;
   searchTimeMs: number;
+  preprocessTimeMs?: number;
+  mmrTimeMs?: number;
+  rerankTimeMs?: number;
 }
 
 // 上传结果

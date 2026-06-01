@@ -13,6 +13,8 @@ import {
   streamRejectAgentToolExecution,
 } from '../lib/agentApi';
 import { MESSAGES } from '../core/messages';
+import { taskApi } from '../lib/api/tasks';
+import { financeApi } from '../lib/api/finance';
 
 type AgentAction =
   | { type: 'ADD_MESSAGE'; payload: AgentMessage }
@@ -610,6 +612,39 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const refreshCollectionsForRun = useCallback(async (run: AgentRunDetailDto) => {
+    const completedToolNames = new Set(
+      (run.executedToolCalls || [])
+        .filter((execution) => execution.status === 'completed')
+        .map((execution) => execution.toolName)
+    );
+
+    const refreshers: Array<Promise<unknown>> = [];
+
+    if (
+      completedToolNames.has('create_task') ||
+      completedToolNames.has('update_task') ||
+      completedToolNames.has('delete_task')
+    ) {
+      refreshers.push(taskApi.refresh());
+    }
+
+    if (completedToolNames.has('add_finance_record')) {
+      refreshers.push(financeApi.refresh());
+    }
+
+    if (refreshers.length === 0) {
+      return;
+    }
+
+    const results = await Promise.allSettled(refreshers);
+    results.forEach((result) => {
+      if (result.status === 'rejected') {
+        console.warn('[Agent] Failed to refresh collection after confirmed tool execution:', result.reason);
+      }
+    });
+  }, []);
+
   const sendMessage = useCallback(async (content: string) => {
     if (state.isProcessing || !state.isConnected) {
       return;
@@ -768,6 +803,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
         },
       }, controller.signal);
       applyRunResultToAssistantMessage(confirmationRequest.pendingMessageId, run);
+      await refreshCollectionsForRun(run);
     } catch (error) {
       dispatch({
         type: 'SET_ERROR',
@@ -776,7 +812,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
     } finally {
       dispatch({ type: 'SET_PROCESSING', payload: false });
     }
-  }, [applyRunResultToAssistantMessage, state.confirmationRequest]);
+  }, [applyRunResultToAssistantMessage, applyStreamEventToAssistantMessage, refreshCollectionsForRun, state.confirmationRequest]);
 
   const rejectAction = useCallback(async () => {
     const confirmationRequest = state.confirmationRequest;

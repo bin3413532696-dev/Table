@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Database, Download, Upload, Trash2, AlertCircle, CheckCircle, Lock, Eye, EyeOff, Check, Sun, Moon, Settings as SettingsIcon, Shield, HardDrive, Plus, Edit2, Trash2 as TrashIcon, Globe, ChevronDown, ChevronUp, Power, Bot, Sparkles, MessageSquare, Zap } from 'lucide-react';
-import { dataManager, financeDB, taskDB } from '../../db';
 import { initializeData } from '../../lib/dataSync';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useCurrentUser } from '../../contexts/UserContext';
@@ -33,6 +32,7 @@ import {
   updateAgentPersona,
   type AgentPersonaDto,
 } from '../../lib/agentApi';
+import { maintenanceApi } from '../../lib/api/maintenance';
 import { registeredToolNames } from '../../agent/toolMetadata';
 import { MESSAGES } from '../../core/messages';
 import { PageHeader, PageContent, defaultEasing } from '../../components/ui/PageAnimations';
@@ -162,10 +162,6 @@ function ProfileSettings() {
   };
 
   const refreshUserScopedData = async () => {
-    await Promise.all([
-      financeDB.getAll(),
-      taskDB.getAll(),
-    ]);
     await initializeData();
   };
 
@@ -551,7 +547,7 @@ function DataManager() {
   });
 
   const refreshStats = async () => {
-    const nextStats = await dataManager.getStats();
+    const nextStats = await maintenanceApi.getStats();
     setStats(nextStats);
   };
 
@@ -579,17 +575,17 @@ function DataManager() {
   };
 
   const handleExportBusiness = async () => {
-    const data = await dataManager.exportBusinessData();
+    const data = await maintenanceApi.exportBusinessData();
     downloadJson(`business_backup_${new Date().toISOString().split('T')[0]}.json`, data);
   };
 
   const handleExportKnowledge = async () => {
-    const data = await dataManager.exportKnowledgeData();
+    const data = await maintenanceApi.exportKnowledgeData();
     downloadJson(`knowledge_backup_${new Date().toISOString().split('T')[0]}.json`, data);
   };
 
   const handleExportLocalSettings = async () => {
-    const data = await dataManager.exportLocalSettings();
+    const data = await maintenanceApi.exportLocalSettings();
     downloadJson(`local_settings_${new Date().toISOString().split('T')[0]}.json`, data);
   };
 
@@ -623,11 +619,11 @@ function DataManager() {
   const handleClear = async () => {
     try {
       if (clearMode === 'all') {
-        await dataManager.clearAll();
+        await maintenanceApi.clearAll();
       } else if (clearMode === 'knowledge') {
-        await dataManager.clearKnowledgeData();
+        await maintenanceApi.clearKnowledgeData();
       } else if (clearMode === 'local') {
-        dataManager.clearLocalSettings();
+        maintenanceApi.clearLocalSettings();
       }
       setShowClearConfirm(false);
       if (clearMode === 'local') {
@@ -700,7 +696,7 @@ function DataManager() {
             <input
               type="file"
               accept=".json"
-              onChange={createImportHandler(dataManager.importBusinessData, MESSAGES.settings.importBusinessSuccess, {
+              onChange={createImportHandler(maintenanceApi.importBusinessData, MESSAGES.settings.importBusinessSuccess, {
                 refreshStatsAfterSuccess: true,
               })}
               className="hidden"
@@ -736,7 +732,7 @@ function DataManager() {
             <input
               type="file"
               accept=".json"
-              onChange={createImportHandler(dataManager.importKnowledgeData, MESSAGES.settings.importKnowledgeSuccess, {
+              onChange={createImportHandler(maintenanceApi.importKnowledgeData, MESSAGES.settings.importKnowledgeSuccess, {
                 refreshStatsAfterSuccess: true,
               })}
               className="hidden"
@@ -772,7 +768,7 @@ function DataManager() {
             <input
               type="file"
               accept=".json"
-              onChange={createImportHandler(dataManager.importLocalSettings, MESSAGES.settings.importSettingsSuccess, {
+              onChange={createImportHandler(maintenanceApi.importLocalSettings, MESSAGES.settings.importSettingsSuccess, {
                 reloadAfterSuccess: true,
               })}
               className="hidden"

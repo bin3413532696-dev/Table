@@ -245,7 +245,7 @@ async def process_document(file: UploadFile):
                     confidence_count += 1
 
         # 计算平均置信度
-        avg_confidence = confidence_count > 0 ? total_confidence / confidence_count : 0.0
+        avg_confidence = total_confidence / confidence_count if confidence_count > 0 else 0.0
 
         # 判断是否真正进行了 OCR（有文字提取）
         has_ocr = len(all_text_blocks) > 0 or len(all_tables) > 0
@@ -307,7 +307,7 @@ async def process_single_image(file: UploadFile):
                 total_confidence += block.confidence
                 confidence_count += 1
 
-        avg_confidence = confidence_count > 0 ? total_confidence / confidence_count : 0.0
+        avg_confidence = total_confidence / confidence_count if confidence_count > 0 else 0.0
         has_ocr = len(text_blocks) > 0 or len(tables) > 0
         processing_time = int((time.time() - start_time) * 1000)
 

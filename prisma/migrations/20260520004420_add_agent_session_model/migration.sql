@@ -181,10 +181,42 @@ ALTER TABLE "knowledge_preset_tags" DROP CONSTRAINT IF EXISTS "knowledge_preset_
 ALTER TABLE "knowledge_preset_tags" ADD CONSTRAINT "knowledge_preset_tags_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- RenameIndex
-ALTER INDEX "knowledge_notes_deleted_at_idx" RENAME TO "knowledge_notes_user_id_idx";
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'knowledge_notes_deleted_at_idx') THEN
+    ALTER INDEX "knowledge_notes_deleted_at_idx" RENAME TO "knowledge_notes_user_id_idx";
+  ELSIF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'knowledge_notes_user_id_idx') THEN
+    NULL;
+  ELSE
+    CREATE INDEX "knowledge_notes_user_id_idx" ON "knowledge_notes"("user_id");
+  END IF;
+END $$;
 
-ALTER INDEX "knowledge_notes_user_updated_at_idx" RENAME TO "knowledge_notes_user_id_updated_at_idx";
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'knowledge_notes_user_updated_at_idx') THEN
+    ALTER INDEX "knowledge_notes_user_updated_at_idx" RENAME TO "knowledge_notes_user_id_updated_at_idx";
+  ELSIF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'knowledge_notes_user_id_updated_at_idx') THEN
+    NULL;
+  ELSE
+    CREATE INDEX "knowledge_notes_user_id_updated_at_idx" ON "knowledge_notes"("user_id", "updated_at" DESC);
+  END IF;
+END $$;
 
-ALTER INDEX "knowledge_preset_tags_user_name_uq" RENAME TO "knowledge_preset_tags_user_id_name_key";
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'knowledge_preset_tags_user_name_uq') THEN
+    ALTER INDEX "knowledge_preset_tags_user_name_uq" RENAME TO "knowledge_preset_tags_user_id_name_key";
+  ELSIF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'knowledge_preset_tags_user_id_name_key') THEN
+    NULL;
+  ELSE
+    CREATE UNIQUE INDEX "knowledge_preset_tags_user_id_name_key" ON "knowledge_preset_tags"("user_id", "name");
+  END IF;
+END $$;
 
-ALTER INDEX "knowledge_preset_tags_user_sort_idx" RENAME TO "knowledge_preset_tags_user_id_sort_order_idx";
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'knowledge_preset_tags_user_sort_idx') THEN
+    ALTER INDEX "knowledge_preset_tags_user_sort_idx" RENAME TO "knowledge_preset_tags_user_id_sort_order_idx";
+  ELSIF EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'knowledge_preset_tags_user_id_sort_order_idx') THEN
+    NULL;
+  ELSE
+    CREATE INDEX "knowledge_preset_tags_user_id_sort_order_idx" ON "knowledge_preset_tags"("user_id", "sort_order");
+  END IF;
+END $$;

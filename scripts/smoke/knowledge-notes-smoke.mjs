@@ -1,11 +1,74 @@
 const SERVER_ORIGIN = process.env.KNOWLEDGE_API_ORIGIN || 'http://127.0.0.1:8787';
 const DEFAULT_USER_ID = process.env.KNOWLEDGE_USER_ID || '00000000-0000-0000-0000-000000000001';
+const CSRF_COOKIE_NAME = 'table_dev_csrf_token';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+
+const cookieJar = new Map();
+
+function storeCookies(response) {
+  const getSetCookie = response.headers.getSetCookie?.bind(response.headers);
+  const cookieHeaders = getSetCookie ? getSetCookie() : [];
+
+  for (const header of cookieHeaders) {
+    const [cookiePart] = String(header).split(';');
+    const separatorIndex = cookiePart.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const name = cookiePart.slice(0, separatorIndex).trim();
+    const value = cookiePart.slice(separatorIndex + 1).trim();
+    if (!name) {
+      continue;
+    }
+
+    cookieJar.set(name, value);
+  }
+}
+
+function buildCookieHeader() {
+  return Array.from(cookieJar.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+async function ensureCsrfCookie() {
+  if (cookieJar.has(CSRF_COOKIE_NAME)) {
+    return;
+  }
+
+  const response = await fetch(`${SERVER_ORIGIN}/api/knowledge/metadata`, {
+    headers: {
+      'x-user-id': DEFAULT_USER_ID,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`GET /api/knowledge/metadata failed: HTTP ${response.status}`);
+  }
+
+  storeCookies(response);
+}
 
 async function request(path, init = {}) {
+  if ((init.method || 'GET').toUpperCase() !== 'GET') {
+    await ensureCsrfCookie();
+  }
+
   const headers = {
     'x-user-id': DEFAULT_USER_ID,
     ...(init.headers || {}),
   };
+
+  const cookieHeader = buildCookieHeader();
+  if (cookieHeader) {
+    headers.Cookie = cookieHeader;
+  }
+
+  const csrfToken = cookieJar.get(CSRF_COOKIE_NAME);
+  if (csrfToken && !headers[CSRF_HEADER_NAME] && (init.method || 'GET').toUpperCase() !== 'GET') {
+    headers[CSRF_HEADER_NAME] = csrfToken;
+  }
 
   if (init.body !== undefined && !('Content-Type' in headers)) {
     headers['Content-Type'] = 'application/json';
@@ -15,6 +78,8 @@ async function request(path, init = {}) {
     headers,
     ...init,
   });
+
+  storeCookies(response);
 
   if (response.status === 204) {
     return undefined;
@@ -44,16 +109,17 @@ async function main() {
   let createdPresetTagId = null;
 
   try {
-    const createdPresetTag = await request('/api/knowledge/tags/preset', {
+    const createdPresetTagEnvelope = await request('/api/knowledge/tags/preset', {
       method: 'POST',
       body: JSON.stringify({
         name: tagName,
         color: '#3B82F6',
       }),
     });
+    const createdPresetTag = createdPresetTagEnvelope?.data;
     createdPresetTagId = createdPresetTag.id;
 
-    const createdNote = await request('/api/knowledge/notes', {
+    const createdNoteEnvelope = await request('/api/knowledge/notes', {
       method: 'POST',
       body: JSON.stringify({
         title: noteTitle,
@@ -61,6 +127,7 @@ async function main() {
         tags: [tagName, 'smoke'],
       }),
     });
+    const createdNote = createdNoteEnvelope?.data;
     createdNoteId = createdNote.id;
 
     const noteList = await request('/api/knowledge/notes');
@@ -71,12 +138,13 @@ async function main() {
       throw new Error('笔记列表未返回新建记录或标签不正确。');
     }
 
-    const noteDetail = await request(`/api/knowledge/notes/${createdNoteId}`);
+    const noteDetailEnvelope = await request(`/api/knowledge/notes/${createdNoteId}`);
+    const noteDetail = noteDetailEnvelope?.data;
     if (noteDetail.title !== noteTitle || !String(noteDetail.content || '').includes('smoke test')) {
       throw new Error('笔记详情读取异常。');
     }
 
-    const updatedNote = await request(`/api/knowledge/notes/${createdNoteId}`, {
+    const updatedNoteEnvelope = await request(`/api/knowledge/notes/${createdNoteId}`, {
       method: 'PATCH',
       body: JSON.stringify({
         title: updatedTitle,
@@ -84,6 +152,7 @@ async function main() {
         tags: [tagName, 'smoke', 'updated'],
       }),
     });
+    const updatedNote = updatedNoteEnvelope?.data;
     if (
       updatedNote.title !== updatedTitle ||
       !updatedNote.tags.includes('updated') ||
@@ -117,11 +186,12 @@ async function main() {
       throw new Error('知识库标签列表未包含新建标签。');
     }
 
-    const metadata = await request('/api/knowledge/metadata');
+    const metadataEnvelope = await request('/api/knowledge/metadata');
+    const metadata = metadataEnvelope?.data;
     if (
-      !metadata?.data ||
-      !Number.isInteger(metadata.data.noteCount) ||
-      !Number.isInteger(metadata.data.presetTagCount)
+      !metadata ||
+      !Number.isInteger(metadata.noteCount) ||
+      !Number.isInteger(metadata.presetTagCount)
     ) {
       throw new Error('知识库元数据结构不符合预期。');
     }
@@ -143,7 +213,7 @@ async function main() {
           noteTitle,
           updatedTitle,
           tagName,
-          metadata: metadata.data,
+          metadata,
         },
         null,
         2

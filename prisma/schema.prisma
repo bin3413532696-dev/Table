@@ -45,17 +45,26 @@ model AgentSession {
 }
 
 model AgentRun {
-  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String       @map("user_id") @db.Uuid
-  sessionId    String       @map("session_id") @db.Uuid
-  status       String
-  inputText    String       @map("input_text")
-  model        String
-  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  version      Int          @default(1)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
-  session      AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  id                     String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                 String       @map("user_id") @db.Uuid
+  sessionId              String       @map("session_id") @db.Uuid
+  status                 String
+  inputText              String       @map("input_text")
+  model                  String
+  messagesJson           Json         @default("[]") @map("messages_json")
+  executedToolCallsJson  Json         @default("[]") @map("executed_tool_calls_json")
+  pendingToolCallsJson   Json         @default("[]") @map("pending_tool_calls_json")
+  assistantTextChunksJson Json        @default("[]") @map("assistant_text_chunks_json")
+  timelineJson           Json         @default("[]") @map("timeline_json")
+  finalText              String       @default("") @map("final_text")
+  errorText              String?      @map("error_text")
+  iterationCount         Int          @default(0) @map("iteration_count")
+  requiresConfirmation   Boolean      @default(false) @map("requires_confirmation")
+  createdAt              DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  version                Int          @default(1)
+  user                   User         @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  session                AgentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([userId])
   @@index([userId, createdAt(sort: Desc)])

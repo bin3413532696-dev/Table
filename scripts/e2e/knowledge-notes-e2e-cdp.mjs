@@ -2,6 +2,10 @@ const DEBUGGER_URL = 'http://127.0.0.1:9222/json/list';
 const PAGE_ORIGIN = 'http://localhost:3266';
 const PAGE_URL_PREFIX = `${PAGE_ORIGIN}/`;
 const DEFAULT_USER_ID = '00000000-0000-0000-0000-000000000001';
+const CSRF_COOKIE_NAME = 'table_dev_csrf_token';
+const CSRF_HEADER_NAME = 'x-csrf-token';
+
+const cookieJar = new Map();
 
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -15,11 +19,71 @@ async function fetchJson(url, options) {
   return response.json();
 }
 
+function storeCookies(response) {
+  const getSetCookie = response.headers.getSetCookie?.bind(response.headers);
+  const cookieHeaders = getSetCookie ? getSetCookie() : [];
+
+  for (const header of cookieHeaders) {
+    const [cookiePart] = String(header).split(';');
+    const separatorIndex = cookiePart.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const name = cookiePart.slice(0, separatorIndex).trim();
+    const value = cookiePart.slice(separatorIndex + 1).trim();
+    if (!name) {
+      continue;
+    }
+
+    cookieJar.set(name, value);
+  }
+}
+
+function buildCookieHeader() {
+  return Array.from(cookieJar.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+async function ensureCsrfCookie() {
+  if (cookieJar.has(CSRF_COOKIE_NAME)) {
+    return;
+  }
+
+  const response = await fetch(`${PAGE_ORIGIN}/api/knowledge/metadata`, {
+    headers: {
+      'x-user-id': DEFAULT_USER_ID,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`GET /api/knowledge/metadata failed: HTTP ${response.status}`);
+  }
+
+  storeCookies(response);
+}
+
 async function requestApi(path, init = {}) {
+  const method = (init.method || 'GET').toUpperCase();
+  if (method !== 'GET') {
+    await ensureCsrfCookie();
+  }
+
   const headers = {
     'x-user-id': DEFAULT_USER_ID,
     ...(init.headers || {}),
   };
+
+  const cookieHeader = buildCookieHeader();
+  if (cookieHeader) {
+    headers.Cookie = cookieHeader;
+  }
+
+  const csrfToken = cookieJar.get(CSRF_COOKIE_NAME);
+  if (csrfToken && !headers[CSRF_HEADER_NAME] && method !== 'GET') {
+    headers[CSRF_HEADER_NAME] = csrfToken;
+  }
 
   if (init.body !== undefined && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
@@ -29,6 +93,8 @@ async function requestApi(path, init = {}) {
     ...init,
     headers,
   });
+
+  storeCookies(response);
 
   if (response.status === 204) {
     return undefined;
@@ -522,7 +588,8 @@ async function main() {
     await clickButtonByText(cdp, '保存');
     await waitForFeedback(cdp, '笔记已更新');
 
-    const updatedNote = await requestApi(`/api/knowledge/notes/${createdNote.id}`);
+    const updatedNoteEnvelope = await requestApi(`/api/knowledge/notes/${createdNote.id}`);
+    const updatedNote = updatedNoteEnvelope?.data;
     summary.tests.push({
       test: 'update_note',
       titleUpdated: updatedNote?.title === noteTitleUpdated,
@@ -543,7 +610,8 @@ async function main() {
     );
     await clickEditDeleteButton(cdp);
     await waitForFeedback(cdp, '笔记已删除');
-    const deletedNote = await requestApi(`/api/knowledge/notes/${createdNote.id}`).catch(() => null);
+    const deletedNoteEnvelope = await requestApi(`/api/knowledge/notes/${createdNote.id}`).catch(() => null);
+    const deletedNote = deletedNoteEnvelope?.data ?? null;
     summary.tests.push({
       test: 'delete_note',
       removed: deletedNote === null,

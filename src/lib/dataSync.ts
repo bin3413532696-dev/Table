@@ -1,5 +1,7 @@
 import { syncEngine, SyncStatus, SyncResult, LoadResult } from '../sync';
 import { SYNC_CONFIG } from '../sync/config';
+import { financeApi } from './api/finance';
+import { taskApi } from './api/tasks';
 
 export type { SyncStatus, SyncResult, LoadResult };
 
@@ -15,10 +17,9 @@ export async function initializeData(): Promise<boolean> {
   console.log('[Sync] Initializing authority data...');
 
   try {
-    const { financeDB, taskDB } = await import('../db');
     await Promise.all([
-      financeDB.getAll(),
-      taskDB.getAll(),
+      financeApi.getAll(),
+      taskApi.getAll(),
     ]);
   } catch (error) {
     console.warn('[Sync] Failed to warm task/finance API cache:', error);

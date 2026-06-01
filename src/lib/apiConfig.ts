@@ -1,4 +1,4 @@
-import { fetchWithAuth } from './auth';
+import { requestApi } from './api/client';
 
 export interface ApiProvider {
   id: string;
@@ -52,15 +52,6 @@ function setProviderCache(providers: ApiProvider[]) {
   notifyApiConfigChanged();
 }
 
-async function parseErrorMessage(response: Response, fallback: string) {
-  try {
-    const payload = await response.json() as { message?: string };
-    return payload.message || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 export async function ensureBootstrappedApiConfig(): Promise<void> {
   if (providersLoaded) {
     return;
@@ -74,16 +65,11 @@ export function getApiConfigs(): ApiProvider[] {
 }
 
 export async function refreshApiConfigs(): Promise<ApiProvider[]> {
-  const response = await fetchWithAuth('/api/providers');
-  if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, `Failed to load providers: HTTP ${response.status}`));
-  }
-
-  const payload = await response.json() as {
+  const payload = await requestApi<{
     data: {
       items: ApiProvider[];
     };
-  };
+  }>('/api/providers');
 
   setProviderCache(payload.data.items || []);
   return getApiConfigs();
@@ -96,11 +82,8 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
   for (const provider of configs) {
     const existing = currentById.get(provider.id);
     if (!existing) {
-      const createResponse = await fetchWithAuth('/api/providers', {
+      await requestApi('/api/providers', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           id: provider.id,
           name: provider.name,
@@ -114,10 +97,6 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
           isActive: provider.isActive,
         }),
       });
-
-      if (!createResponse.ok) {
-        throw new Error(await parseErrorMessage(createResponse, `Failed to create provider: HTTP ${createResponse.status}`));
-      }
       continue;
     }
 
@@ -139,11 +118,8 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
       continue;
     }
 
-    const updateResponse = await fetchWithAuth(`/api/providers/${provider.id}`, {
+    await requestApi(`/api/providers/${provider.id}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify({
         name: provider.name,
         apiFormat: provider.apiFormat,
@@ -156,10 +132,6 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
         isActive: provider.isActive,
       }),
     });
-
-    if (!updateResponse.ok) {
-      throw new Error(await parseErrorMessage(updateResponse, `Failed to update provider: HTTP ${updateResponse.status}`));
-    }
   }
 
   for (const existing of providerCache) {
@@ -167,37 +139,26 @@ export async function saveApiConfigs(configs: ApiProvider[]): Promise<void> {
       continue;
     }
 
-    const deleteResponse = await fetchWithAuth(`/api/providers/${existing.id}`, {
+    await requestApi(`/api/providers/${existing.id}`, {
       method: 'DELETE',
     });
-    if (!deleteResponse.ok) {
-      throw new Error(await parseErrorMessage(deleteResponse, `Failed to delete provider: HTTP ${deleteResponse.status}`));
-    }
   }
 
   await refreshApiConfigs();
 }
 
 export async function activateApiConfig(id: string): Promise<ApiProvider[]> {
-  const response = await fetchWithAuth(`/api/providers/${id}/activate`, {
+  await requestApi(`/api/providers/${id}/activate`, {
     method: 'POST',
   });
-
-  if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, `Failed to activate provider: HTTP ${response.status}`));
-  }
 
   return refreshApiConfigs();
 }
 
 export async function deleteApiConfig(id: string): Promise<ApiProvider[]> {
-  const response = await fetchWithAuth(`/api/providers/${id}`, {
+  await requestApi(`/api/providers/${id}`, {
     method: 'DELETE',
   });
-
-  if (!response.ok) {
-    throw new Error(await parseErrorMessage(response, `Failed to delete provider: HTTP ${response.status}`));
-  }
 
   return refreshApiConfigs();
 }

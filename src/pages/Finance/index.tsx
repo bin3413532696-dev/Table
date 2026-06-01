@@ -8,13 +8,16 @@ import {
   BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart as RechartsPie, Pie, Cell, Legend
 } from 'recharts';
-import { financeDB, FinanceRecord, createUseDB, getErrorMessage } from '../../db';
 import Loading from '../../components/Loading';
 import { VirtualList } from '../../components/VirtualList';
 import { Button, EmptyState } from '../../components/ui';
 import { RecordItem, RecordForm, FinanceOverview } from './components';
 import { MESSAGES } from '../../core/messages';
 import { PageHeader, PageContent, defaultEasing } from '../../components/ui/PageAnimations';
+import type { FinanceRecord } from '../../core/types';
+import { getErrorMessage } from '../../lib/api/client';
+import { financeApi } from '../../lib/api/finance';
+import { useCollectionData } from '../../lib/useCollectionData';
 
 const DEFAULT_CATEGORIES = {
   income: ['API调用收入', '服务收入', '其他收入'],
@@ -26,12 +29,10 @@ const DEFAULT_MODELS = ['GPT-4', 'GPT-3.5', 'Claude', 'Gemini', '其他'];
 const getChartColor = (index: number) => `var(--chart-${(index % 8) + 1})`;
 const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-7)', 'var(--chart-8)'];
 
-const useDB = createUseDB(React);
-
 const MAX_DESCRIPTION_LENGTH = 100;
 
 export default function Finance() {
-  const { data: recordsData, loading, error: loadError } = useDB(() => financeDB.getAll(), ['finance']);
+  const { data: recordsData, loading, error: loadError } = useCollectionData(() => financeApi.getAll(), ['finance']);
   const records = recordsData ?? [];
 
   const [showForm, setShowForm] = useState(false);
@@ -158,13 +159,13 @@ export default function Finance() {
         if (version === undefined) {
           throw new Error(MESSAGES.common.versionConflict);
         }
-        await financeDB.update(editingId, {
+        await financeApi.update(editingId, {
           ...formData,
           version,
         });
         setEditingId(null);
       } else {
-        await financeDB.add({
+        await financeApi.add({
           type: formData.type || 'expense',
           amount: Number(formData.amount),
           description: formData.description || '',
@@ -194,7 +195,7 @@ export default function Finance() {
   const handleDelete = async (id: string) => {
     try {
       setFeedback(null);
-      await financeDB.delete(id);
+      await financeApi.delete(id);
       setShowDeleteConfirm(null);
       setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
     } catch (error) {
@@ -206,7 +207,7 @@ export default function Finance() {
   };
 
   const handleBatchDelete = async () => {
-    const results = await Promise.allSettled([...selectedIds].map(id => financeDB.delete(id)));
+    const results = await Promise.allSettled([...selectedIds].map(id => financeApi.delete(id)));
     const failedCount = results.filter((result) => result.status === 'rejected').length;
     if (failedCount > 0) {
       setBatchFeedback(`批量删除完成，但有 ${failedCount} 项删除失败。`);

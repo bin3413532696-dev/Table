@@ -1,0 +1,140 @@
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from app.api.routes import knowledge_rag as knowledge_rag_routes
+from app.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, generate_csrf_token
+from app.core.user_context import UserContext
+from app.dependencies import get_authenticated_user
+from app.db.session import get_session
+from app.main import create_app
+
+
+def _make_app():
+    app = create_app()
+
+    async def fake_get_session():
+        yield object()
+
+    async def fake_get_authenticated_user():
+        return UserContext(
+            user_id="00000000-0000-0000-0000-000000000001",
+            source="default",
+        )
+
+    app.dependency_overrides[get_session] = fake_get_session
+    app.dependency_overrides[get_authenticated_user] = fake_get_authenticated_user
+    return app
+
+
+@pytest.mark.asyncio
+async def test_non_health_get_sets_csrf_cookie(monkeypatch) -> None:
+    app = _make_app()
+
+    async def fake_get_stats(session, user_id):
+        return {"documentCount": 0, "indexedDocumentCount": 0, "chunkCount": 0, "chunkWithEmbeddingCount": 0, "cacheCount": 0}
+
+    monkeypatch.setattr(knowledge_rag_routes, "get_stats", fake_get_stats)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/api/knowledge-rag/stats")
+
+    assert response.status_code == 200
+    assert CSRF_COOKIE_NAME in response.cookies
+
+
+@pytest.mark.asyncio
+async def test_search_endpoint_rejects_missing_csrf() -> None:
+    app = _make_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.post(
+            "/api/knowledge-rag/search",
+            json={"query": "budget", "mode": "hybrid", "limit": 5, "threshold": 0.2},
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "FORBIDDEN", "message": "CSRF token validation failed"}
+
+
+@pytest.mark.asyncio
+async def test_options_request_is_not_rejected_as_csrf() -> None:
+    app = _make_app()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.options("/api/knowledge-rag/search")
+
+    assert response.status_code != 403
+
+
+@pytest.mark.asyncio
+async def test_search_endpoint_uses_route_service(monkeypatch) -> None:
+    app = _make_app()
+    token = generate_csrf_token()
+
+    async def fake_search_service(session, user_id, payload, settings=None):
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        assert payload.query == "budget"
+        assert payload.mode == "hybrid"
+        return {
+            "results": [
+                {
+                    "id": "chunk-1",
+                    "documentId": "doc-1",
+                    "documentTitle": "Budget Planning",
+                    "content": "budget planning and execution guidance",
+                    "chunkIndex": 0,
+                    "score": 0.91,
+                    "source": "hybrid",
+                    "sourceInfo": "integration.md",
+                    "publishDate": None,
+                    "sourceDept": "Finance",
+                    "securityLevel": "internal",
+                    "businessCategory": "planning",
+                }
+            ],
+            "semanticCount": 1,
+            "keywordCount": 1,
+            "queryEmbeddingTimeMs": 4,
+            "searchTimeMs": 9,
+        }
+
+    monkeypatch.setattr(knowledge_rag_routes, "search_service", fake_search_service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        response = await client.post(
+            "/api/knowledge-rag/search",
+            json={"query": "budget", "mode": "hybrid", "limit": 5, "threshold": 0.2},
+            headers={CSRF_HEADER_NAME: token},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["semanticCount"] == 1
+    assert payload["keywordCount"] == 1
+    assert payload["results"][0]["source"] == "hybrid"
+    assert payload["results"][0]["documentTitle"] == "Budget Planning"
+
+
+@pytest.mark.asyncio
+async def test_backfill_endpoint_uses_route_service(monkeypatch) -> None:
+    app = _make_app()
+    token = generate_csrf_token()
+    document_id = "00000000-0000-0000-0000-000000000123"
+
+    async def fake_backfill_embeddings_service(session, user_id, current_document_id, settings=None):
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        assert current_document_id == document_id
+        return {"count": 2}
+
+    monkeypatch.setattr(knowledge_rag_routes, "backfill_embeddings_service", fake_backfill_embeddings_service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        response = await client.post(
+            f"/api/knowledge-rag/documents/{document_id}/backfill",
+            headers={CSRF_HEADER_NAME: token},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"count": 2}

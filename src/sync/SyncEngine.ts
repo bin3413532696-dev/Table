@@ -5,8 +5,7 @@
 
 import { SYNC_CONFIG, SyncStatus, SyncResult, SyncDataType, SyncStatusSnapshot } from './config';
 import { eventEmitter, EventTopics } from '../core/events';
-import { AppError, ErrorCode } from '../core/errors';
-import { fetchWithAuth } from '../lib/auth';
+import { getKnowledgeMetadata, getNoteList, getPresetTagList } from '../pages/Knowledge/api';
 
 const KNOWLEDGE_CACHE_KEY = 'knowledge_cache_v1';
 
@@ -227,32 +226,16 @@ class SyncEngineClass {
     error?: string;
   }> {
     try {
-      const [notesResponse, presetTagsResponse, metadataResponse] = await Promise.all([
-        fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_NOTES_ENDPOINT),
-        fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_PRESET_TAGS_ENDPOINT),
-        fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_METADATA_ENDPOINT),
-      ]);
-
-      if (!notesResponse.ok) {
-        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${notesResponse.status}`);
-      }
-      if (!presetTagsResponse.ok) {
-        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${presetTagsResponse.status}`);
-      }
-      if (!metadataResponse.ok) {
-        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${metadataResponse.status}`);
-      }
-
-      const [notesResult, presetTagsResult, metadataResult] = await Promise.all([
-        notesResponse.json(),
-        presetTagsResponse.json(),
-        metadataResponse.json(),
+      const [notes, presetTags, metadata] = await Promise.all([
+        getNoteList(),
+        getPresetTagList(),
+        getKnowledgeMetadata(),
       ]);
 
       const data: KnowledgeLoadPayload = {
-        notes: Array.isArray(notesResult?.items) ? notesResult.items : [],
-        presetTags: Array.isArray(presetTagsResult?.items) ? presetTagsResult.items : [],
-        metadata: metadataResult?.data ?? { noteCount: 0, presetTagCount: 0 },
+        notes,
+        presetTags,
+        metadata: metadata ?? { noteCount: 0, presetTagCount: 0 },
       };
 
       this.saveKnowledgeCache(data);
@@ -280,17 +263,9 @@ class SyncEngineClass {
     error?: string;
   }> {
     try {
-      const response = await fetchWithAuth(SYNC_CONFIG.KNOWLEDGE_METADATA_ENDPOINT);
-
-      if (!response.ok) {
-        throw AppError.fromCode(ErrorCode.NETWORK_ERROR, `HTTP ${response.status}`);
-      }
-
-      const result = await response.json();
-
       return {
         success: true,
-        data: result.data,
+        data: await getKnowledgeMetadata(),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
