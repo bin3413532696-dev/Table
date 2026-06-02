@@ -12,6 +12,7 @@ AgentRunStatus = Literal[
     "cancelled",
 ]
 AgentMessageRole = Literal["user", "assistant", "system", "tool"]
+AgentSessionMemoryStatus = Literal["idle", "pending", "processing", "ready", "failed"]
 TimelineEventType = Literal[
     "llm_start",
     "llm_end",
@@ -74,16 +75,46 @@ class AgentRunDetailDto(AgentRunDto):
     timeline: list[TimelineEvent] = Field(default_factory=list)
 
 
+class AgentSessionGoalDto(BaseModel):
+    title: str
+    status: str = "active"
+
+
+class AgentSessionTodoDto(BaseModel):
+    title: str
+    status: str = "open"
+    dueHint: str | None = None
+    sourceRunId: str | None = None
+
+
+class AgentSessionMemoryDto(BaseModel):
+    summary: str = ""
+    preferences: list[str] = Field(default_factory=list)
+    facts: list[str] = Field(default_factory=list)
+    goals: list[AgentSessionGoalDto] = Field(default_factory=list)
+    todos: list[AgentSessionTodoDto] = Field(default_factory=list)
+    rules: list[str] = Field(default_factory=list)
+    status: AgentSessionMemoryStatus = "idle"
+    updatedAt: int | None = None
+    disabled: bool = False
+    runCount: int = 0
+
+
 class AgentSessionDto(BaseModel):
     id: str
     title: str
     createdAt: int
     updatedAt: int
+    memoryStatus: AgentSessionMemoryStatus = "idle"
+    memoryDisabled: bool = False
+    memoryUpdatedAt: int | None = None
+    memoryRunCount: int = 0
     runs: list[AgentRunDto] = Field(default_factory=list)
 
 
 class AgentSessionDetailDto(AgentSessionDto):
     messages: list[AgentRunMessageDto] = Field(default_factory=list)
+    memory: AgentSessionMemoryDto = Field(default_factory=AgentSessionMemoryDto)
 
 
 class AgentRuntimeProviderDto(BaseModel):
@@ -106,6 +137,28 @@ class AgentRuntimeStatusDto(BaseModel):
     module: str
     stage: str
     runtime: AgentRuntimeDetailsDto
+
+
+class AgentToolCapabilityDto(BaseModel):
+    name: str
+    description: str
+    promptSignature: str
+    category: Literal["query", "mutation", "system"]
+    module: str
+    requiresConfirmation: bool = False
+    requiresRag: bool = False
+    enabled: bool = True
+
+
+class AgentProviderCapabilityDto(BaseModel):
+    apiFormat: Literal["anthropic", "openai", "gemini", "custom"]
+    label: str
+    enabled: bool = True
+
+
+class AgentCapabilitiesDto(BaseModel):
+    tools: list[AgentToolCapabilityDto] = Field(default_factory=list)
+    providers: list[AgentProviderCapabilityDto] = Field(default_factory=list)
 
 
 class AgentSessionListResponse(BaseModel):
@@ -134,7 +187,13 @@ class CreateAgentSessionRequest(BaseModel):
 
 
 class UpdateAgentSessionRequest(BaseModel):
-    title: TrimmedSessionTitle
+    title: TrimmedSessionTitle | None = None
+
+    @model_validator(mode="after")
+    def ensure_title_present(self) -> "UpdateAgentSessionRequest":
+        if self.title is None:
+            raise ValueError("title is required")
+        return self
 
 
 class ListAgentRunsQuery(BaseModel):
@@ -173,3 +232,7 @@ class UpdateAgentRunRequest(BaseModel):
 
 class AgentPersonaDto(BaseModel):
     systemPrompt: TrimmedSystemPrompt = ""
+
+
+class UpdateAgentSessionMemorySettingsRequest(BaseModel):
+    disabled: bool

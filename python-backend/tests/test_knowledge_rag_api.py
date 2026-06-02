@@ -1,5 +1,6 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from types import SimpleNamespace
 
 from app.api.routes import knowledge_rag as knowledge_rag_routes
 from app.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, generate_csrf_token
@@ -138,3 +139,129 @@ async def test_backfill_endpoint_uses_route_service(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"count": 2}
+
+
+@pytest.mark.asyncio
+async def test_chunks_endpoint_reads_document_id_from_query(monkeypatch) -> None:
+    app = _make_app()
+    document_id = "00000000-0000-0000-0000-000000000123"
+
+    async def fake_get_chunks(session, user_id, query):
+        del session
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        assert query.documentId == document_id
+        assert query.limit == 2
+        assert query.offset == 0
+        return (
+            [
+                {
+                    "id": "00000000-0000-0000-0000-000000000901",
+                    "documentId": document_id,
+                    "userId": "00000000-0000-0000-0000-000000000001",
+                    "content": "chunk body",
+                    "contentHash": "chunk-hash",
+                    "chunkIndex": 0,
+                    "startPos": 0,
+                    "endPos": 10,
+                    "headingChain": None,
+                    "headingLevel": None,
+                    "embeddingDimensions": None,
+                    "embeddingVersion": None,
+                    "chunkType": "small",
+                    "parentId": None,
+                    "hasEmbedding": False,
+                    "embeddingModel": None,
+                    "createdAt": 1717200000000,
+                    "updatedAt": 1717200000000,
+                }
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(knowledge_rag_routes, "get_chunks", fake_get_chunks)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get(f"/api/knowledge-rag/chunks?documentId={document_id}&limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["documentId"] == document_id
+    assert payload["items"][0]["chunkIndex"] == 0
+
+
+@pytest.mark.asyncio
+async def test_jobs_endpoint_reads_query_params(monkeypatch) -> None:
+    app = _make_app()
+    document_id = "00000000-0000-0000-0000-000000000123"
+
+    async def fake_get_jobs(session, user_id, query):
+        del session
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        assert query.documentId == document_id
+        assert query.limit == 2
+        assert query.offset == 0
+        return (
+            [
+                {
+                    "id": "00000000-0000-0000-0000-000000000777",
+                    "userId": "00000000-0000-0000-0000-000000000001",
+                    "documentId": document_id,
+                    "jobType": "full_index",
+                    "status": "completed",
+                    "progress": 100,
+                    "error": None,
+                    "startedAt": 1717200000000,
+                    "completedAt": 1717200001000,
+                    "createdAt": 1717200000000,
+                }
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(knowledge_rag_routes, "get_jobs", fake_get_jobs)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get(f"/api/knowledge-rag/jobs?documentId={document_id}&limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["documentId"] == document_id
+    assert payload["items"][0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_trigger_index_endpoint_returns_conflict_payload_for_active_job(monkeypatch) -> None:
+    app = _make_app()
+    token = generate_csrf_token()
+    document_id = "00000000-0000-0000-0000-000000000123"
+    active_job = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000777",
+        document_id=document_id,
+        status="running",
+    )
+
+    async def fake_trigger_index_service(session, user_id, current_document_id, payload, settings=None):
+        del session, user_id, payload, settings
+        assert current_document_id == document_id
+        raise knowledge_rag_routes.IndexJobActiveError(active_job)
+
+    monkeypatch.setattr(knowledge_rag_routes, "trigger_index_service", fake_trigger_index_service)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        response = await client.post(
+            f"/api/knowledge-rag/documents/{document_id}/index",
+            json={"force": True},
+            headers={CSRF_HEADER_NAME: token},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "index_job_active",
+        "documentId": document_id,
+        "jobId": "00000000-0000-0000-0000-000000000777",
+        "jobStatus": "running",
+        "message": "An indexing job is already active for this document.",
+    }

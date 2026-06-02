@@ -7,6 +7,9 @@
     "backend:dev": "uv run --package table-python-backend uvicorn app.main:app --host 127.0.0.1 --port 8787 --reload",
     "backend:test": "uv run --package table-python-backend pytest python-backend/tests -q",
     "knowledge:smoke": "node scripts/smoke/knowledge-notes-smoke.mjs",
+    "knowledge-rag:smoke": "node scripts/smoke/knowledge-rag-smoke.mjs",
+    "agent-rag:smoke": "node scripts/smoke/agent-rag-smoke.mjs",
+    "agent-memory:smoke": "node scripts/smoke/agent-memory-smoke.mjs",
     "modules:smoke": "node scripts/smoke/tasks-finance-smoke.mjs",
     "build": "webpack --mode production",
     "typecheck": "tsc --noEmit",
@@ -18,6 +21,7 @@
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/theme-one-dark": "^6.1.3",
+    "@prisma/client": "^6.19.3",
     "@replit/codemirror-vim": "^6.3.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tiptap/core": "^3.22.4",

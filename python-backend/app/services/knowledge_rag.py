@@ -1,5 +1,6 @@
 from datetime import datetime, time
 from hashlib import sha256
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,7 +13,9 @@ from app.repositories.knowledge_rag import (
     create_job,
     delete_chunks_by_document,
     delete_document,
+    find_active_job_for_document,
     find_document_by_id,
+    find_document_by_id_for_update,
     find_embedding_cache_batch,
     find_job_by_id,
     get_chunk_embeddings_batch,
@@ -57,6 +60,30 @@ from app.schemas.knowledge_rag import (
 )
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
+
+ACTIVE_INDEX_JOB_STATUSES = {"pending", "running"}
+SEARCH_FILTER_FIELDS = {
+    "tags",
+    "documentIds",
+    "limit",
+    "publishDateRange",
+    "sourceDept",
+    "securityLevel",
+    "businessCategory",
+}
+
+
+class IndexJobActiveError(RuntimeError):
+    def __init__(self, job: KnowledgeIndexJob):
+        self.job = job
+        self.detail = {
+            "code": "index_job_active",
+            "documentId": str(job.document_id) if job.document_id else None,
+            "jobId": str(job.id),
+            "jobStatus": job.status or "pending",
+            "message": "An indexing job is already active for this document.",
+        }
+        super().__init__(self.detail["message"])
 
 
 def to_document_response(document: KnowledgeDocument) -> KnowledgeDocumentResponse:
@@ -134,24 +161,32 @@ def _tokenize_query(query: str) -> list[str]:
     return [term.strip().lower() for term in query.split() if term.strip()]
 
 
+def _contains_keyword_phrase(value: str, query: str) -> bool:
+    normalized_query = query.strip().lower()
+    return len(normalized_query) >= 2 and normalized_query in value.lower()
+
+
 def _score_keyword_candidate(query: str, title: str, content: str) -> float:
     if not query:
         return 0.0
 
-    query_lower = query.lower()
     title_lower = title.lower()
     content_lower = content.lower()
     score = 0.0
+    title_phrase_match = _contains_keyword_phrase(title, query)
+    content_phrase_match = _contains_keyword_phrase(content, query)
 
-    if query_lower in title_lower:
+    if title_phrase_match:
         score += 0.6
-    if query_lower in content_lower:
+    if content_phrase_match:
         score += 0.4
 
     for token in _tokenize_query(query):
-        if token in title_lower:
+        if len(token) < 2:
+            continue
+        if not title_phrase_match and token in title_lower:
             score += 0.08
-        if token in content_lower:
+        if not content_phrase_match and token in content_lower:
             score += 0.05
 
     return min(score, 1.0)
@@ -163,6 +198,8 @@ def _search_result_from_row(row: dict, *, source: str, score: float) -> SearchRe
         documentId=str(row["document_id"]),
         documentTitle=row["document_title"],
         content=row["content"],
+        parentChunkId=str(row["parent_chunk_id"]) if row.get("parent_chunk_id") else None,
+        parentContent=row.get("parent_content"),
         chunkIndex=row["chunk_index"] or 0,
         score=score,
         source=source,
@@ -262,6 +299,16 @@ def _fuse_search_results(
     return sorted(fused_results, key=lambda item: item.score, reverse=True)
 
 
+def _extract_search_filters(payload) -> dict:
+    raw_filters = payload.model_dump(exclude_none=True)
+    return {key: raw_filters[key] for key in SEARCH_FILTER_FIELDS if key in raw_filters}
+
+
+def _is_soft_embedding_failure(exc: Exception) -> bool:
+    message = str(exc)
+    return message.startswith("Embedding request failed:") or message.startswith("Embedding dimension mismatch:")
+
+
 async def _apply_chunk_embeddings(
     session: AsyncSession,
     user_id: str,
@@ -337,11 +384,17 @@ async def _apply_chunk_embeddings(
 def build_search_context(results: list[SearchResultResponse], max_chars: int = 4000) -> str:
     parts: list[str] = []
     current_length = 0
+    seen_context_ids: set[str] = set()
     for result in results:
-        block = f"[{result.documentTitle}] {result.content}".strip()
+        context_id = result.parentChunkId or result.id
+        if context_id in seen_context_ids:
+            continue
+        context_content = (result.parentContent or result.content).strip()
+        block = f"[{result.documentTitle}] {context_content}".strip()
         if parts and current_length + len(block) > max_chars:
             break
         parts.append(block)
+        seen_context_ids.add(context_id)
         current_length += len(block) + 2
     return "\n\n".join(parts)
 
@@ -449,7 +502,7 @@ async def search_service(
 ) -> SearchResponse:
     started_at = datetime.now()
     current = settings or get_settings()
-    base_filters = payload.model_dump(exclude_none=True)
+    base_filters = _extract_search_filters(payload)
     query = (payload.query or "").strip()
     query_embedding_time_ms = 0
     preprocess_time_ms = 0
@@ -601,6 +654,18 @@ def _default_upload_dir(settings: Settings) -> Path:
     return Path(settings.rag_upload_dir) if settings.rag_upload_dir else REPO_ROOT / "server" / "data" / "uploads"
 
 
+def _document_upload_dir(settings: Settings, user_id: str) -> Path:
+    return _default_upload_dir(settings) / user_id
+
+
+def _find_uploaded_document_path(settings: Settings, user_id: str, document_id: str) -> Path | None:
+    upload_dir = _document_upload_dir(settings, user_id)
+    for path in sorted(upload_dir.glob(f"{document_id}.*")):
+        if path.is_file():
+            return path
+    return None
+
+
 def _extension_to_file_type(filename: str) -> str | None:
     return {
         ".pdf": "pdf",
@@ -653,6 +718,69 @@ def _assemble_ocr_text(payload: dict) -> str:
     return "\n".join(pages).strip()
 
 
+def _decode_text_content(raw_bytes: bytes) -> tuple[str, str]:
+    if not raw_bytes:
+        return "", "utf-8"
+
+    if raw_bytes.startswith(b"\xef\xbb\xbf"):
+        return raw_bytes.decode("utf-8-sig"), "utf-8-sig"
+    if raw_bytes.startswith(b"\xff\xfe"):
+        return raw_bytes.decode("utf-16"), "utf-16"
+    if raw_bytes.startswith(b"\xfe\xff"):
+        return raw_bytes.decode("utf-16"), "utf-16"
+
+    candidates: list[str] = ["utf-8", "gb18030", "gbk"]
+    null_ratio = raw_bytes.count(0) / max(len(raw_bytes), 1)
+    if null_ratio > 0.1:
+        candidates = ["utf-16", "utf-16-le", "utf-16-be", *candidates]
+
+    first_success: tuple[str, str] | None = None
+    for encoding in candidates:
+        try:
+            decoded = raw_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+        if first_success is None:
+            first_success = (decoded, encoding)
+        if decoded.strip():
+            return decoded, encoding
+
+    if first_success is not None:
+        return first_success
+
+    return raw_bytes.decode("utf-8", errors="ignore"), "utf-8-ignore"
+
+
+def _extract_pdf_text_locally(raw_bytes: bytes) -> str:
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return ""
+
+    try:
+        reader = PdfReader(BytesIO(raw_bytes))
+    except Exception:
+        return ""
+
+    pages: list[str] = []
+    for page_num, page in enumerate(reader.pages, start=1):
+        try:
+            page_text = (page.extract_text() or "").strip()
+        except Exception:
+            page_text = ""
+
+        if not page_text:
+            continue
+
+        if page_num > 1:
+            pages.append(f"--- Page {page_num} ---\n{page_text}")
+        else:
+            pages.append(page_text)
+
+    return "\n\n".join(pages).strip()
+
+
 async def _extract_upload_content(
     *,
     file_path: Path,
@@ -661,7 +789,8 @@ async def _extract_upload_content(
     settings: Settings,
 ) -> tuple[str, dict | None, str | None, bool]:
     if file_type in {"txt", "md", "markdown"}:
-        return raw_bytes.decode("utf-8", errors="ignore"), None, "direct", False
+        content, encoding = _decode_text_content(raw_bytes)
+        return content, {"textEncoding": encoding}, "direct", False
 
     if file_type == "pdf":
         client = OCRServiceClient(
@@ -671,12 +800,88 @@ async def _extract_upload_content(
                 timeout_ms=settings.ocr_timeout_ms,
             )
         )
+        ocr_error: str | None = None
         if await client.is_available():
-            payload = await client.process_pdf(str(file_path))
-            return _assemble_ocr_text(payload), payload, "ocr", True
-        return "", {"ocrError": "OCR service unavailable"}, "ocr_unavailable", False
+            try:
+                payload = await client.process_pdf(str(file_path))
+                ocr_text = _assemble_ocr_text(payload)
+                if ocr_text.strip():
+                    return ocr_text, payload, "ocr", True
+                ocr_error = "OCR returned no extractable text"
+            except Exception as exc:
+                ocr_error = f"OCR processing failed: {exc}"
+        else:
+            ocr_error = "OCR service unavailable"
+
+        fallback_text = _extract_pdf_text_locally(raw_bytes)
+        if fallback_text:
+            metadata = {"parseMethod": "pdf_text"}
+            if ocr_error:
+                metadata["ocrError"] = ocr_error
+            return fallback_text, metadata, "pdf_text", False
+
+        metadata = {"parseMethod": "pdf_text"}
+        if ocr_error:
+            metadata["ocrError"] = ocr_error
+        return "", metadata, "pdf_text_unavailable", False
 
     return "", None, None, False
+
+
+async def _load_document_content_for_indexing(
+    session: AsyncSession,
+    user_id: str,
+    document: KnowledgeDocument,
+    *,
+    settings: Settings,
+) -> tuple[str, str | None]:
+    if (document.content or "").strip():
+        return document.content or "", document.file_type
+
+    file_path = _find_uploaded_document_path(settings, user_id, str(document.id))
+    if file_path is None:
+        return "", document.file_type
+
+    raw_bytes = file_path.read_bytes()
+    file_type = document.file_type or _extension_to_file_type(file_path.name)
+    if file_type is None:
+        return "", document.file_type
+
+    content, _, _, _ = await _extract_upload_content(
+        file_path=file_path,
+        file_type=file_type,
+        raw_bytes=raw_bytes,
+        settings=settings,
+    )
+    return content, file_type
+
+
+async def _create_index_job_with_guard(
+    session: AsyncSession,
+    user_id: str,
+    document_id: str,
+    *,
+    job_type: str,
+) -> tuple[KnowledgeDocument, KnowledgeIndexJob]:
+    document = await find_document_by_id_for_update(session, user_id, document_id)
+    if not document:
+        raise ValueError("Document not found")
+
+    active_job = await find_active_job_for_document(session, user_id, document_id)
+    if active_job and (active_job.status or "") in ACTIVE_INDEX_JOB_STATUSES:
+        await session.rollback()
+        raise IndexJobActiveError(active_job)
+
+    job = await create_job(
+        session,
+        user_id,
+        document_id=document_id,
+        job_type=job_type,
+        status="pending",
+        progress=0,
+        error=None,
+    )
+    return document, job
 
 
 async def upload_document_service(
@@ -699,7 +904,7 @@ async def upload_document_service(
         raise ValueError(f"File is too large. Max supported size is {current.index_max_file_size_mb}MB")
 
     document_id = uuid4()
-    upload_dir = _default_upload_dir(current) / user_id
+    upload_dir = _document_upload_dir(current, user_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(file.filename or "").suffix.lower()
     file_path = upload_dir / f"{document_id}{suffix}"
@@ -760,10 +965,9 @@ async def upload_document_service(
         }
     except Exception:
         if document is not None:
+            await session.rollback()
             await delete_document(session, user_id, str(document.id))
         raise
-    finally:
-        file_path.unlink(missing_ok=True)
 
 
 async def delete_document_service(
@@ -781,7 +985,7 @@ async def delete_document_service(
     if not deleted:
         return False
 
-    upload_dir = _default_upload_dir(current) / user_id
+    upload_dir = _document_upload_dir(current, user_id)
     for path in upload_dir.glob(f"{document_id}.*"):
         path.unlink(missing_ok=True)
     return True
@@ -802,21 +1006,25 @@ async def trigger_index_service(
     if not payload.force and document.status == "indexed":
         return {"message": "Document is already indexed; reindex is not required."}
 
-    job = await create_job(
+    document, job = await _create_index_job_with_guard(
         session,
         user_id,
-        document_id=document_id,
+        document_id,
         job_type="reindex",
-        status="pending",
-        progress=0,
+    )
+    content, file_type = await _load_document_content_for_indexing(
+        session,
+        user_id,
+        document,
+        settings=current,
     )
     document, job = await execute_indexing_pipeline(
         session,
         user_id,
         document=document,
         job=job,
-        content=document.content or "",
-        file_type=document.file_type,
+        content=content,
+        file_type=file_type,
         settings=current,
     )
     return {"job": to_job_response(job)}
@@ -833,6 +1041,7 @@ async def execute_indexing_pipeline(
     settings: Settings | None = None,
 ) -> tuple[KnowledgeDocument, KnowledgeIndexJob]:
     current = settings or get_settings()
+    embedding_warning: dict | None = None
     running_job = await update_job_status(
         session,
         user_id,
@@ -871,12 +1080,20 @@ async def execute_indexing_pipeline(
         if not running_job:
             raise RuntimeError("Failed to update indexing progress after chunking")
 
-        embedding_count = await _apply_chunk_embeddings(
-            session,
-            user_id,
-            chunks,
-            settings=current,
-        )
+        try:
+            small_chunks = [chunk for chunk in chunks if chunk.get("chunkType") == "small"]
+            embedding_count = await _apply_chunk_embeddings(
+                session,
+                user_id,
+                small_chunks,
+                settings=current,
+            )
+        except Exception as exc:
+            if not _is_soft_embedding_failure(exc):
+                raise
+            embedding_count = 0
+            embedding_warning = {"message": str(exc)}
+
         has_embedding_provider = await embedding_provider_available(session, user_id, current)
         progress = 90 if embedding_count or not has_embedding_provider else 80
         running_job = await update_job_status(
@@ -885,7 +1102,7 @@ async def execute_indexing_pipeline(
             str(job.id),
             status="running",
             progress=progress,
-            error=None,
+            error=embedding_warning,
         )
         if not running_job:
             raise RuntimeError("Failed to update indexing progress after embedding")
@@ -905,7 +1122,7 @@ async def execute_indexing_pipeline(
             str(job.id),
             status="completed",
             progress=100,
-            error=None,
+            error=embedding_warning,
         )
         if not current_document or not running_job:
             raise RuntimeError("Failed to finalize indexing state")

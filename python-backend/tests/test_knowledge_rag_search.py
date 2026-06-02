@@ -21,6 +21,10 @@ def test_score_keyword_candidate_prefers_title_and_content_phrase_matches() -> N
     assert high > 0.5
 
 
+def test_score_keyword_candidate_avoids_single_character_score_inflation() -> None:
+    assert _score_keyword_candidate("收", "收入报表", "收入情况说明") == 0.0
+
+
 def test_build_search_context_limits_output() -> None:
     results = [
         SearchResultResponse(
@@ -28,6 +32,8 @@ def test_build_search_context_limits_output() -> None:
             documentId="d1",
             documentTitle="Doc 1",
             content="a" * 100,
+            parentChunkId="p1",
+            parentContent="A" * 100,
             chunkIndex=0,
             score=0.8,
             source="keyword",
@@ -38,6 +44,8 @@ def test_build_search_context_limits_output() -> None:
             documentId="d2",
             documentTitle="Doc 2",
             content="b" * 100,
+            parentChunkId="p2",
+            parentContent="B" * 100,
             chunkIndex=1,
             score=0.7,
             source="keyword",
@@ -47,6 +55,39 @@ def test_build_search_context_limits_output() -> None:
     context = build_search_context(results, max_chars=120)
     assert "[Doc 1]" in context
     assert "[Doc 2]" not in context
+
+
+def test_build_search_context_deduplicates_shared_parent_context() -> None:
+    results = [
+        SearchResultResponse(
+            id="1",
+            documentId="d1",
+            documentTitle="Doc 1",
+            content="child-1",
+            parentChunkId="parent-1",
+            parentContent="shared parent context",
+            chunkIndex=0,
+            score=0.9,
+            source="semantic",
+            sourceInfo=None,
+        ),
+        SearchResultResponse(
+            id="2",
+            documentId="d1",
+            documentTitle="Doc 1",
+            content="child-2",
+            parentChunkId="parent-1",
+            parentContent="shared parent context",
+            chunkIndex=1,
+            score=0.8,
+            source="semantic",
+            sourceInfo=None,
+        ),
+    ]
+
+    context = build_search_context(results, max_chars=200)
+    assert context.count("[Doc 1]") == 1
+    assert "shared parent context" in context
 
 
 def test_fuse_search_results_marks_overlap_as_hybrid() -> None:
@@ -340,6 +381,71 @@ def test_search_service_query_preprocess_expands_queries_and_deduplicates(monkey
         assert response.semanticCount == 2
         assert response.keywordCount == 2
         assert response.preprocessTimeMs == 12
+
+    asyncio.run(run())
+
+
+def test_search_service_passes_only_supported_filters(monkeypatch) -> None:
+    settings = Settings(
+        database_url="postgresql://user:pass@localhost:5432/table",
+        embedding_api_key="token",
+        embedding_dimensions=2,
+        embedding_version=3,
+    )
+
+    async def run() -> None:
+        seen_keyword_filters: list[dict] = []
+        seen_semantic_filters: list[dict] = []
+
+        async def fake_keyword_search_chunks(session, user_id, filters):
+            seen_keyword_filters.append(filters)
+            return []
+
+        async def fake_semantic_search_chunks(session, user_id, *, embedding_vector, embedding_version, filters):
+            seen_semantic_filters.append(filters)
+            return []
+
+        async def fake_embed_query(query, current_settings, runtime_config=None):
+            return [0.1, 0.2]
+
+        monkeypatch.setattr(knowledge_rag, "keyword_search_chunks", fake_keyword_search_chunks)
+        monkeypatch.setattr(knowledge_rag, "semantic_search_chunks", fake_semantic_search_chunks)
+        monkeypatch.setattr(knowledge_rag, "embed_query", fake_embed_query)
+
+        await knowledge_rag.search_service(
+            session=object(),
+            user_id="00000000-0000-0000-0000-000000000001",
+            payload=HybridSearchRequest(
+                query="budget",
+                mode="hybrid",
+                limit=5,
+                threshold=0.4,
+                fusionWeight=0.2,
+                enableRerank=True,
+                enableQueryPreprocess=False,
+                documentIds=["doc-1"],
+                tags=["finance"],
+                sourceDept=["Finance"],
+                securityLevel="internal",
+                businessCategory=["planning"],
+                publishDateRange={"start": "2026-01-01", "end": "2026-03-01"},
+            ),
+            settings=settings,
+        )
+
+        assert seen_keyword_filters == [
+            {
+                "tags": ["finance"],
+                "documentIds": ["doc-1"],
+                "limit": 5,
+                "publishDateRange": {"start": "2026-01-01", "end": "2026-03-01"},
+                "sourceDept": ["Finance"],
+                "securityLevel": "internal",
+                "businessCategory": ["planning"],
+                "query": "budget",
+            }
+        ]
+        assert seen_semantic_filters == seen_keyword_filters
 
     asyncio.run(run())
 

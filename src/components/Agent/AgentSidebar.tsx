@@ -15,6 +15,7 @@ import {
 } from '../../lib/agentApi';
 import { useSmartScroll } from '../../hooks/useSmartScroll';
 import { NewMessageButton } from './NewMessageButton';
+import { SessionMemoryCard } from './SessionMemoryCard';
 
 const SIDEBAR_WIDTH = 384;
 
@@ -106,7 +107,19 @@ const MessageItem = memo(function MessageItem({ message, streamingContent, expan
 
 export const AgentSidebar: React.FC = () => {
   const { state: sidebarState, close } = useAgentSidebar();
-  const { state, sendMessage, stopThinking, confirmAction, rejectAction, clearConversation, newSession, loadHistorySession } = useAgent();
+  const {
+    state,
+    sendMessage,
+    stopThinking,
+    confirmAction,
+    rejectAction,
+    clearConversation,
+    newSession,
+    loadHistorySession,
+    refreshSessionMemory,
+    deleteSessionMemory,
+    setSessionMemoryDisabled,
+  } = useAgent();
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [historySessions, setHistorySessions] = useState<AgentSessionDto[]>([]);
@@ -404,6 +417,14 @@ export const AgentSidebar: React.FC = () => {
           className={`flex-1 overflow-auto p-3 space-y-3 ${showHistory ? 'hidden' : ''}`}
           style={{ overscrollBehavior: 'contain' }}
         >
+          <SessionMemoryCard
+            memory={state.currentSessionMemory}
+            onRefresh={() => refreshSessionMemory(undefined, { backgroundPoll: true })}
+            onDelete={() => deleteSessionMemory()}
+            onToggleDisabled={(disabled) => setSessionMemoryDisabled(disabled)}
+            compact
+          />
+
           {/* 新消息提示按钮 */}
           <NewMessageButton
             visible={scrollState.newMessagesBelow}

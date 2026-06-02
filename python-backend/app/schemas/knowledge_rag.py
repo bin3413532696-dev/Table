@@ -160,6 +160,8 @@ class SearchResultResponse(BaseModel):
     documentId: str
     documentTitle: str
     content: str
+    parentChunkId: str | None = None
+    parentContent: str | None = None
     chunkIndex: int
     score: float
     source: str

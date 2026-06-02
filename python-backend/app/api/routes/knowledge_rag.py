@@ -17,6 +17,7 @@ from app.schemas.knowledge_rag import (
     UpdateDocumentRequest,
 )
 from app.services.knowledge_rag import (
+    IndexJobActiveError,
     backfill_embeddings_service,
     delete_document_service,
     get_chunks,
@@ -69,6 +70,27 @@ def parse_document_list_query(request: Request) -> DocumentListQuery:
             "sourceDept": _split_csv_values(request.query_params.getlist("sourceDept")) or None,
             "securityLevel": request.query_params.get("securityLevel"),
             "businessCategory": _split_csv_values(request.query_params.getlist("businessCategory")) or None,
+            "limit": request.query_params.get("limit", 20),
+            "offset": request.query_params.get("offset", 0),
+        }
+    )
+
+
+def parse_chunk_list_query(request: Request) -> ChunkListQuery:
+    return ChunkListQuery.model_validate(
+        {
+            "documentId": request.query_params.get("documentId"),
+            "limit": request.query_params.get("limit", 50),
+            "offset": request.query_params.get("offset", 0),
+        }
+    )
+
+
+def parse_job_list_query(request: Request) -> JobListQuery:
+    return JobListQuery.model_validate(
+        {
+            "status": request.query_params.get("status"),
+            "documentId": request.query_params.get("documentId"),
             "limit": request.query_params.get("limit", 20),
             "offset": request.query_params.get("offset", 0),
         }
@@ -148,6 +170,8 @@ async def trigger_index(
 ):
     try:
         return await trigger_index_service(session, user.user_id, str(document_id), payload)
+    except IndexJobActiveError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": str(exc)}) from exc
 
@@ -168,7 +192,11 @@ async def backfill_embeddings(
 
 
 @router.get("/jobs", response_model=JobListEnvelope)
-async def list_jobs(query: JobListQuery, session: DbSession, user: AuthenticatedUser) -> JobListEnvelope:
+async def list_jobs(
+    query: JobListQuery = Depends(parse_job_list_query),
+    session: DbSession = None,  # type: ignore[assignment]
+    user: AuthenticatedUser = None,  # type: ignore[assignment]
+) -> JobListEnvelope:
     items, total = await get_jobs(session, user.user_id, query)
     return JobListEnvelope(items=items, total=total)
 
@@ -182,7 +210,11 @@ async def get_job_detail(job_id: UUID, session: DbSession, user: AuthenticatedUs
 
 
 @router.get("/chunks", response_model=ChunkListEnvelope)
-async def list_chunks(query: ChunkListQuery, session: DbSession, user: AuthenticatedUser) -> ChunkListEnvelope:
+async def list_chunks(
+    query: ChunkListQuery = Depends(parse_chunk_list_query),
+    session: DbSession = None,  # type: ignore[assignment]
+    user: AuthenticatedUser = None,  # type: ignore[assignment]
+) -> ChunkListEnvelope:
     items, total = await get_chunks(session, user.user_id, query)
     return ChunkListEnvelope(items=items, total=total)
 

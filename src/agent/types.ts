@@ -1,3 +1,5 @@
+import type { AgentSessionMemoryDto } from '../lib/agentApi';
+
 export interface ToolResult {
   success: boolean;
   data?: unknown;
@@ -67,6 +69,7 @@ export interface AgentState {
   error: string | null;
   currentRunId: string | null;
   currentSessionId: string;
+  currentSessionMemory: AgentSessionMemoryDto | null;
   // RAG 知识检索是否启用（默认禁用）
   ragEnabled: boolean;
 }

@@ -31,13 +31,23 @@ model User {
 }
 
 model AgentSession {
-  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String     @map("user_id") @db.Uuid
-  title     String     @default("新会话")
-  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  runs      AgentRun[]
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  id                    String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                String     @map("user_id") @db.Uuid
+  title                 String     @default("新会话")
+  memorySummary         String     @default("") @map("memory_summary")
+  memoryPreferencesJson Json       @default("[]") @map("memory_preferences_json")
+  memoryFactsJson       Json       @default("[]") @map("memory_facts_json")
+  memoryGoalsJson       Json       @default("[]") @map("memory_goals_json")
+  memoryTodosJson       Json       @default("[]") @map("memory_todos_json")
+  memoryRulesJson       Json       @default("[]") @map("memory_rules_json")
+  memoryStatus          String     @default("idle") @map("memory_status")
+  memoryUpdatedAt       DateTime?  @map("memory_updated_at") @db.Timestamptz(6)
+  memoryDisabled        Boolean    @default(false) @map("memory_disabled")
+  memoryRunCount        Int        @default(0) @map("memory_run_count")
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  runs                  AgentRun[]
+  user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@index([userId])
   @@index([userId, updatedAt(sort: Desc)])

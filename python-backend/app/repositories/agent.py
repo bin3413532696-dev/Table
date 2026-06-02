@@ -119,6 +119,16 @@ async def update_agent_session(
     session_id: str,
     *,
     title: str | None = None,
+    memory_summary: str | None | object = _UNSET,
+    memory_preferences_json: list[str] | None | object = _UNSET,
+    memory_facts_json: list[str] | None | object = _UNSET,
+    memory_goals_json: list[dict] | None | object = _UNSET,
+    memory_todos_json: list[dict] | None | object = _UNSET,
+    memory_rules_json: list[str] | None | object = _UNSET,
+    memory_status: str | None | object = _UNSET,
+    memory_updated_at: datetime | None | object = _UNSET,
+    memory_disabled: bool | object = _UNSET,
+    memory_run_count: int | None | object = _UNSET,
 ) -> AgentSession | None:
     item = await find_agent_session_by_id(session, user_id, session_id)
     if not item:
@@ -126,6 +136,26 @@ async def update_agent_session(
 
     if title is not None:
         item.title = title
+    if memory_summary is not _UNSET:
+        item.memory_summary = memory_summary or ""
+    if memory_preferences_json is not _UNSET:
+        item.memory_preferences_json = list(memory_preferences_json or [])
+    if memory_facts_json is not _UNSET:
+        item.memory_facts_json = list(memory_facts_json or [])
+    if memory_goals_json is not _UNSET:
+        item.memory_goals_json = list(memory_goals_json or [])
+    if memory_todos_json is not _UNSET:
+        item.memory_todos_json = list(memory_todos_json or [])
+    if memory_rules_json is not _UNSET:
+        item.memory_rules_json = list(memory_rules_json or [])
+    if memory_status is not _UNSET:
+        item.memory_status = memory_status or "idle"
+    if memory_updated_at is not _UNSET:
+        item.memory_updated_at = memory_updated_at
+    if memory_disabled is not _UNSET:
+        item.memory_disabled = bool(memory_disabled)
+    if memory_run_count is not _UNSET:
+        item.memory_run_count = int(memory_run_count or 0)
     item.updated_at = _now()
     await session.commit()
     await session.refresh(item)

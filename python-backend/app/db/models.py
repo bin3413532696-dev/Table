@@ -92,6 +92,16 @@ class AgentSession(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     user_id: Mapped[uuid.UUID] = mapped_column("user_id", UUID(as_uuid=True), index=True)
     title: Mapped[str] = mapped_column(String, default="新会话")
+    memory_summary: Mapped[str] = mapped_column("memory_summary", Text, default="")
+    memory_preferences_json: Mapped[list[str]] = mapped_column("memory_preferences_json", JSONB, default=list)
+    memory_facts_json: Mapped[list[str]] = mapped_column("memory_facts_json", JSONB, default=list)
+    memory_goals_json: Mapped[list[dict]] = mapped_column("memory_goals_json", JSONB, default=list)
+    memory_todos_json: Mapped[list[dict]] = mapped_column("memory_todos_json", JSONB, default=list)
+    memory_rules_json: Mapped[list[str]] = mapped_column("memory_rules_json", JSONB, default=list)
+    memory_status: Mapped[str] = mapped_column("memory_status", String, default="idle")
+    memory_updated_at: Mapped[datetime | None] = mapped_column("memory_updated_at", DateTime(timezone=True), nullable=True)
+    memory_disabled: Mapped[bool] = mapped_column("memory_disabled", Boolean, default=False)
+    memory_run_count: Mapped[int] = mapped_column("memory_run_count", Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         "created_at",
         DateTime(timezone=True),

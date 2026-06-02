@@ -28,12 +28,13 @@ import {
   updateAuthMe,
 } from '../../lib/auth';
 import {
+  fetchAgentCapabilities,
   fetchAgentPersona,
+  type AgentCapabilitiesDto,
   updateAgentPersona,
   type AgentPersonaDto,
 } from '../../lib/agentApi';
 import { maintenanceApi } from '../../lib/api/maintenance';
-import { registeredToolNames } from '../../agent/toolMetadata';
 import { MESSAGES } from '../../core/messages';
 import { PageHeader, PageContent, defaultEasing } from '../../components/ui/PageAnimations';
 
@@ -884,6 +885,8 @@ function ApiConfigSettings() {
   const [loadingPersona, setLoadingPersona] = useState(false);
   const [savingPersona, setSavingPersona] = useState(false);
   const [personaSaved, setPersonaSaved] = useState(false);
+  const [capabilities, setCapabilities] = useState<AgentCapabilitiesDto>({ tools: [], providers: [] });
+  const [loadingCapabilities, setLoadingCapabilities] = useState(false);
 
   const apiFormats = [
     { value: 'openai', label: 'OpenAI Chat Completions' },
@@ -985,6 +988,32 @@ function ApiConfigSettings() {
     };
 
     void loadProviders();
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const loadCapabilities = async () => {
+      setLoadingCapabilities(true);
+      try {
+        const data = await fetchAgentCapabilities();
+        if (!disposed) {
+          setCapabilities(data);
+        }
+      } catch (error) {
+        console.warn('[Settings] Failed to load agent capabilities:', error);
+      } finally {
+        if (!disposed) {
+          setLoadingCapabilities(false);
+        }
+      }
+    };
+
+    void loadCapabilities();
 
     return () => {
       disposed = true;
@@ -1469,18 +1498,29 @@ function ApiConfigSettings() {
           可用工具
         </h4>
         <p className="text-sm text-text-muted mb-2">
-          当前智能体已注册 <span className="text-primary font-medium">{registeredToolNames.length}</span> 个工具
+          当前智能体已注册 <span className="text-primary font-medium">{capabilities.tools.length}</span> 个工具
         </p>
-        <div className="flex flex-wrap gap-2">
-          {registeredToolNames.map((toolName) => (
-            <span
-              key={toolName}
-              className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary border border-primary/20"
-            >
-              {toolName}
-            </span>
-          ))}
-        </div>
+        {loadingCapabilities ? (
+          <p className="text-sm text-text-muted">正在加载工具元数据...</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {capabilities.tools.map((tool) => (
+              <span
+                key={tool.name}
+                className={`text-xs px-2 py-1 rounded-full border ${
+                  tool.category === 'mutation'
+                    ? 'bg-warning/10 text-warning border-warning/20'
+                    : tool.requiresRag
+                    ? 'bg-info/10 text-info border-info/20'
+                    : 'bg-primary/10 text-primary border-primary/20'
+                }`}
+                title={tool.description}
+              >
+                {tool.name}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="p-4 rounded-lg bg-bg-secondary border border-border-primary">

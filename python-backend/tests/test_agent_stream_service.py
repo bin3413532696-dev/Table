@@ -105,6 +105,34 @@ def test_to_agent_run_detail_exposes_placeholder_pending_tool_for_waiting_confir
 
 
 @pytest.mark.asyncio
+async def test_get_agent_runtime_status_serializes_provider_uuid_id(monkeypatch) -> None:
+    user_id = str(uuid.uuid4())
+    provider_id = uuid.uuid4()
+    provider = SimpleNamespace(
+        id=provider_id,
+        name="Primary Provider",
+        api_format="openai",
+        base_url="https://provider.example.com",
+        api_key_encrypted="encrypted-secret",
+        model="gpt-4o-mini",
+    )
+
+    async def fake_find_active_provider_for_user(session, requested_user_id):
+        del session
+        assert requested_user_id == user_id
+        return provider
+
+    monkeypatch.setattr(agent_service, "find_active_provider_for_user", fake_find_active_provider_for_user)
+
+    result = await agent_service.get_agent_runtime_status(object(), user_id)
+
+    assert result.ok is True
+    assert result.runtime.provider is not None
+    assert result.runtime.provider.id == str(provider_id)
+    assert isinstance(result.runtime.provider.id, str)
+
+
+@pytest.mark.asyncio
 async def test_get_agent_session_detail_aggregates_persisted_run_messages(monkeypatch) -> None:
     user_id = str(uuid.uuid4())
     session_id = str(uuid.uuid4())
@@ -698,6 +726,188 @@ async def test_stream_agent_run_record_executes_query_tool_and_continues(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_stream_agent_run_record_preexecutes_rag_when_enabled(monkeypatch) -> None:
+    user_id = str(uuid.uuid4())
+    user_uuid = uuid.UUID(user_id)
+    session_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    created_at = datetime(2026, 5, 31, 8, 0, tzinfo=timezone.utc)
+    completed_at = created_at + timedelta(seconds=2)
+
+    session_item = AgentSession(
+        id=session_id,
+        user_id=user_uuid,
+        title="RAG Session",
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    created_run = AgentRun(
+        id=run_id,
+        user_id=user_uuid,
+        session_id=session_id,
+        status="running",
+        input_text="知识库里怎么说 Transformer",
+        model="gpt-4o-mini",
+        created_at=created_at,
+        updated_at=created_at,
+        version=1,
+    )
+    completed_run = AgentRun(
+        id=run_id,
+        user_id=user_uuid,
+        session_id=session_id,
+        status="completed",
+        input_text="知识库里怎么说 Transformer",
+        model="gpt-4o-mini",
+        created_at=created_at,
+        updated_at=completed_at,
+        version=2,
+    )
+
+    async def fake_find_active_provider_for_user(session, requested_user_id):
+        del session
+        assert requested_user_id == user_id
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Primary Provider",
+            api_format="openai",
+            base_url="https://provider.example.com/",
+            api_key_encrypted="encrypted-secret",
+            model="gpt-4o-mini",
+            headers_json={},
+        )
+
+    async def fake_find_agent_session_by_id(session, requested_user_id, requested_session_id):
+        del session
+        assert requested_user_id == user_id
+        assert requested_session_id == str(session_id)
+        return session_item
+
+    async def fake_find_user_setting(session, requested_user_id):
+        del session
+        assert requested_user_id == user_id
+        return None
+
+    async def fake_create_agent_run(session, requested_user_id, *, session_id, input_text, model, status):
+        del session
+        assert requested_user_id == user_id
+        assert session_id == str(session_item.id)
+        assert input_text == "知识库里怎么说 Transformer"
+        assert model == "gpt-4o-mini"
+        assert status == "running"
+        return created_run
+
+    async def fake_update_agent_session(session, requested_user_id, requested_session_id, *, title=None):
+        del session, title
+        assert requested_user_id == user_id
+        assert requested_session_id == str(session_item.id)
+        return session_item
+
+    async def fake_update_agent_run(
+        session,
+        requested_user_id,
+        requested_run_id,
+        *,
+        status=None,
+        messages_json=None,
+        executed_tool_calls_json=None,
+        pending_tool_calls_json=None,
+        assistant_text_chunks_json=None,
+        timeline_json=None,
+        final_text=None,
+        error_text=object(),
+        iteration_count=None,
+        requires_confirmation=None,
+        expected_version=None,
+    ):
+        del session, expected_version, error_text
+        assert requested_user_id == user_id
+        assert requested_run_id == str(run_id)
+        assert status == "completed"
+        assert requires_confirmation is False
+        assert pending_tool_calls_json == []
+        assert isinstance(executed_tool_calls_json, list) and len(executed_tool_calls_json) == 1
+        assert executed_tool_calls_json[0]["toolName"] == "rag_answer"
+        assert executed_tool_calls_json[0]["status"] == "completed"
+        assert assistant_text_chunks_json == ["知识库结果显示：Transformer 是核心架构。"]
+        assert final_text == "知识库结果显示：Transformer 是核心架构。"
+        assert iteration_count == 1
+        assert isinstance(messages_json, list) and messages_json[-2]["role"] == "tool"
+        assert "Tool rag_answer executed successfully" in messages_json[-2]["content"]
+        assert isinstance(timeline_json, list) and any(
+            item["type"] == "tool_start" and item["data"].get("forced") is True for item in timeline_json
+        )
+        return completed_run
+
+    async def fake_find_agent_run_by_id(session, requested_user_id, requested_run_id):
+        del session
+        assert requested_user_id == user_id
+        assert requested_run_id == str(run_id)
+        return completed_run
+
+    async def fake_execute_agent_tool_call(session, requested_user_id, tool_call, *, settings=None):
+        del session, settings
+        assert requested_user_id == user_id
+        assert tool_call.name == "rag_answer"
+        assert tool_call.arguments["question"] == "知识库里怎么说 Transformer"
+        return agent_service.AgentRunToolExecutionDto(
+            id=tool_call.id,
+            toolName=tool_call.name,
+            arguments=tool_call.arguments,
+            status="completed",
+            requiresConfirmation=False,
+            result={
+                "context": "[Doc] Transformer 是核心架构。",
+                "sources": [{"chunkId": "chunk-1", "documentTitle": "大模型发展历程.txt", "score": 0.9}],
+                "confidence": 0.9,
+                "message": "找到 1 条相关内容，置信度 90%",
+                "searched": True,
+            },
+            createdAt=4,
+        )
+
+    async def fake_stream_openai_chat_completion(runtime_config, *, messages):
+        assert runtime_config.model == "gpt-4o-mini"
+        assert messages[-1]["role"] == "user"
+        assert "Tool rag_answer executed successfully" in messages[-1]["content"]
+        yield "知识库结果显示：Transformer 是核心架构。"
+
+    monkeypatch.setattr(agent_service, "find_active_provider_for_user", fake_find_active_provider_for_user)
+    monkeypatch.setattr(agent_service, "decrypt_provider_secret", lambda value, settings=None: "plain-secret")
+    monkeypatch.setattr(agent_service, "find_agent_session_by_id", fake_find_agent_session_by_id)
+    monkeypatch.setattr(agent_service, "find_user_setting", fake_find_user_setting)
+    monkeypatch.setattr(agent_service, "create_agent_run", fake_create_agent_run)
+    monkeypatch.setattr(agent_service, "update_agent_session", fake_update_agent_session)
+    monkeypatch.setattr(agent_service, "update_agent_run", fake_update_agent_run)
+    monkeypatch.setattr(agent_service, "find_agent_run_by_id", fake_find_agent_run_by_id)
+    monkeypatch.setattr(agent_service, "_execute_agent_tool_call", fake_execute_agent_tool_call)
+    monkeypatch.setattr(agent_service, "_stream_openai_chat_completion", fake_stream_openai_chat_completion)
+
+    payload = CreateAgentRunRequest(
+        sessionId=session_id,
+        inputText="知识库里怎么说 Transformer",
+        model="default",
+        ragEnabled=True,
+    )
+
+    events = [event async for event in agent_service.stream_agent_run_record(object(), user_id, payload)]
+
+    assert events[0] == {
+        "type": "metadata",
+        "runId": str(run_id),
+        "sessionId": str(session_id),
+        "model": "gpt-4o-mini",
+    }
+    assert [event["token"] for event in events if event["type"] == "token"] == [
+        "知识库结果显示：Transformer 是核心架构。",
+    ]
+    assert events[-1]["type"] == "run_completed"
+    assert events[-1]["run"]["status"] == "completed"
+    assert events[-1]["run"]["executedToolCalls"][0]["toolName"] == "rag_answer"
+    assert events[-1]["run"]["finalText"] == "知识库结果显示：Transformer 是核心架构。"
+
+
+@pytest.mark.asyncio
 async def test_stream_agent_run_record_enters_waiting_confirmation_for_write_tool(monkeypatch) -> None:
     user_id = str(uuid.uuid4())
     user_uuid = uuid.UUID(user_id)
@@ -839,6 +1049,167 @@ async def test_stream_agent_run_record_enters_waiting_confirmation_for_write_too
     assert events[-1]["type"] == "run_completed"
     assert events[-1]["run"]["status"] == "waiting_confirmation"
     assert events[-1]["run"]["requiresConfirmation"] is True
+    assert events[-1]["run"]["pendingToolCalls"][0]["toolName"] == "create_task"
+
+
+@pytest.mark.asyncio
+async def test_stream_agent_run_record_executes_safe_tools_before_waiting_for_confirmation(monkeypatch) -> None:
+    user_id = str(uuid.uuid4())
+    user_uuid = uuid.UUID(user_id)
+    session_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    created_at = datetime(2026, 5, 31, 8, 0, tzinfo=timezone.utc)
+    waiting_run = AgentRun(
+        id=run_id,
+        user_id=user_uuid,
+        session_id=session_id,
+        status="waiting_confirmation",
+        input_text="List tasks and create one",
+        model="gpt-4o-mini",
+        created_at=created_at,
+        updated_at=created_at,
+        version=2,
+    )
+
+    session_item = AgentSession(
+        id=session_id,
+        user_id=user_uuid,
+        title="Mixed Tool Session",
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    created_run = AgentRun(
+        id=run_id,
+        user_id=user_uuid,
+        session_id=session_id,
+        status="running",
+        input_text="List tasks and create one",
+        model="gpt-4o-mini",
+        created_at=created_at,
+        updated_at=created_at,
+        version=1,
+    )
+
+    async def fake_find_active_provider_for_user(session, requested_user_id):
+        del session
+        assert requested_user_id == user_id
+        return SimpleNamespace(
+            id=uuid.uuid4(),
+            name="Primary Provider",
+            api_format="openai",
+            base_url="https://provider.example.com/",
+            api_key_encrypted="encrypted-secret",
+            model="gpt-4o-mini",
+            headers_json={},
+        )
+
+    async def fake_find_agent_session_by_id(session, requested_user_id, requested_session_id):
+        del session
+        assert requested_user_id == user_id
+        assert requested_session_id == str(session_id)
+        return session_item
+
+    async def fake_find_user_setting(session, requested_user_id):
+        del session
+        assert requested_user_id == user_id
+        return None
+
+    async def fake_create_agent_run(session, requested_user_id, *, session_id, input_text, model, status):
+        del session
+        assert requested_user_id == user_id
+        assert session_id == str(session_item.id)
+        assert input_text == "List tasks and create one"
+        assert model == "gpt-4o-mini"
+        assert status == "running"
+        return created_run
+
+    async def fake_update_agent_session(session, requested_user_id, requested_session_id, *, title=None):
+        del session, title
+        assert requested_user_id == user_id
+        assert requested_session_id == str(session_item.id)
+        return session_item
+
+    async def fake_update_agent_run(
+        session,
+        requested_user_id,
+        requested_run_id,
+        *,
+        status=None,
+        messages_json=None,
+        executed_tool_calls_json=None,
+        pending_tool_calls_json=None,
+        assistant_text_chunks_json=None,
+        timeline_json=None,
+        final_text=None,
+        error_text=object(),
+        iteration_count=None,
+        requires_confirmation=None,
+        expected_version=None,
+    ):
+        del session, expected_version, error_text
+        assert requested_user_id == user_id
+        assert requested_run_id == str(run_id)
+        assert status == "waiting_confirmation"
+        assert requires_confirmation is True
+        assert iteration_count == 1
+        assert isinstance(executed_tool_calls_json, list) and len(executed_tool_calls_json) == 1
+        assert executed_tool_calls_json[0]["toolName"] == "query_tasks"
+        assert isinstance(pending_tool_calls_json, list) and len(pending_tool_calls_json) == 1
+        assert pending_tool_calls_json[0]["toolName"] == "create_task"
+        assert isinstance(messages_json, list) and messages_json[-1]["role"] == "tool"
+        assert "Tool query_tasks executed successfully" in messages_json[-1]["content"]
+        assert assistant_text_chunks_json == [
+            '```tool\n{"name":"query_tasks","arguments":{"completed":false,"limit":2}}\n```\n```tool\n{"name":"create_task","arguments":{"title":"Write report","priority":"high"}}\n```'
+        ]
+        assert final_text == ""
+        assert isinstance(timeline_json, list) and any(item["type"] == "tool_start" for item in timeline_json)
+        return waiting_run
+
+    async def fake_find_agent_run_by_id(session, requested_user_id, requested_run_id):
+        del session
+        assert requested_user_id == user_id
+        assert requested_run_id == str(run_id)
+        return waiting_run
+
+    async def fake_execute_agent_tool_call(session, requested_user_id, tool_call, *, settings=None):
+        del session, settings
+        assert requested_user_id == user_id
+        assert tool_call.name == "query_tasks"
+        return agent_service.AgentRunToolExecutionDto(
+            id=tool_call.id,
+            toolName=tool_call.name,
+            arguments=tool_call.arguments,
+            status="completed",
+            requiresConfirmation=False,
+            result={"value": [{"id": "task-1", "title": "A"}]},
+            createdAt=4,
+        )
+
+    async def fake_stream_openai_chat_completion(runtime_config, *, messages):
+        del runtime_config
+        assert messages[-1] == {"role": "user", "content": "List tasks and create one"}
+        yield (
+            '```tool\n{"name":"query_tasks","arguments":{"completed":false,"limit":2}}\n```\n'
+            '```tool\n{"name":"create_task","arguments":{"title":"Write report","priority":"high"}}\n```'
+        )
+
+    monkeypatch.setattr(agent_service, "find_active_provider_for_user", fake_find_active_provider_for_user)
+    monkeypatch.setattr(agent_service, "decrypt_provider_secret", lambda value, settings=None: "plain-secret")
+    monkeypatch.setattr(agent_service, "find_agent_session_by_id", fake_find_agent_session_by_id)
+    monkeypatch.setattr(agent_service, "find_user_setting", fake_find_user_setting)
+    monkeypatch.setattr(agent_service, "create_agent_run", fake_create_agent_run)
+    monkeypatch.setattr(agent_service, "update_agent_session", fake_update_agent_session)
+    monkeypatch.setattr(agent_service, "update_agent_run", fake_update_agent_run)
+    monkeypatch.setattr(agent_service, "find_agent_run_by_id", fake_find_agent_run_by_id)
+    monkeypatch.setattr(agent_service, "_execute_agent_tool_call", fake_execute_agent_tool_call)
+    monkeypatch.setattr(agent_service, "_stream_openai_chat_completion", fake_stream_openai_chat_completion)
+
+    payload = CreateAgentRunRequest(sessionId=session_id, inputText="List tasks and create one", model="default")
+
+    events = [event async for event in agent_service.stream_agent_run_record(object(), user_id, payload)]
+
+    assert events[-1]["type"] == "run_completed"
+    assert events[-1]["run"]["status"] == "waiting_confirmation"
     assert events[-1]["run"]["pendingToolCalls"][0]["toolName"] == "create_task"
 
 

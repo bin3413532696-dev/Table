@@ -4,6 +4,7 @@ from uuid import UUID
 
 from app.dependencies import AuthenticatedUser, DbSession
 from app.schemas.agent import (
+    AgentCapabilitiesDto,
     AgentDeleteResponse,
     AgentPersonaDto,
     AgentRunDetailDto,
@@ -11,12 +12,14 @@ from app.schemas.agent import (
     AgentRunListResponse,
     AgentRuntimeStatusDto,
     AgentSessionDetailDto,
+    AgentSessionMemoryDto,
     AgentSessionDto,
     AgentSessionListResponse,
     CreateAgentRunRequest,
     CreateAgentSessionRequest,
     ListAgentRunsQuery,
     ListAgentSessionsQuery,
+    UpdateAgentSessionMemorySettingsRequest,
     UpdateAgentRunRequest,
     UpdateAgentSessionRequest,
 )
@@ -26,18 +29,22 @@ from app.services.agent import (
     create_agent_session_record,
     delete_agent_run_record,
     delete_agent_session_record,
+    delete_agent_session_memory_record,
+    get_agent_capabilities,
     get_agent_persona,
     get_agent_run_detail,
     get_agent_run_list,
     get_agent_runtime_status,
     get_agent_session_detail,
     get_agent_session_list,
+    get_agent_session_memory_record,
     reject_agent_tool_record,
     stream_agent_run_record,
     stream_confirm_agent_tool_record,
     stream_reject_agent_tool_record,
     update_agent_persona_record,
     update_agent_run_record,
+    update_agent_session_memory_settings_record,
     update_agent_session_record,
 )
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -60,6 +67,11 @@ def _tool_not_found() -> HTTPException:
 @router.get("/health", response_model=AgentRuntimeStatusDto)
 async def agent_health(session: DbSession, user: AuthenticatedUser) -> AgentRuntimeStatusDto:
     return await get_agent_runtime_status(session, user.user_id)
+
+
+@router.get("/capabilities", response_model=AgentCapabilitiesDto)
+async def agent_capabilities(session: DbSession, user: AuthenticatedUser) -> AgentCapabilitiesDto:
+    return await get_agent_capabilities(session, user.user_id)
 
 
 @router.get("/persona", response_model=AgentPersonaDto)
@@ -130,6 +142,43 @@ async def remove_agent_session(
     if not item:
         raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/sessions/{session_id}/memory", response_model=AgentSessionMemoryDto)
+async def get_agent_session_memory_route(
+    session_id: UUID,
+    session: DbSession,
+    user: AuthenticatedUser,
+) -> AgentSessionMemoryDto:
+    item = await get_agent_session_memory_record(session, user.user_id, str(session_id))
+    if not item:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+    return item
+
+
+@router.patch("/sessions/{session_id}/memory/settings", response_model=AgentSessionMemoryDto)
+async def patch_agent_session_memory_settings(
+    session_id: UUID,
+    payload: UpdateAgentSessionMemorySettingsRequest,
+    session: DbSession,
+    user: AuthenticatedUser,
+) -> AgentSessionMemoryDto:
+    item = await update_agent_session_memory_settings_record(session, user.user_id, str(session_id), payload)
+    if not item:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+    return item
+
+
+@router.delete("/sessions/{session_id}/memory", response_model=AgentSessionMemoryDto)
+async def remove_agent_session_memory(
+    session_id: UUID,
+    session: DbSession,
+    user: AuthenticatedUser,
+) -> AgentSessionMemoryDto:
+    item = await delete_agent_session_memory_record(session, user.user_id, str(session_id))
+    if not item:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+    return item
 
 
 @router.get("/runs", response_model=AgentRunListResponse)

@@ -79,6 +79,40 @@ async def test_fetch_agent_persona_uses_route_service(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_capabilities_uses_route_service(monkeypatch) -> None:
+    app = _make_app()
+
+    async def fake_get_agent_capabilities(session, user_id):
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        return {
+            "tools": [
+                {
+                    "name": "query_tasks",
+                    "description": "List tasks",
+                    "promptSignature": "query_tasks(completed?, priority?, limit?)",
+                    "category": "query",
+                    "module": "tasks",
+                    "requiresConfirmation": False,
+                    "requiresRag": False,
+                    "enabled": True,
+                }
+            ],
+            "providers": [
+                {"apiFormat": "openai", "label": "OpenAI Chat Completions", "enabled": True}
+            ],
+        }
+
+    monkeypatch.setattr(agent_routes, "get_agent_capabilities", fake_get_agent_capabilities)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/api/agent/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["tools"][0]["name"] == "query_tasks"
+    assert response.json()["providers"][0]["apiFormat"] == "openai"
+
+
+@pytest.mark.asyncio
 async def test_update_agent_persona_requires_csrf() -> None:
     app = _make_app()
 
@@ -117,6 +151,110 @@ async def test_list_agent_sessions_uses_route_service(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["total"] == 1
     assert response.json()["items"][0]["title"] == "Session A"
+
+
+@pytest.mark.asyncio
+async def test_get_agent_session_memory_uses_route_service(monkeypatch) -> None:
+    app = _make_app()
+
+    async def fake_get_agent_session_memory_record(session, user_id, session_id):
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        assert session_id == "00000000-0000-0000-0000-000000000101"
+        return {
+            "summary": "用户偏好简洁回答。",
+            "preferences": ["偏好简洁回答"],
+            "facts": [],
+            "goals": [],
+            "todos": [],
+            "rules": [],
+            "status": "ready",
+            "updatedAt": 10,
+            "disabled": False,
+            "runCount": 3,
+        }
+
+    monkeypatch.setattr(agent_routes, "get_agent_session_memory_record", fake_get_agent_session_memory_record)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/api/agent/sessions/00000000-0000-0000-0000-000000000101/memory")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["summary"] == "用户偏好简洁回答。"
+
+
+@pytest.mark.asyncio
+async def test_patch_agent_session_memory_settings_requires_csrf_and_uses_service(monkeypatch) -> None:
+    app = _make_app()
+    token = generate_csrf_token()
+
+    async def fake_update_agent_session_memory_settings_record(session, user_id, session_id, payload):
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        assert session_id == "00000000-0000-0000-0000-000000000101"
+        assert payload.disabled is True
+        return {
+            "summary": "",
+            "preferences": [],
+            "facts": [],
+            "goals": [],
+            "todos": [],
+            "rules": [],
+            "status": "idle",
+            "updatedAt": None,
+            "disabled": True,
+            "runCount": 0,
+        }
+
+    monkeypatch.setattr(
+        agent_routes,
+        "update_agent_session_memory_settings_record",
+        fake_update_agent_session_memory_settings_record,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        response = await client.patch(
+            "/api/agent/sessions/00000000-0000-0000-0000-000000000101/memory/settings",
+            headers={CSRF_HEADER_NAME: token},
+            json={"disabled": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["disabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_agent_session_memory_uses_route_service(monkeypatch) -> None:
+    app = _make_app()
+    token = generate_csrf_token()
+
+    async def fake_delete_agent_session_memory_record(session, user_id, session_id):
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        assert session_id == "00000000-0000-0000-0000-000000000101"
+        return {
+            "summary": "",
+            "preferences": [],
+            "facts": [],
+            "goals": [],
+            "todos": [],
+            "rules": [],
+            "status": "idle",
+            "updatedAt": None,
+            "disabled": False,
+            "runCount": 0,
+        }
+
+    monkeypatch.setattr(agent_routes, "delete_agent_session_memory_record", fake_delete_agent_session_memory_record)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        response = await client.delete(
+            "/api/agent/sessions/00000000-0000-0000-0000-000000000101/memory",
+            headers={CSRF_HEADER_NAME: token},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "idle"
 
 
 @pytest.mark.asyncio

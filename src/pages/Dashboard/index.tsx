@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { useAgent } from '../../agent/AgentContext';
 import { AgentMessage } from '../../agent/types';
 import { useNavigate } from 'react-router-dom';
+import { SessionMemoryCard } from '../../components/Agent';
 import {
   fetchAgentSessionList,
   fetchAgentSessionDetail,
@@ -143,7 +144,19 @@ function getSessionStatus(session: AgentSessionDto): string {
 }
 
 export default function Dashboard() {
-  const { state, sendMessage, stopThinking, confirmAction, rejectAction, newSession, loadHistorySession, toggleRag } = useAgent();
+  const {
+    state,
+    sendMessage,
+    stopThinking,
+    confirmAction,
+    rejectAction,
+    newSession,
+    loadHistorySession,
+    refreshSessionMemory,
+    deleteSessionMemory,
+    setSessionMemoryDisabled,
+    toggleRag,
+  } = useAgent();
   const [input, setInput] = useState('');
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
   const [inputAreaHeight, setInputAreaHeight] = useState(88);
@@ -540,6 +553,13 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="max-w-4xl mx-auto px-4 sm:px-8 lg:px-12 xl:px-16 space-y-6">
+              <SessionMemoryCard
+                memory={state.currentSessionMemory}
+                onRefresh={() => refreshSessionMemory(undefined, { backgroundPoll: true })}
+                onDelete={() => deleteSessionMemory()}
+                onToggleDisabled={(disabled) => setSessionMemoryDisabled(disabled)}
+              />
+
               {messagesToRender.map(({ message, streamingContent }, index) => (
                 <motion.div
                   key={message.id}
@@ -677,9 +697,10 @@ export default function Dashboard() {
                     ? 'bg-success/15 text-success border border-success/25 shadow-[0_2px_8px_rgba(22,163,74,0.15)]'
                     : 'bg-bg-tertiary text-text-muted border border-border-primary/50 hover:border-border-secondary hover:text-text-secondary'
                 }`}
-                title={state.ragEnabled ? '禁用知识库检索' : '启用知识库检索'}
+                title={state.ragEnabled ? '知识库检索已开启，点击关闭' : '知识库检索已关闭，点击开启'}
               >
                 <Database className="w-4 h-4" />
+                <span className="text-xs font-medium">{state.ragEnabled ? '知识库开' : '知识库关'}</span>
               </motion.button>
               <motion.button
                 whileHover={{ scale: 1.05 }}

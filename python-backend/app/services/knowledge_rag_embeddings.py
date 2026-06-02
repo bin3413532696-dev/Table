@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
+from collections import OrderedDict
 from time import time
 from typing import Any
 
@@ -14,7 +15,11 @@ from app.repositories.providers import find_active_provider_for_user
 from app.services.api_urls import build_v1_api_url
 
 
-_QUERY_EMBEDDING_CACHE: dict[str, tuple[float, list[float]]] = {}
+QUERY_EMBEDDING_CACHE_TTL_SECONDS = 3600
+QUERY_EMBEDDING_CACHE_MAX_ITEMS = 1024
+EMBEDDING_BATCH_MAX_INPUTS = 8
+EMBEDDING_BATCH_MAX_CHARS = 6000
+_QUERY_EMBEDDING_CACHE: OrderedDict[str, tuple[float, list[float]]] = OrderedDict()
 
 
 def format_vector_for_db(embedding: list[float]) -> str:
@@ -109,15 +114,20 @@ def get_cached_query_embedding(query: str, model: str) -> list[float] | None:
     if not cached:
         return None
     timestamp, embedding = cached
-    if time() - timestamp > 3600:
+    if time() - timestamp > QUERY_EMBEDDING_CACHE_TTL_SECONDS:
         _QUERY_EMBEDDING_CACHE.pop(key, None)
         return None
+    _QUERY_EMBEDDING_CACHE.move_to_end(key)
     return embedding
 
 
 def set_cached_query_embedding(query: str, model: str, embedding: list[float]) -> None:
     key = _query_cache_key(query, model)
+    if key in _QUERY_EMBEDDING_CACHE:
+        _QUERY_EMBEDDING_CACHE.move_to_end(key)
     _QUERY_EMBEDDING_CACHE[key] = (time(), embedding)
+    while len(_QUERY_EMBEDDING_CACHE) > QUERY_EMBEDDING_CACHE_MAX_ITEMS:
+        _QUERY_EMBEDDING_CACHE.popitem(last=False)
 
 
 class OpenAICompatibleEmbeddingClient:
@@ -218,13 +228,38 @@ async def embed_chunk_batch(
         runtime_config=runtime_config,
     )
     client = OpenAICompatibleEmbeddingClient(config)
-    embeddings = await client.embed([chunk.content for chunk in chunks])
-    return [
-        {
-            "chunkId": chunk.chunk_id,
-            "contentHash": chunk.content_hash,
-            "embedding": embedding,
-            "embeddingModel": config.model,
-        }
-        for chunk, embedding in zip(chunks, embeddings, strict=False)
-    ]
+    results: list[dict] = []
+    current_batch: list[EmbeddingChunkInput] = []
+    current_chars = 0
+
+    async def flush_batch() -> None:
+        nonlocal current_batch, current_chars
+        if not current_batch:
+            return
+        embeddings = await client.embed([chunk.content for chunk in current_batch])
+        results.extend(
+            {
+                "chunkId": chunk.chunk_id,
+                "contentHash": chunk.content_hash,
+                "embedding": embedding,
+                "embeddingModel": config.model,
+            }
+            for chunk, embedding in zip(current_batch, embeddings, strict=False)
+        )
+        current_batch = []
+        current_chars = 0
+
+    for chunk in chunks:
+        chunk_chars = len(chunk.content)
+        should_flush = bool(current_batch) and (
+            len(current_batch) >= EMBEDDING_BATCH_MAX_INPUTS
+            or current_chars + chunk_chars > EMBEDDING_BATCH_MAX_CHARS
+        )
+        if should_flush:
+            await flush_batch()
+
+        current_batch.append(chunk)
+        current_chars += chunk_chars
+
+    await flush_batch()
+    return results

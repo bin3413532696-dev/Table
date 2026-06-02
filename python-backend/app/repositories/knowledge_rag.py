@@ -9,6 +9,7 @@ from app.db.models import (
     KnowledgeIndexJob,
 )
 from sqlalchemy import func, or_, select, text, update
+from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -86,6 +87,21 @@ async def find_document_by_id(session: AsyncSession, user_id: str, document_id: 
             KnowledgeDocument.id == UUID(document_id),
             KnowledgeDocument.user_id == UUID(user_id),
         )
+    )
+
+
+async def find_document_by_id_for_update(
+    session: AsyncSession,
+    user_id: str,
+    document_id: str,
+) -> KnowledgeDocument | None:
+    return await session.scalar(
+        select(KnowledgeDocument)
+        .where(
+            KnowledgeDocument.id == UUID(document_id),
+            KnowledgeDocument.user_id == UUID(user_id),
+        )
+        .with_for_update()
     )
 
 
@@ -189,6 +205,23 @@ async def find_job_by_id(session: AsyncSession, user_id: str, job_id: str) -> Kn
             KnowledgeIndexJob.id == UUID(job_id),
             KnowledgeIndexJob.user_id == UUID(user_id),
         )
+    )
+
+
+async def find_active_job_for_document(
+    session: AsyncSession,
+    user_id: str,
+    document_id: str,
+) -> KnowledgeIndexJob | None:
+    return await session.scalar(
+        select(KnowledgeIndexJob)
+        .where(
+            KnowledgeIndexJob.user_id == UUID(user_id),
+            KnowledgeIndexJob.document_id == UUID(document_id),
+            KnowledgeIndexJob.status.in_(["pending", "running"]),
+        )
+        .order_by(KnowledgeIndexJob.created_at.desc())
+        .limit(1)
     )
 
 
@@ -319,12 +352,14 @@ async def get_chunk_by_id(
                   c.embedding_version,
                   c.chunk_type,
                   c.parent_id,
+                  p.content AS parent_content,
                   c.created_at,
                   c.updated_at,
                   (c.embedding IS NOT NULL) AS has_embedding,
                   d.title AS document_title
                 FROM knowledge_chunks c
                 JOIN knowledge_documents d ON c.document_id = d.id
+                LEFT JOIN knowledge_chunks p ON c.parent_id = p.id
                 WHERE c.id = CAST(:chunk_id AS uuid)
                   AND c.user_id = CAST(:user_id AS uuid)
                   AND d.user_id = CAST(:user_id AS uuid)
@@ -383,37 +418,40 @@ async def create_chunks(
         for chunk in chunks
     ]
 
-    await session.execute(
-        text(
-            """
-            INSERT INTO knowledge_chunks (
-              id, document_id, user_id, content, content_hash,
-              chunk_index, start_pos, end_pos,
-              heading_chain, heading_level,
-              embedding_dimensions, embedding_version,
-              chunk_type, parent_id, created_at, updated_at
-            ) VALUES (
-              CAST(:id AS uuid),
-              CAST(:document_id AS uuid),
-              CAST(:user_id AS uuid),
-              :content,
-              :content_hash,
-              :chunk_index,
-              :start_pos,
-              :end_pos,
-              :heading_chain,
-              :heading_level,
-              :embedding_dimensions,
-              :embedding_version,
-              :chunk_type,
-              CAST(:parent_id AS uuid),
-              NOW(),
-              NOW()
-            )
-            """
-        ),
-        rows,
+    insert_sql = text(
+        """
+        INSERT INTO knowledge_chunks (
+          id, document_id, user_id, content, content_hash,
+          chunk_index, start_pos, end_pos,
+          heading_chain, heading_level,
+          embedding_dimensions, embedding_version,
+          chunk_type, parent_id, created_at, updated_at
+        ) VALUES (
+          CAST(:id AS uuid),
+          CAST(:document_id AS uuid),
+          CAST(:user_id AS uuid),
+          :content,
+          :content_hash,
+          :chunk_index,
+          :start_pos,
+          :end_pos,
+          :heading_chain,
+          :heading_level,
+          :embedding_dimensions,
+          :embedding_version,
+          :chunk_type,
+          CAST(:parent_id AS uuid),
+          NOW(),
+          NOW()
+        )
+        """
     )
+    parent_rows = [row for row in rows if row["chunk_type"] == "parent"]
+    child_rows = [row for row in rows if row["chunk_type"] != "parent"]
+    if parent_rows:
+        await session.execute(insert_sql, parent_rows)
+    if child_rows:
+        await session.execute(insert_sql, child_rows)
     await session.commit()
     return len(rows)
 
@@ -648,11 +686,15 @@ async def keyword_search_chunks(
     user_id: str,
     filters: dict,
 ) -> list[dict]:
+    parent_chunk = aliased(KnowledgeChunk)
     stmt = (
         select(
             KnowledgeChunk.id.label("id"),
             KnowledgeChunk.document_id.label("document_id"),
             KnowledgeChunk.content.label("content"),
+            KnowledgeChunk.parent_id.label("parent_id"),
+            parent_chunk.id.label("parent_chunk_id"),
+            parent_chunk.content.label("parent_content"),
             KnowledgeChunk.chunk_index.label("chunk_index"),
             KnowledgeChunk.updated_at.label("updated_at"),
             KnowledgeDocument.title.label("document_title"),
@@ -665,6 +707,7 @@ async def keyword_search_chunks(
             KnowledgeDocument.parse_quality.label("parse_quality"),
         )
         .join(KnowledgeDocument, KnowledgeChunk.document_id == KnowledgeDocument.id)
+        .outerjoin(parent_chunk, KnowledgeChunk.parent_id == parent_chunk.id)
         .where(
             KnowledgeChunk.user_id == UUID(user_id),
             KnowledgeDocument.user_id == UUID(user_id),
@@ -726,6 +769,9 @@ async def semantic_search_chunks(
           c.id,
           c.document_id,
           c.content,
+          c.parent_id,
+          p.id AS parent_chunk_id,
+          p.content AS parent_content,
           c.chunk_index,
           c.updated_at,
           d.title AS document_title,
@@ -739,6 +785,7 @@ async def semantic_search_chunks(
           1 - (c.embedding <=> CAST(:embedding_vector AS vector)) AS score
         FROM knowledge_chunks c
         JOIN knowledge_documents d ON c.document_id = d.id
+        LEFT JOIN knowledge_chunks p ON c.parent_id = p.id
         WHERE c.user_id = CAST(:user_id AS uuid)
           AND d.user_id = CAST(:user_id AS uuid)
           AND d.status = 'indexed'

@@ -3,6 +3,7 @@ import asyncio
 from app.core.config import Settings
 from app.services.knowledge_rag_query_preprocessor import (
     QueryExpansionRuntimeConfig,
+    _normalize_queries,
     multi_query_expansion,
     preprocess_query,
     rewrite_query,
@@ -127,3 +128,11 @@ def test_multi_query_expansion_parses_chat_output(monkeypatch) -> None:
         assert result.expanded_queries == ["预算执行管理", "财务预算执行", "预算控制流程"]
 
     asyncio.run(run())
+
+
+def test_normalize_queries_limit_includes_original_query() -> None:
+    assert _normalize_queries(
+        ["财务预算执行", "预算控制流程", "财务预算执行", "预算复盘"],
+        "预算执行管理",
+        4,
+    ) == ["预算执行管理", "财务预算执行", "预算控制流程", "预算复盘"]

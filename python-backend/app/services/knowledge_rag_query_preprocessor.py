@@ -155,12 +155,13 @@ class OpenAICompatibleChatClient:
 
 def _normalize_queries(queries: list[str], original_query: str, limit: int) -> list[str]:
     normalized: list[str] = []
+    max_items = max(limit, 1)
     for query in [original_query, *queries]:
         item = query.strip()
         if not item or item in normalized:
             continue
         normalized.append(item)
-        if len(normalized) >= max(limit, 1):
+        if len(normalized) >= max_items:
             break
     return normalized or [original_query.strip()]
 
@@ -193,7 +194,7 @@ async def multi_query_expansion(
         "3. 覆盖不同的搜索角度\n"
         "4. 每个查询独立一行，不要编号，不要解释"
     )
-    user_prompt = f'原始查询："{{query}}"\n\n生成 {expand_count} 个扩展查询（每行一个）：'.format(query=query)
+    user_prompt = f'原始查询："{query}"\n\n生成 {expand_count} 个扩展查询（每行一个）：'
 
     try:
         client = OpenAICompatibleChatClient(config)

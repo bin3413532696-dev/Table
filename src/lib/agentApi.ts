@@ -51,16 +51,46 @@ export interface AgentRunDetailDto extends AgentRunDto {
   timeline: TimelineEvent[];
 }
 
+export interface AgentSessionGoalDto {
+  title: string;
+  status: string;
+}
+
+export interface AgentSessionTodoDto {
+  title: string;
+  status: string;
+  dueHint?: string | null;
+  sourceRunId?: string | null;
+}
+
+export interface AgentSessionMemoryDto {
+  summary: string;
+  preferences: string[];
+  facts: string[];
+  goals: AgentSessionGoalDto[];
+  todos: AgentSessionTodoDto[];
+  rules: string[];
+  status: 'idle' | 'pending' | 'processing' | 'ready' | 'failed';
+  updatedAt?: number | null;
+  disabled: boolean;
+  runCount: number;
+}
+
 export interface AgentSessionDto {
   id: string;
   title: string;
   createdAt: number;
   updatedAt: number;
+  memoryStatus: 'idle' | 'pending' | 'processing' | 'ready' | 'failed';
+  memoryDisabled: boolean;
+  memoryUpdatedAt?: number | null;
+  memoryRunCount: number;
   runs: AgentRunDto[];
 }
 
 export interface AgentSessionDetailDto extends AgentSessionDto {
   messages: AgentRunMessageDto[];
+  memory: AgentSessionMemoryDto;
 }
 
 export interface AgentRuntimeStatusDto {
@@ -79,6 +109,28 @@ export interface AgentRuntimeStatusDto {
       hasApiKey: boolean;
     };
   };
+}
+
+export interface AgentToolCapabilityDto {
+  name: string;
+  description: string;
+  promptSignature: string;
+  category: 'query' | 'mutation' | 'system';
+  module: string;
+  requiresConfirmation: boolean;
+  requiresRag: boolean;
+  enabled: boolean;
+}
+
+export interface AgentProviderCapabilityDto {
+  apiFormat: 'anthropic' | 'openai' | 'gemini' | 'custom';
+  label: string;
+  enabled: boolean;
+}
+
+export interface AgentCapabilitiesDto {
+  tools: AgentToolCapabilityDto[];
+  providers: AgentProviderCapabilityDto[];
 }
 
 export interface AgentRunStreamEvent {
@@ -131,15 +183,28 @@ async function readAgentEventStream(
   const flushEventBlock = (block: string) => {
     const lines = block.split('\n');
     let eventName = 'message';
+    let eventId: string | null = null;
+    let retryMs: number | null = null;
     const dataLines: string[] = [];
 
     for (const line of lines) {
+      if (!line || line.startsWith(':')) {
+        continue;
+      }
       if (line.startsWith('event:')) {
         eventName = line.slice(6).trim();
       } else if (line.startsWith('data:')) {
         dataLines.push(line.slice(5).trim());
+      } else if (line.startsWith('id:')) {
+        eventId = line.slice(3).trim();
+      } else if (line.startsWith('retry:')) {
+        const parsedRetry = Number.parseInt(line.slice(6).trim(), 10);
+        retryMs = Number.isFinite(parsedRetry) ? parsedRetry : null;
       }
     }
+
+    void eventId;
+    void retryMs;
 
     if (dataLines.length === 0) {
       return;
@@ -219,6 +284,10 @@ export async function fetchAgentSessionDetail(sessionId: string): Promise<AgentS
   return requestApi<AgentSessionDetailDto>(`/api/agent/sessions/${sessionId}`);
 }
 
+export async function fetchAgentSessionMemory(sessionId: string): Promise<AgentSessionMemoryDto> {
+  return requestApi<AgentSessionMemoryDto>(`/api/agent/sessions/${sessionId}/memory`);
+}
+
 export async function createAgentSession(title?: string): Promise<AgentSessionDto> {
   return requestApi<AgentSessionDto>('/api/agent/sessions', {
     method: 'POST',
@@ -239,10 +308,30 @@ export async function deleteAgentSessionApi(sessionId: string): Promise<void> {
   });
 }
 
+export async function updateAgentSessionMemorySettings(
+  sessionId: string,
+  input: { disabled: boolean }
+): Promise<AgentSessionMemoryDto> {
+  return requestApi<AgentSessionMemoryDto>(`/api/agent/sessions/${sessionId}/memory/settings`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteAgentSessionMemory(sessionId: string): Promise<AgentSessionMemoryDto> {
+  return requestApi<AgentSessionMemoryDto>(`/api/agent/sessions/${sessionId}/memory`, {
+    method: 'DELETE',
+  });
+}
+
 // ============ Run APIs ============
 
 export async function fetchAgentRuntimeStatus(): Promise<AgentRuntimeStatusDto> {
   return requestApi<AgentRuntimeStatusDto>('/api/agent/health');
+}
+
+export async function fetchAgentCapabilities(): Promise<AgentCapabilitiesDto> {
+  return requestApi<AgentCapabilitiesDto>('/api/agent/capabilities');
 }
 
 export async function streamAgentRun(
