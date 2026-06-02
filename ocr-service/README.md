@@ -81,10 +81,10 @@ Content-Type: multipart/form-data
 
 ```bash
 # 安装依赖
-pip install -r requirements.txt
+uv sync --package table-ocr-service
 
 # 启动服务
-uvicorn main:app --host 0.0.0.0 --port 8001
+uv run --package table-ocr-service uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
 ### 方式 2: Docker 运行
@@ -115,16 +115,9 @@ curl -X POST http://localhost:8001/ocr/process \
 2. **批量处理**: 适当增加 DPI（200-300）以提高识别精度
 3. **内存限制**: PaddleOCR 模型较大，建议预留 2GB+ 内存
 
-## 与 Node.js 后端集成
+## 与 Python 后端集成
 
-Node.js 通过 `ocr-client.ts` 调用此服务：
-
-```typescript
-import { processWithOCR } from './indexing/ocr-client';
-
-const result = await processWithOCR('/path/to/pdf');
-console.log(result.textBlocks);
-```
+Python 后端通过 `integrations/ocr_service.py` 调用此服务。
 
 ## 注意事项
 

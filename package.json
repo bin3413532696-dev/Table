@@ -1,9 +1,17 @@
 {
-  "name": "personal-workspace",
+  "name": "table",
   "version": "1.0.0",
+  "private": true,
+  "description": "个人工作台应用 — React + FastAPI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bin3413532696-dev/Table.git"
+  },
   "scripts": {
     "dev": "webpack serve",
     "backend:sync": "uv sync --package table-python-backend",
+    "ocr:dev": "uv run --package table-ocr-service uvicorn main:app --host 127.0.0.1 --port 8001 --reload",
     "backend:dev": "uv run --package table-python-backend uvicorn app.main:app --host 127.0.0.1 --port 8787 --reload",
     "backend:test": "uv run --package table-python-backend pytest python-backend/tests -q",
     "knowledge:smoke": "node scripts/smoke/knowledge-notes-smoke.mjs",

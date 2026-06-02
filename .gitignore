@@ -18,3 +18,35 @@ __pycache__/
 # Build / temp artifacts
 .tmp/
 server/data/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment variants
+.env.local
+.env.production
+.env.development
+
+# Coverage
+.coverage
+htmlcov/
+
+# Python build
+*.egg-info/
+*.egg
+dist/
+*.pyc
+
+# SQLite local databases
+*.db
+*.sqlite
+*.sqlite3

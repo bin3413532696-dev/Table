@@ -41,7 +41,6 @@ module.exports = (env, argv) => {
     resolve: {
       extensions: ['.ts', '.tsx', '.js', '.jsx'],
       alias: {
-        '@huggingface/transformers': path.resolve(__dirname, 'node_modules/@huggingface/transformers/dist/transformers.web.js'),
         'sharp$': false,
         'onnxruntime-node$': false,
         'onnxruntime-web$': false,

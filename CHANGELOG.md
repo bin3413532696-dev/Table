@@ -3,7 +3,20 @@
 ## [Unreleased]
 
 ### 仓库整理
-- 清理开发产物并补充 GitHub 标准文件
+- 删除开发垃圾文件（.tmp/、server/data/、大模型发展历程.txt、__pycache__、.pytest_cache）
+- 更新 .gitignore 补充常见模式（.DS_Store、.idea/、.vscode/、*.swp 等）
+- 添加 .gitattributes 统一跨平台行尾处理
+- 添加 .dockerignore 减少构建上下文
+- 修复 package.json 元数据（名称、许可证、private 标记）
+- 清理 webpack.config.js 中未声明的依赖别名
+- 移动 AGENTS.md 到 .claude/ 避免根目录混乱
+- 添加 ESLint 基础配置和 Ruff 配置
+- 归档 PYTHON_MIGRATION.md 到 README 迁移说明
+- 统一 .md 文档为中文
+- 扩充 SECURITY.md 安全策略内容
+- 完善 CHANGELOG.md 历史记录
+- 添加 ocr:dev 脚本并修复 ocr-service README
+- 同步 .env.example 配置模板
 
 ## [1.0.0] - 2026-06-02
 

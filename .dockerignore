@@ -1,0 +1,30 @@
+# 排除依赖与构建产物
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# 项目构建产物
+dist/
+dist-frontend-tests/
+.tmp/
+
+# 环境配置
+.env
+
+# Git
+.git/
+.gitattributes
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+.claude/
+.gstack/
+
+# 日志
+*.log
+logs/

@@ -1,0 +1,34 @@
+# Auto detect and use native line endings
+* text=auto
+
+# Shell scripts must be LF
+*.sh text eol=lf
+
+# JS/TS sources
+*.js text eol=lf
+*.jsx text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+
+# Web
+*.html text eol=lf
+*.css text eol=lf
+*.json text eol=lf
+
+# Python
+*.py text eol=lf
+
+# Markdown / docs
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Lock files — keep as-is
+package-lock.json -text
+uv.lock -text
+
+# Binary
+*.png binary
+*.jpg binary
+*.ico binary

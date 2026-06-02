@@ -107,7 +107,7 @@ Python 后端当前覆盖以下模块：
 
 ## 迁移说明
 
-项目原为 TypeScript 全栈，现已迁移到 Python 后端。迁移过程和当前状态见 [PYTHON_MIGRATION.md](./PYTHON_MIGRATION.md)。
+项目原为 TypeScript 全栈（已退役），现已迁移到 Python 后端。当前 Python 后端测试基线：`102 passed, 5 skipped`。残余风险仅限于边缘 case 的兼容性（历史数据形状、长尾流式行为）。
 
 ## 贡献
 
