@@ -9,6 +9,7 @@ dist-frontend-tests/
 logs/
 data/
 docs/
+!docs/images/
 .venv/
 __pycache__/
 .pytest_cache/
