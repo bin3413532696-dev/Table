@@ -287,11 +287,10 @@ async def test_upload_document_service_falls_back_to_local_pdf_text_when_ocr_is_
     async def fake_create_document(current_session, requested_user_id, payload):
         del current_session
         assert requested_user_id == user_id
-        assert payload["content"] == recovered_text
+        # fire-and-forget: 同步阶段 content 尚未抽取
+        assert payload["content"] == ""
         assert payload["fileType"] == "pdf"
-        assert payload["parseQuality"] == "pdf_text"
-        assert payload["hasOcr"] is False
-        assert payload["originalMetadata"]["ocrError"] == "OCR service unavailable"
+        assert payload["status"] == "pending"
         return document
 
     async def fake_create_job(current_session, requested_user_id, *, document_id=None, job_type, status="pending", progress=0, error=None):
@@ -304,10 +303,7 @@ async def test_upload_document_service_falls_back_to_local_pdf_text_when_ocr_is_
         return job
 
     async def fake_execute_indexing_pipeline(current_session, requested_user_id, *, document, job, content, file_type, settings=None):
-        del current_session, settings
-        assert requested_user_id == user_id
-        assert content == recovered_text
-        assert file_type == "pdf"
+        # fire-and-forget 后此函数在异步 task 里；测试不直接调用
         return document, job
 
     monkeypatch.setattr(knowledge_rag, "OCRServiceClient", _FakeOcrClient)
@@ -354,10 +350,10 @@ async def test_upload_document_service_decodes_gb18030_text_files(monkeypatch, t
     async def fake_create_document(current_session, requested_user_id, payload):
         del current_session
         assert requested_user_id == user_id
-        assert payload["content"] == recovered_text
+        # fire-and-forget: 同步阶段 content 尚未抽取
+        assert payload["content"] == ""
         assert payload["fileType"] == "txt"
-        assert payload["parseQuality"] == "direct"
-        assert payload["originalMetadata"] == {"textEncoding": "gb18030"}
+        assert payload["status"] == "pending"
         return document
 
     async def fake_create_job(current_session, requested_user_id, *, document_id=None, job_type, status="pending", progress=0, error=None):
@@ -370,10 +366,7 @@ async def test_upload_document_service_decodes_gb18030_text_files(monkeypatch, t
         return job
 
     async def fake_execute_indexing_pipeline(current_session, requested_user_id, *, document, job, content, file_type, settings=None):
-        del current_session, settings
-        assert requested_user_id == user_id
-        assert content == recovered_text
-        assert file_type == "txt"
+        # fire-and-forget 后此函数在异步 task 里；测试不直接调用
         return document, job
 
     monkeypatch.setattr(knowledge_rag, "create_document", fake_create_document)

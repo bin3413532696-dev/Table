@@ -17,6 +17,7 @@ from app.schemas.knowledge_rag import (
     UpdateDocumentRequest,
 )
 from app.services.knowledge_rag import (
+    DocumentQualityError,
     IndexJobActiveError,
     backfill_embeddings_service,
     delete_document_service,
@@ -149,6 +150,8 @@ async def upload_document(
             title=title,
             tags=parsed_tags,
         )
+    except DocumentQualityError as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": "BAD_REQUEST", "message": str(exc)}) from exc
 

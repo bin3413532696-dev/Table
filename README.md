@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi)](https://fastapi.tiangolo.com)
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python)](https://www.python.org)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-4169E1?logo=postgresql)](https://www.postgresql.org)
-[![Tests](https://img.shields.io/badge/tests-141_✓_5_◷-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-168_✓_5_◷-brightgreen)]()
 
 **Table** 是一个**个人工作台**应用，将日常工作中零散的工具集中到统一界面。支持**任务管理**、**财务记账**、**知识笔记**、**AI 知识库 (RAG)**、**AI 智能体对话**及 **OCR 文档识别**，所有数据本地可控。
 
@@ -237,7 +237,7 @@ Table/
 │   │       │   └── tools/            # Agent 工具（tasks/finance/knowledge/rag）
 │   │       ├── knowledge_rag_*.py    # RAG 索引/嵌入/检索/重排
 │   │       └── provider_bootstrap.py # Provider 环境变量引导
-│   └── tests/                        # 141 个 pytest 测试
+│   └── tests/                        # 168 个 pytest 测试
 │
 ├── ocr-service/                      # OCR 独立服务 (PaddleOCR)
 │   ├── ocr_service/                  # OCR 处理逻辑
@@ -383,7 +383,7 @@ Table/
 
 | 测试类型 | 命令 | 说明 |
 |---------|------|------|
-| 后端单元测试 | `npm run backend:test` | **141 passed, 5 skipped** — pytest |
+| 后端单元测试 | `npm run backend:test` | **168 passed, 5 skipped** — pytest |
 | 前端 API 测试 | `npm run test:frontend-api` | Node 测试运行器 |
 | 烟雾测试 | `npm run modules:smoke` | 任务+财务模块，无外部依赖 |
 | 烟雾测试 | `npm run knowledge:smoke` | 知识笔记 |

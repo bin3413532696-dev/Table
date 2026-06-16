@@ -10,14 +10,29 @@ from app.core.csrf import (
 )
 from app.core.errors import AuthError, VersionConflictError
 from app.core.user_context import reset_user_context, resolve_request_user_context, set_user_context
+from app.db.session import SessionLocal
+from app.repositories.knowledge_rag import fail_orphan_jobs_on_startup
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """启动时清理异步 pipeline 留下的孤儿 job，防止进程重启后文档永久卡在 pending/running。"""
+    async with SessionLocal() as session:
+        cleaned = await fail_orphan_jobs_on_startup(session)
+    if cleaned:
+        logging.getLogger("table-python-backend").info(
+            "Cleaned up %d orphan indexing job(s) on startup", cleaned
+        )
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Table Python Backend", version="0.1.0")
+    app = FastAPI(title="Table Python Backend", version="0.1.0", lifespan=lifespan)
     logger = logging.getLogger("table-python-backend")
     app.include_router(api_router)
 

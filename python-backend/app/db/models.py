@@ -347,3 +347,24 @@ class KnowledgeEmbeddingCache(Base):
         server_default=func.now(),
     )
     expires_at: Mapped[datetime | None] = mapped_column("expires_at", DateTime(timezone=True), nullable=True)
+
+
+class KnowledgeImageDescriptionCache(Base):
+    __tablename__ = "knowledge_image_description_cache"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column("user_id", UUID(as_uuid=True), index=True)
+    content_hash: Mapped[str] = mapped_column("content_hash", String)
+    description: Mapped[str] = mapped_column("description", Text)
+    model: Mapped[str] = mapped_column("model", String)
+    source_kind: Mapped[str | None] = mapped_column("source_kind", String, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(
+        "created_at",
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        "expires_at", DateTime(timezone=True), nullable=True
+    )

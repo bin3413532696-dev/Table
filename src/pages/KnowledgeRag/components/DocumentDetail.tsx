@@ -159,6 +159,13 @@ export function DocumentDetail({ document, onClose, onReindex }: DocumentDetailP
           )}
 
           {/* Processing Status */}
+          {document.status === 'pending' && (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="w-6 h-6 animate-spin text-gray-500" />
+              <span className="ml-2 text-gray-600">排队中，等待处理...</span>
+            </div>
+          )}
+
           {document.status === 'processing' && (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-blue-500" />

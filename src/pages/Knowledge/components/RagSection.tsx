@@ -97,6 +97,26 @@ export function RagSection({ onFeedback }: RagSectionProps) {
     ragApi.getStats().then(setStats).catch(err => console.error('加载统计失败:', err));
   }, []);
 
+  // 存在 pending/processing 文档时，5s 周期性刷新列表（让异步 pipeline 的状态推进对用户可见）
+  useEffect(() => {
+    const hasActiveJob = documents.some(d => d.status === 'pending' || d.status === 'processing');
+    if (!hasActiveJob) return;
+    const timer = setInterval(() => {
+      ragApi.getDocuments({
+        limit: 50,
+        publishDateRange: metadataFilters.publishDateRange,
+        sourceDept: metadataFilters.sourceDept,
+        securityLevel: metadataFilters.securityLevel,
+        businessCategory: metadataFilters.businessCategory,
+      }).then(result => {
+        setDocuments(result.items);
+        // 同步刷统计（索引完成数量会变）
+        ragApi.getStats().then(setStats).catch(() => {});
+      }).catch(err => console.error('轮询刷新文档失败:', err));
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [documents, metadataFilters]);
+
   // 立即刷新文档列表（不带防抖，用于手动操作）
   const refreshDocuments = async () => {
     setLoading(true);
@@ -331,7 +351,7 @@ export function RagSection({ onFeedback }: RagSectionProps) {
       )}
 
       {/* Index Progress */}
-      {documents.filter(d => d.status === 'processing').map(doc => (
+      {documents.filter(d => d.status === 'pending' || d.status === 'processing').map(doc => (
         <div key={doc.id} className="fixed bottom-4 right-4 z-40">
           <IndexProgress
             documentId={doc.id}

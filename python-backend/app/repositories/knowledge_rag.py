@@ -6,6 +6,7 @@ from app.db.models import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeEmbeddingCache,
+    KnowledgeImageDescriptionCache,
     KnowledgeIndexJob,
 )
 from sqlalchemy import func, or_, select, text, update
@@ -282,6 +283,45 @@ async def update_job_status(
     return job
 
 
+async def fail_orphan_jobs_on_startup(session: AsyncSession) -> int:
+    """启动时把所有 pending/running 的 job 标 failed（防止进程重启留下孤儿任务）。
+    对应的未完成 document 也同步标 failed。返回清理的 job 数。"""
+    result = await session.execute(
+        select(KnowledgeIndexJob).where(
+            KnowledgeIndexJob.status.in_(["pending", "running"])
+        )
+    )
+    orphan_jobs = result.scalars().all()
+    if not orphan_jobs:
+        return 0
+
+    orphan_job_ids = [job.id for job in orphan_jobs]
+    document_ids = [job.document_id for job in orphan_jobs if job.document_id]
+
+    await session.execute(
+        update(KnowledgeIndexJob)
+        .where(KnowledgeIndexJob.id.in_(orphan_job_ids))
+        .values(
+            status="failed",
+            error_json={"message": "orphaned by restart"},
+            completed_at=func.now(),
+        )
+    )
+
+    if document_ids:
+        await session.execute(
+            update(KnowledgeDocument)
+            .where(
+                KnowledgeDocument.id.in_(document_ids),
+                KnowledgeDocument.status.not_in(["indexed", "deleted"]),
+            )
+            .values(status="failed")
+        )
+
+    await session.commit()
+    return len(orphan_jobs)
+
+
 async def list_chunks_with_count(
     session: AsyncSession,
     user_id: str,
@@ -522,6 +562,72 @@ async def store_embedding_cache(
             "embedding_vector": embedding_vector,
             "embedding_model": embedding_model,
             "expires_at": expires_at,
+        },
+    )
+    await session.commit()
+
+
+async def find_image_description_cache(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    content_hash: str,
+    model: str,
+) -> str | None:
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT description
+                FROM knowledge_image_description_cache
+                WHERE user_id = CAST(:user_id AS uuid)
+                  AND content_hash = :content_hash
+                  AND model = :model
+                  AND (expires_at IS NULL OR expires_at > NOW())
+                LIMIT 1
+                """
+            ),
+            {"user_id": user_id, "content_hash": content_hash, "model": model},
+        )
+    ).mappings().first()
+    return row["description"] if row else None
+
+
+async def store_image_description_cache(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    content_hash: str,
+    description: str,
+    model: str,
+    source_kind: str | None = None,
+) -> None:
+    await session.execute(
+        text(
+            """
+            INSERT INTO knowledge_image_description_cache (
+              id, user_id, content_hash, description, model, source_kind, created_at
+            )
+            VALUES (
+              gen_random_uuid(),
+              CAST(:user_id AS uuid),
+              :content_hash,
+              :description,
+              :model,
+              :source_kind,
+              NOW()
+            )
+            ON CONFLICT (user_id, content_hash, model) DO UPDATE
+            SET description = :description,
+                source_kind = :source_kind
+            """
+        ),
+        {
+            "user_id": user_id,
+            "content_hash": content_hash,
+            "description": description,
+            "model": model,
+            "source_kind": source_kind,
         },
     )
     await session.commit()

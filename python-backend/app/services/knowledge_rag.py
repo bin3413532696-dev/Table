@@ -1,3 +1,6 @@
+import asyncio
+import logging
+import re
 from datetime import datetime, time
 from hashlib import sha256
 from io import BytesIO
@@ -6,6 +9,7 @@ from uuid import uuid4
 
 from app.core.config import REPO_ROOT, Settings, get_settings
 from app.db.models import KnowledgeDocument, KnowledgeIndexJob
+from app.db.session import SessionLocal
 from app.integrations.ocr_service import OCRServiceClient, OCRServiceSettings
 from app.repositories.knowledge_rag import (
     create_chunks,
@@ -27,6 +31,8 @@ from app.repositories.knowledge_rag import (
     list_jobs_with_count,
     semantic_search_chunks,
     store_embedding_cache,
+    find_image_description_cache,
+    store_image_description_cache,
     update_document,
     update_chunk_embeddings_batch,
     update_job_status,
@@ -61,6 +67,8 @@ from app.schemas.knowledge_rag import (
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger("table-python-backend")
+
 ACTIVE_INDEX_JOB_STATUSES = {"pending", "running"}
 SEARCH_FILTER_FIELDS = {
     "tags",
@@ -84,6 +92,22 @@ class IndexJobActiveError(RuntimeError):
             "message": "An indexing job is already active for this document.",
         }
         super().__init__(self.detail["message"])
+
+
+class DocumentQualityError(Exception):
+    """PDF 文本层质量未达预检阈值，应拒绝入库。"""
+
+    def __init__(self, *, reason: str, metrics: dict, threshold: float):
+        self.reason = reason
+        self.metrics = metrics
+        self.threshold = threshold
+        self.detail = {            "error": "DOCUMENT_QUALITY_INSUFFICIENT",
+            "message": "该文档质量不达标，请检查后重新上传",
+            "reason": reason,
+            "metrics": metrics,
+            "threshold": threshold,
+        }
+        super().__init__(reason)
 
 
 def to_document_response(document: KnowledgeDocument) -> KnowledgeDocumentResponse:
@@ -781,6 +805,88 @@ def _extract_pdf_text_locally(raw_bytes: bytes) -> str:
     return "\n\n".join(pages).strip()
 
 
+_VALID_CHAR_CATEGORIES = frozenset({"L", "N", "P", "S", "Z"})
+_ZERO_WIDTH_CHARS = frozenset({"​", "‌", "‍", "﻿", "­"})
+
+
+def _count_valid_chars(text: str) -> int:
+    """统计有效字符：字母/数字/标点/符号 + 普通空白，排除控制符与零宽字符。"""
+    import unicodedata
+
+    count = 0
+    for ch in text:
+        if ch in ("\n", "\r", "\t", " "):
+            count += 1
+            continue
+        if ch in _ZERO_WIDTH_CHARS:
+            continue
+        if unicodedata.category(ch)[0] in _VALID_CHAR_CATEGORIES:
+            count += 1
+    return count
+
+
+def _preflight_pdf_quality(
+    raw_bytes: bytes,
+    settings: Settings,
+) -> tuple[bool, str, dict]:
+    """
+    返回 (passed, reason, metrics)。
+    passed=True 表示通过预检或属于扫描件（跳过，继续走 OCR pipeline）。
+    passed=False 表示质量不达标，应拒绝。
+    """
+    if not settings.rag_quality_preflight_enabled:
+        return True, "preflight disabled", {}
+
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return True, "pypdf unavailable", {}
+
+    try:
+        reader = PdfReader(BytesIO(raw_bytes))
+    except Exception:
+        return True, "pdf unreadable by pypdf", {}
+
+    max_pages = settings.rag_quality_preflight_max_pages
+    sample_pages = reader.pages[:max_pages]
+
+    total_chars = 0
+    valid_chars = 0
+    for page in sample_pages:
+        try:
+            page_text = page.extract_text() or ""
+        except Exception:
+            page_text = ""
+        total_chars += len(page_text)
+        valid_chars += _count_valid_chars(page_text)
+
+    metrics: dict = {
+        "sampledPages": len(sample_pages),
+        "totalPages": len(reader.pages),
+        "sampledChars": total_chars,
+        "validChars": valid_chars,
+        "threshold": settings.rag_quality_min_valid_ratio,
+    }
+
+    if total_chars < settings.rag_quality_scan_detection_chars:
+        metrics["verdict"] = "scan_like"
+        return True, "scan-like PDF, will fall through to OCR", metrics
+
+    valid_ratio = valid_chars / total_chars
+    metrics["validRatio"] = round(valid_ratio, 4)
+
+    if valid_ratio < settings.rag_quality_min_valid_ratio:
+        metrics["verdict"] = "rejected"
+        return False, (
+            f"PDF text layer quality insufficient "
+            f"(valid ratio {valid_ratio:.2%} < threshold "
+            f"{settings.rag_quality_min_valid_ratio:.2%})"
+        ), metrics
+
+    metrics["verdict"] = "passed"
+    return True, "passed", metrics
+
+
 async def _extract_upload_content(
     *,
     file_path: Path,
@@ -793,37 +899,66 @@ async def _extract_upload_content(
         return content, {"textEncoding": encoding}, "direct", False
 
     if file_type == "pdf":
-        client = OCRServiceClient(
-            OCRServiceSettings(
-                service_url=settings.ocr_service_url,
-                enabled=settings.ocr_enabled,
-                timeout_ms=settings.ocr_timeout_ms,
-            )
-        )
-        ocr_error: str | None = None
-        if await client.is_available():
-            try:
-                payload = await client.process_pdf(str(file_path))
-                ocr_text = _assemble_ocr_text(payload)
-                if ocr_text.strip():
-                    return ocr_text, payload, "ocr", True
-                ocr_error = "OCR returned no extractable text"
-            except Exception as exc:
-                ocr_error = f"OCR processing failed: {exc}"
-        else:
-            ocr_error = "OCR service unavailable"
+        from app.services.knowledge_rag_pdf import extract_pdf_with_images
 
-        fallback_text = _extract_pdf_text_locally(raw_bytes)
-        if fallback_text:
+        # pypdf 探针：极快，用于判断是否扫描件（决定走 MarkItDown 还是 OCR）
+        probe_text = _extract_pdf_text_locally(raw_bytes)
+        scan_like = bool(probe_text) and len(probe_text) < settings.rag_quality_scan_detection_chars
+        is_scan = not probe_text or scan_like
+
+        # OCR fallback：扫描件或文本层不可用
+        async def _ocr_fallback() -> tuple[str, dict | None, str | None, bool]:
+            client = OCRServiceClient(
+                OCRServiceSettings(
+                    service_url=settings.ocr_service_url,
+                    enabled=settings.ocr_enabled,
+                    timeout_ms=settings.ocr_timeout_ms,
+                )
+            )
+            ocr_error: str | None = None
+            if await client.is_available():
+                try:
+                    payload = await client.process_pdf(str(file_path))
+                    ocr_text = _assemble_ocr_text(payload)
+                    if ocr_text.strip():
+                        return ocr_text, payload, "ocr", True
+                    ocr_error = "OCR returned no extractable text"
+                except Exception as exc:
+                    ocr_error = f"OCR processing failed: {exc}"
+            else:
+                ocr_error = "OCR service unavailable"
+            if probe_text:
+                metadata = {"parseMethod": "pdf_text"}
+                if ocr_error:
+                    metadata["ocrError"] = ocr_error
+                return probe_text, metadata, "pdf_text", False
             metadata = {"parseMethod": "pdf_text"}
             if ocr_error:
                 metadata["ocrError"] = ocr_error
-            return fallback_text, metadata, "pdf_text", False
+            return "", metadata, "pdf_text_unavailable", False
 
-        metadata = {"parseMethod": "pdf_text"}
-        if ocr_error:
-            metadata["ocrError"] = ocr_error
-        return "", metadata, "pdf_text_unavailable", False
+        if is_scan:
+            return await _ocr_fallback()
+
+        # 文本层 PDF：MarkItDown 主路径 + PyMuPDF 图片提取
+        if settings.rag_pdf_parser == "markitdown":
+            try:
+                result = await extract_pdf_with_images(
+                    raw_bytes,
+                    file_path=file_path,
+                    settings=settings,
+                    ocr_fallback=_ocr_fallback,
+                )
+                return result.markdown, result.metadata, "pdf_markitdown", False
+            except Exception as exc:
+                logger.warning("MarkItDown path failed, falling back to OCR: %s", exc)
+                return await _ocr_fallback()
+
+        # 兼容旧 parser=pypdf（保留旧行为，不提图）
+        if probe_text and len(probe_text) >= settings.rag_pdf_text_fast_path_min_chars:
+            return probe_text, {"parseMethod": "pdf_text_fast_path"}, "pdf_text", False
+
+        return await _ocr_fallback()
 
     return "", None, None, False
 
@@ -884,6 +1019,219 @@ async def _create_index_job_with_guard(
     return document, job
 
 
+_PLACEHOLDER_RE = None
+
+
+def _image_placeholder_regex() -> re.Pattern:
+    global _PLACEHOLDER_RE
+    if _PLACEHOLDER_RE is None:
+        _PLACEHOLDER_RE = re.compile(r"\[IMAGE:page=(\d+);idx=(\d+)\]")
+    return _PLACEHOLDER_RE
+
+
+def _find_image_file(images_dir: Path, page_num: int, image_index: int) -> Path | None:
+    if not images_dir.exists():
+        return None
+    for ext in ("png", "jpg", "jpeg"):
+        candidate = images_dir / f"page_{page_num}_idx_{image_index}.{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+async def _describe_single_image_vlm(
+    *,
+    image_path: Path,
+    runtime_config,
+    semaphore: asyncio.Semaphore,
+) -> str:
+    """只跑 VLM 调用（带并发信号量）。无 DB 操作，可并发。失败抛异常。"""
+    image_bytes = image_path.read_bytes()
+    mime_type = "image/jpeg" if image_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+    from app.services.knowledge_rag_vision import describe_image
+
+    async with semaphore:
+        return await describe_image(
+            image_bytes, mime_type=mime_type, runtime_config=runtime_config
+        )
+
+
+async def _describe_images_and_replace_placeholders(
+    *,
+    session: AsyncSession,
+    user_id: str,
+    document_id: str,
+    content: str,
+    settings: Settings,
+) -> str:
+    """扫描 content 里的图片占位符，逐张调 VLM 描述，原地替换。
+
+    三阶段（避免 AsyncSession 并发使用）：
+    1. 串行：缓存查询 → 命中的描述直接收集
+    2. gather + semaphore：未命中并发跑 VLM（HTTP，无 DB 操作）
+    3. 串行：写缓存 + 构建替换 map
+    """
+    if not settings.rag_vision_llm_enabled:
+        return content
+    if "[IMAGE:" not in content:
+        return content
+
+    from app.services.knowledge_rag_vision import resolve_vision_llm_runtime_config
+
+    runtime_config = await resolve_vision_llm_runtime_config(session, user_id, settings)
+    if runtime_config is None:
+        logger.info(
+            "Vision LLM unavailable; leaving %d image placeholders as-is",
+            len(_image_placeholder_regex().findall(content)),
+        )
+        return content
+
+    file_path = _find_uploaded_document_path(settings, user_id, document_id)
+    if file_path is None:
+        return content
+    images_dir = file_path.parent / f"{file_path.stem}_images"
+
+    placeholders = list(_image_placeholder_regex().finditer(content))
+    if not placeholders:
+        return content
+
+    max_images = settings.rag_vision_llm_max_images_per_doc
+    semaphore = asyncio.Semaphore(max(1, settings.rag_vision_llm_max_concurrency))
+
+    tasks_to_process = placeholders[:max_images]
+    skipped = placeholders[max_images:]
+
+    # Phase 1: 串行缓存查询
+    pending: list[tuple[re.Match, Path, str]] = []  # (match, image_path, content_hash)
+    descriptions: dict[str, str] = {}  # original_placeholder -> description
+
+    for match in tasks_to_process:
+        page_num = int(match.group(1))
+        idx = int(match.group(2))
+        image_path = _find_image_file(images_dir, page_num, idx)
+        if image_path is None:
+            descriptions[match.group(0)] = f"[图片文件缺失：page={page_num},idx={idx}]"
+            continue
+        image_bytes = image_path.read_bytes()
+        content_hash = sha256(image_bytes).hexdigest()
+        cached = await find_image_description_cache(
+            session, user_id, content_hash=content_hash, model=runtime_config.model
+        )
+        if cached:
+            descriptions[match.group(0)] = cached
+            continue
+        pending.append((match, image_path, content_hash))
+
+    # Phase 2: 并发跑 VLM（仅 HTTP，不碰 session）
+    async def _safe_vlm(image_path: Path, match: re.Match) -> tuple[str, str | None, str | None]:
+        """返回 (original_placeholder, description_or_None, error_or_None)"""
+        try:
+            desc = await _describe_single_image_vlm(
+                image_path=image_path, runtime_config=runtime_config, semaphore=semaphore,
+            )
+            return match.group(0), desc, None
+        except Exception as exc:
+            logger.warning("VLM describe_image failed for %s: %s", image_path.name, exc)
+            return match.group(0), None, str(exc)
+
+    vlm_results = await asyncio.gather(*(_safe_vlm(ip, m) for m, ip, _ in pending))
+
+    # Phase 3: 串行写缓存 + 收集描述
+    pending_hashes = {(m.group(0)): ch for m, _, ch in pending}
+    for original, desc, err in vlm_results:
+        if desc is None:
+            descriptions[original] = f"[图片描述失败：{err}]"
+            continue
+        descriptions[original] = desc
+        content_hash = pending_hashes.get(original)
+        if content_hash:
+            try:
+                await store_image_description_cache(
+                    session, user_id,
+                    content_hash=content_hash,
+                    description=desc,
+                    model=runtime_config.model,
+                    source_kind="vlm",
+                )
+            except Exception as exc:
+                logger.warning("Failed to cache image description: %s", exc)
+
+    for m in skipped:
+        descriptions[m.group(0)] = "[图片描述跳过：超出单文档上限]"
+
+    def _format_desc(original: str, desc: str) -> str:
+        # 从 original 解析 page_num 用于标注
+        m = _image_placeholder_regex().match(original)
+        page_num = m.group(1) if m else "?"
+        return f"\n\n[图片描述 (page {page_num})]\n{desc}\n"
+
+    def _replace(match):
+        desc = descriptions.get(match.group(0))
+        if desc is None:
+            return match.group(0)
+        if desc.startswith("[图片"):
+            return f"\n\n{desc}\n"
+        return _format_desc(match.group(0), desc)
+
+    return _image_placeholder_regex().sub(_replace, content)
+
+
+async def _run_indexing_pipeline_task(
+    *,
+    user_id: str,
+    document_id: str,
+    job_id: str,
+    file_type: str | None,
+    settings: Settings,
+) -> None:
+    """异步 pipeline 任务：独立 session 跑完整索引流程（OCR → chunking → embedding → 入库）。
+    不依赖请求生命周期；显式传 user_id，不依赖 ContextVar。"""
+    async with SessionLocal() as session:
+        try:
+            document = await find_document_by_id(session, user_id, document_id)
+            job = await find_job_by_id(session, user_id, job_id)
+            if not document or not job:
+                return
+
+            content, resolved_file_type = await _load_document_content_for_indexing(
+                session, user_id, document, settings=settings,
+            )
+
+            # 图片描述子阶段：把 [IMAGE:page=N;idx=M] 占位符替换为 VLM 描述
+            if "[IMAGE:" in content:
+                try:
+                    content = await _describe_images_and_replace_placeholders(
+                        session=session, user_id=user_id, document_id=document_id,
+                        content=content, settings=settings,
+                    )
+                    # 回写到 document.content，避免下次重跑
+                    await update_document(session, user_id, document_id, {"content": content})
+                    await session.commit()
+                except Exception as exc:
+                    logger.warning("Image description phase failed (continuing with placeholders): %s", exc)
+
+            await execute_indexing_pipeline(
+                session, user_id,
+                document=document, job=job,
+                content=content,
+                file_type=file_type or resolved_file_type,
+                settings=settings,
+            )
+        except Exception as exc:
+            # execute_indexing_pipeline 内部已经把大部分失败转成 failed 状态返回；
+            # 这里只兜底意外异常（session 问题、加载失败等）
+            try:
+                await update_document(session, user_id, document_id, {"status": "failed"})
+                await update_job_status(
+                    session, user_id, job_id,
+                    status="failed",
+                    error={"message": f"pipeline task crashed: {exc}"},
+                )
+                await session.commit()
+            except Exception:
+                pass
+
+
 async def upload_document_service(
     session: AsyncSession,
     user_id: str,
@@ -909,36 +1257,35 @@ async def upload_document_service(
     suffix = Path(file.filename or "").suffix.lower()
     file_path = upload_dir / f"{document_id}{suffix}"
     file_path.write_bytes(raw_bytes)
-    document: KnowledgeDocument | None = None
 
+    if file_type == "pdf":
+        passed, reason, metrics = _preflight_pdf_quality(raw_bytes, current)
+        if not passed:
+            file_path.unlink(missing_ok=True)
+            raise DocumentQualityError(
+                reason=reason,
+                metrics=metrics,
+                threshold=current.rag_quality_min_valid_ratio,
+            )
+
+    document = await create_document(
+        session,
+        user_id,
+        {
+            "id": document_id,
+            "title": (title or file.filename or "Untitled").strip(),
+            "summary": "",
+            "content": "",
+            "source": file.filename,
+            "fileType": file_type,
+            "fileSize": len(raw_bytes),
+            "status": "pending",
+            "tags": tags,
+            "contentHash": sha256(raw_bytes).hexdigest(),
+            "version": 1,
+        },
+    )
     try:
-        content, original_metadata, parse_quality, has_ocr = await _extract_upload_content(
-            file_path=file_path,
-            file_type=file_type,
-            raw_bytes=raw_bytes,
-            settings=current,
-        )
-        summary = content[:200] + ("..." if len(content) > 200 else "")
-        document = await create_document(
-            session,
-            user_id,
-            {
-                "id": document_id,
-                "title": (title or file.filename or "Untitled").strip(),
-                "summary": summary,
-                "content": content,
-                "source": file.filename,
-                "fileType": file_type,
-                "fileSize": len(raw_bytes),
-                "status": "pending",
-                "tags": tags,
-                "contentHash": sha256(raw_bytes).hexdigest(),
-                "version": 1,
-                "parseQuality": parse_quality,
-                "hasOcr": has_ocr,
-                "originalMetadata": original_metadata,
-            },
-        )
         job = await create_job(
             session,
             user_id,
@@ -948,26 +1295,25 @@ async def upload_document_service(
             progress=0,
             error=None,
         )
-        document, job = await execute_indexing_pipeline(
-            session,
-            user_id,
-            document=document,
-            job=job,
-            content=content,
-            file_type=file_type,
-            settings=current,
-        )
-        return {
-            "document": to_document_response(document),
-            "job": to_job_response(job),
-            "metadata": original_metadata,
-            "parseQuality": parse_quality,
-        }
     except Exception:
-        if document is not None:
-            await session.rollback()
-            await delete_document(session, user_id, str(document.id))
+        # job 创建失败 → 删除已 commit 的 document，避免孤儿
+        await delete_document(session, user_id, str(document.id))
+        file_path.unlink(missing_ok=True)
         raise
+
+    # fire-and-forget 异步 pipeline；请求立即返回 pending job
+    asyncio.create_task(_run_indexing_pipeline_task(
+        user_id=user_id,
+        document_id=str(document.id),
+        job_id=str(job.id),
+        file_type=file_type,
+        settings=current,
+    ))
+
+    return {
+        "document": to_document_response(document),
+        "job": to_job_response(job),
+    }
 
 
 async def delete_document_service(
