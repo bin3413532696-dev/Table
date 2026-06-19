@@ -8,7 +8,7 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-4169E1?logo=postgresql)](https://www.postgresql.org)
 [![Tests](https://img.shields.io/badge/tests-168_✓_5_◷-brightgreen)]()
 
-**Table** 是一个**个人工作台**应用，将日常工作中零散的工具集中到统一界面。支持**任务管理**、**财务记账**、**知识笔记**、**AI 知识库 (RAG)**、**AI 智能体对话**及 **OCR 文档识别**，所有数据本地可控。
+**Table** 是一个面向**个人使用**的 AI 工作台，核心场景不是通用办公，而是**从大体量资料中持续学习新知识**。你可以上传 PDF、Markdown、TXT 以及扫描件等资料，系统会自动完成解析、切片、混合检索、重排与 OCR 降级；围绕同一份教材或资料反复提问时，检索会持续收敛到相关段落。在此基础上，项目还提供基于 LangGraph 的 Agent 编排能力，让单轮对话可以跨知识库、任务、财务等模块联动。
 
 ## 界面预览
 
@@ -16,17 +16,25 @@
 
 ---
 
+## 项目定位
+
+- 面向个人用户，而不是团队协作平台
+- 核心场景是从大型资料中系统学习，而不是只做文件存储
+- 资料类型不限于 PDF，也覆盖 Markdown、TXT、扫描件等长文档场景
+- RAG 负责把资料变成可反复查询的知识底座，Agent 负责在同一轮对话中跨模块编排操作
+
 ## 功能特性
 
 | 模块 | 说明 |
 |------|------|
+| ✅ **RAG 知识库** | 支持 PDF / TXT / Markdown / 扫描件等资料上传，自动完成解析、切片、嵌入、混合检索、MMR 与 Cross-encoder 重排 |
+| ✅ **资料集管理** | 可将同一主题下的多份资料归组，便于围绕单门课程、一本教材或一组长文档持续提问 |
+| ✅ **AI 智能体（首页）** | 基于 LangGraph 的多 Provider Agent，对话中可调用知识库、任务、财务等工具，并结合会话记忆与长期记忆 |
+| ✅ **OCR 识别** | 扫描件、图片和无文本层 PDF 的降级识别与版面分析，作为 RAG 解析链路的一部分 |
+| ✅ **知识笔记** | 富文本 / Markdown 编辑器、标签分类、元数据筛选 |
 | ✅ **任务管理** | 增删改查、优先级、截止日期、筛选排序 |
 | ✅ **财务记账** | 收支分类记录、统计图表、月度概览 |
-| ✅ **知识笔记** | 富文本 / Markdown 编辑器、标签分类、元数据筛选 |
-| ✅ **RAG 知识库** | 文档上传 (PDF/TXT/MD)、自动切片索引、语义 + BM25 混合检索、MMR 多样化重排、Cross-encoder 精排、查询预处理 |
-| ✅ **AI 智能体（首页）** | 多 Provider (OpenAI / Anthropic / Gemini / 兼容 API)、会话管理、长期记忆、工具调用（创建任务、记账、搜索知识库、RAG 查询）|
 | ✅ **Provider 管理** | 加密存储 API 密钥、多 Provider 切换、环境变量自动引导 |
-| ✅ **OCR 识别** | PDF / 图片文字提取、版面分析、表格结构提取 |
 | ✅ **工具中心** | 常用工具快捷入口 |
 
 ---
@@ -38,8 +46,8 @@
 | **前端** | React 18, TypeScript 5, Webpack 5, Tailwind CSS 3, Framer Motion, Recharts, TipTap |
 | **后端** | FastAPI, SQLAlchemy 2.0, asyncpg, PostgreSQL 15 |
 | **OCR** | Python 独立服务 (PaddleOCR + PyMuPDF) |
-| **AI Agent** | LangGraph, Provider 流式适配 (OpenAI / Anthropic / Gemini) |
-| **RAG** | 文本嵌入 + pgvector, BM25 全文检索, MMR 重排, Cross-encoder 精排 |
+| **AI Agent** | LangGraph, Provider 流式适配, 会话记忆与长期记忆 |
+| **RAG** | 多格式资料解析, 父子分块, 文本嵌入 + pgvector, BM25 全文检索, MMR 重排, Cross-encoder 精排 |
 | **包管理** | npm (前端), uv (Python workspace) |
 
 ---
@@ -398,7 +406,7 @@ Table/
 
 ## 项目背景
 
-Table 最初是一个 TypeScript 全栈应用（Express + Prisma + React），后迁移至 Python 后端（FastAPI + SQLAlchemy）。当前 TypeScript 后端已退役，`python-backend/` 是唯一正式后端。
+Table 最初是一个通用个人工作台，后续逐步收敛为一个**服务个人学习场景的 RAG + Agent 应用**：重点解决“大资料读不完、问不准、跨轮对话记不住上下文”的问题。历史上项目曾是 TypeScript 全栈应用（Express + Prisma + React），现已迁移到 Python 后端（FastAPI + SQLAlchemy），`python-backend/` 是唯一正式后端。
 
 ---
 

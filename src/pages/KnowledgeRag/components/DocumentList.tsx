@@ -60,6 +60,7 @@ export function DocumentList({ documents, onDelete, onReindex, onSelect }: Docum
                   ? `${(doc.fileSize / 1024 / 1024).toFixed(1)} MB`
                   : `${(doc.fileSize / 1024).toFixed(1)} KB`}
                 {doc.source && ` · ${doc.source}`}
+                {doc.corpusIds.length > 0 && ` · 已归组 ${doc.corpusIds.length}`}
               </p>
               <MetadataBadges doc={doc} />
             </div>

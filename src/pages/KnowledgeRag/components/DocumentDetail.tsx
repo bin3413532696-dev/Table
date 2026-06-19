@@ -7,6 +7,8 @@ interface DocumentDetailProps {
   document: KnowledgeDocument;
   onClose: () => void;
   onReindex?: (id: string) => void;
+  onAddToCorpus?: (id: string) => void;
+  currentCorpusName?: string;
 }
 
 const fileTypeIcons: Record<string, string> = {
@@ -16,7 +18,7 @@ const fileTypeIcons: Record<string, string> = {
   markdown: '📝',
 };
 
-export function DocumentDetail({ document, onClose, onReindex }: DocumentDetailProps) {
+export function DocumentDetail({ document, onClose, onReindex, onAddToCorpus, currentCorpusName }: DocumentDetailProps) {
   const [chunks, setChunks] = React.useState<KnowledgeChunk[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [expandedChunk, setExpandedChunk] = React.useState<number | null>(null);
@@ -186,14 +188,24 @@ export function DocumentDetail({ document, onClose, onReindex }: DocumentDetailP
             创建: {new Date(document.createdAt).toLocaleString()}
             · 更新: {new Date(document.updatedAt).toLocaleString()}
           </div>
-          {onReindex && document.status === 'indexed' && (
-            <button
-              onClick={() => onReindex(document.id)}
-              className="text-sm text-blue-600 hover:text-blue-700"
-            >
-              重新索引
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            {onAddToCorpus && currentCorpusName && (
+              <button
+                onClick={() => onAddToCorpus(document.id)}
+                className="text-sm text-purple-600 hover:text-purple-700"
+              >
+                加入资料集：{currentCorpusName}
+              </button>
+            )}
+            {onReindex && document.status === 'indexed' && (
+              <button
+                onClick={() => onReindex(document.id)}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                重新索引
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

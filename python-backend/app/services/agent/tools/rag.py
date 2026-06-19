@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.repositories.knowledge_rag import get_chunk_by_id as get_rag_chunk_by_id
 from app.schemas.knowledge_rag import HybridSearchRequest
+from app.services.agent._long_term_memory import resolve_session_corpus_id
 from app.services.agent.registry import (
     AgentToolAvailabilityContext,
     AgentToolDefinition,
@@ -9,7 +10,30 @@ from app.services.agent.registry import (
     register_tool_definition,
 )
 from app.services.agent.tools.common import int_arg, string_arg
-from app.services.knowledge_rag import build_search_context, search_service, search_with_context_service
+from app.services.knowledge_rag import (
+    build_search_context,
+    resolve_corpus_document_ids,
+    search_service,
+    search_with_context_service,
+)
+
+
+async def _resolve_document_ids_for_context(
+    context: AgentToolExecutionContext,
+    arguments: dict[str, object],
+) -> list[str] | None:
+    explicit_document_ids = arguments.get("documentIds")
+    if isinstance(explicit_document_ids, list) and all(isinstance(item, str) for item in explicit_document_ids):
+        return explicit_document_ids
+
+    session_id = arguments.get("_sessionId")
+    if not isinstance(session_id, str) or not session_id.strip():
+        return None
+    corpus_id = await resolve_session_corpus_id(context.session, context.user_id, session_id=session_id)
+    if not corpus_id:
+        return None
+    document_ids = await resolve_corpus_document_ids(context.session, context.user_id, corpus_id=corpus_id)
+    return document_ids or None
 
 
 def _rag_enabled(context: AgentToolAvailabilityContext) -> bool:
@@ -41,8 +65,10 @@ async def _search_knowledge_rag(context: AgentToolExecutionContext, arguments: d
     query = string_arg(arguments, "query")
     if not query:
         return {"context": "", "results": [], "message": "请提供查询内容。"}
+    document_ids = await _resolve_document_ids_for_context(context, arguments)
     payload = HybridSearchRequest(
         query=query,
+        documentIds=document_ids,
         limit=int_arg(arguments, "limit", 10),
         mode="semantic",
         enableQueryPreprocess=True,
@@ -54,10 +80,11 @@ async def _search_knowledge_rag(context: AgentToolExecutionContext, arguments: d
 
 
 async def _semantic_search(context: AgentToolExecutionContext, arguments: dict[str, object]) -> object:
+    document_ids = await _resolve_document_ids_for_context(context, arguments)
     payload = HybridSearchRequest(
         query=string_arg(arguments, "query") or "",
         tags=arguments.get("tags") if isinstance(arguments.get("tags"), list) else None,
-        documentIds=arguments.get("documentIds") if isinstance(arguments.get("documentIds"), list) else None,
+        documentIds=document_ids,
         limit=int_arg(arguments, "limit", 10),
         mode="semantic",
         enableQueryPreprocess=context.settings.query_preprocessor_enabled,
@@ -69,8 +96,10 @@ async def _semantic_search(context: AgentToolExecutionContext, arguments: dict[s
 
 
 async def _keyword_search(context: AgentToolExecutionContext, arguments: dict[str, object]) -> object:
+    document_ids = await _resolve_document_ids_for_context(context, arguments)
     payload = HybridSearchRequest(
         query=string_arg(arguments, "query") or "",
+        documentIds=document_ids,
         limit=int_arg(arguments, "limit", 10),
         mode="keyword",
     )
@@ -106,9 +135,11 @@ async def _rag_answer(context: AgentToolExecutionContext, arguments: dict[str, o
             "message": "请提供查询内容。",
         }
 
+    document_ids = await _resolve_document_ids_for_context(context, arguments)
     payload = HybridSearchRequest(
         query=question,
         tags=arguments.get("tags") if isinstance(arguments.get("tags"), list) else None,
+        documentIds=document_ids,
         limit=int_arg(arguments, "limit", 10),
         mode="semantic",
         enableQueryPreprocess=context.settings.query_preprocessor_enabled,
@@ -133,6 +164,7 @@ async def _rag_answer(context: AgentToolExecutionContext, arguments: dict[str, o
         "sources": [
             {
                 "chunkId": result_item.id,
+                "documentId": result_item.documentId,
                 "documentTitle": result_item.documentTitle,
                 "score": result_item.score,
             }

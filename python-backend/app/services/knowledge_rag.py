@@ -37,6 +37,15 @@ from app.repositories.knowledge_rag import (
     update_chunk_embeddings_batch,
     update_job_status,
 )
+from app.repositories.knowledge_corpora import (
+    create_corpus,
+    delete_corpus,
+    find_corpus_by_id,
+    list_corpora,
+    list_corpus_document_links,
+    replace_corpus_documents,
+    update_corpus,
+)
 from app.services.knowledge_rag_embeddings import (
     EmbeddingChunkInput,
     EmbeddingRuntimeConfig,
@@ -51,7 +60,9 @@ from app.services.knowledge_rag_mmr import mmr_rerank
 from app.services.knowledge_rag_query_preprocessor import preprocess_query
 from app.services.knowledge_rag_reranker import cross_encoder_rerank
 from app.schemas.knowledge_rag import (
+    CreateKnowledgeCorpusRequest,
     ChunkListQuery,
+    KnowledgeCorpusResponse,
     DocumentListQuery,
     IndexJobResponse,
     JobListQuery,
@@ -62,6 +73,7 @@ from app.schemas.knowledge_rag import (
     SearchResponse,
     SearchResultResponse,
     TriggerIndexRequest,
+    UpdateKnowledgeCorpusRequest,
     UpdateDocumentRequest,
 )
 from fastapi import UploadFile
@@ -114,6 +126,7 @@ def to_document_response(document: KnowledgeDocument) -> KnowledgeDocumentRespon
     return KnowledgeDocumentResponse(
         id=str(document.id),
         userId=str(document.user_id),
+        corpusIds=[],
         title=document.title,
         summary=document.summary or "",
         content=document.content or "",
@@ -134,6 +147,19 @@ def to_document_response(document: KnowledgeDocument) -> KnowledgeDocumentRespon
         originalMetadata=document.original_metadata,
         createdAt=int(document.created_at.timestamp() * 1000) if document.created_at else 0,
         updatedAt=int(document.updated_at.timestamp() * 1000) if document.updated_at else 0,
+    )
+
+
+def to_corpus_response(corpus, document_ids: list[str]) -> KnowledgeCorpusResponse:
+    return KnowledgeCorpusResponse(
+        id=str(corpus.id),
+        userId=str(corpus.user_id),
+        name=corpus.name,
+        description=corpus.description or "",
+        defaultTags=list(corpus.default_tags_json or []),
+        documentIds=document_ids,
+        createdAt=int(corpus.created_at.timestamp() * 1000) if corpus.created_at else 0,
+        updatedAt=int(corpus.updated_at.timestamp() * 1000) if corpus.updated_at else 0,
     )
 
 
@@ -328,6 +354,18 @@ def _extract_search_filters(payload) -> dict:
     return {key: raw_filters[key] for key in SEARCH_FILTER_FIELDS if key in raw_filters}
 
 
+async def resolve_corpus_document_ids(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    corpus_id: str | None,
+) -> list[str]:
+    if not corpus_id:
+        return []
+    links = await list_corpus_document_links(session, user_id, corpus_id=corpus_id)
+    return [str(link.document_id) for link in links]
+
+
 def _is_soft_embedding_failure(exc: Exception) -> bool:
     message = str(exc)
     return message.startswith("Embedding request failed:") or message.startswith("Embedding dimension mismatch:")
@@ -425,14 +463,88 @@ def build_search_context(results: list[SearchResultResponse], max_chars: int = 4
 
 async def get_documents(session: AsyncSession, user_id: str, query: DocumentListQuery) -> tuple[list[KnowledgeDocumentResponse], int]:
     documents, total = await list_documents_with_count(session, user_id, query.model_dump(exclude_none=True))
-    return [to_document_response(document) for document in documents], total
+    links = await list_corpus_document_links(session, user_id)
+    corpus_ids_by_document: dict[str, list[str]] = {}
+    for link in links:
+        corpus_ids_by_document.setdefault(str(link.document_id), []).append(str(link.corpus_id))
+
+    items: list[KnowledgeDocumentResponse] = []
+    for document in documents:
+        item = to_document_response(document)
+        item.corpusIds = corpus_ids_by_document.get(str(document.id), [])
+        items.append(item)
+    return items, total
 
 
 async def get_document(session: AsyncSession, user_id: str, document_id: str) -> KnowledgeDocumentResponse | None:
     document = await find_document_by_id(session, user_id, document_id)
     if not document:
         return None
-    return to_document_response(document)
+    item = to_document_response(document)
+    links = await list_corpus_document_links(session, user_id, document_id=document_id)
+    item.corpusIds = [str(link.corpus_id) for link in links]
+    return item
+
+
+async def get_corpora(session: AsyncSession, user_id: str) -> tuple[list[KnowledgeCorpusResponse], int]:
+    corpora = await list_corpora(session, user_id)
+    links = await list_corpus_document_links(session, user_id)
+    document_ids_by_corpus: dict[str, list[str]] = {}
+    for link in links:
+        document_ids_by_corpus.setdefault(str(link.corpus_id), []).append(str(link.document_id))
+    items = [to_corpus_response(corpus, document_ids_by_corpus.get(str(corpus.id), [])) for corpus in corpora]
+    return items, len(items)
+
+
+async def get_corpus(session: AsyncSession, user_id: str, corpus_id: str) -> KnowledgeCorpusResponse | None:
+    corpus = await find_corpus_by_id(session, user_id, corpus_id)
+    if not corpus:
+        return None
+    links = await list_corpus_document_links(session, user_id, corpus_id=corpus_id)
+    return to_corpus_response(corpus, [str(link.document_id) for link in links])
+
+
+async def create_corpus_service(
+    session: AsyncSession,
+    user_id: str,
+    payload: CreateKnowledgeCorpusRequest,
+) -> KnowledgeCorpusResponse:
+    corpus = await create_corpus(
+        session,
+        user_id,
+        name=payload.name,
+        description=payload.description or "",
+        default_tags=list(payload.defaultTags or []),
+    )
+    document_ids = list(payload.documentIds or [])
+    if document_ids:
+        await replace_corpus_documents(session, user_id, corpus_id=str(corpus.id), document_ids=document_ids)
+    return (await get_corpus(session, user_id, str(corpus.id))) or to_corpus_response(corpus, [])
+
+
+async def update_corpus_service(
+    session: AsyncSession,
+    user_id: str,
+    corpus_id: str,
+    payload: UpdateKnowledgeCorpusRequest,
+) -> KnowledgeCorpusResponse | None:
+    corpus = await update_corpus(
+        session,
+        user_id,
+        corpus_id,
+        name=payload.name if "name" in payload.model_fields_set else None,
+        description=payload.description if "description" in payload.model_fields_set else None,
+        default_tags=list(payload.defaultTags or []) if "defaultTags" in payload.model_fields_set else None,
+    )
+    if not corpus:
+        return None
+    if "documentIds" in payload.model_fields_set:
+        await replace_corpus_documents(session, user_id, corpus_id=corpus_id, document_ids=list(payload.documentIds or []))
+    return await get_corpus(session, user_id, corpus_id)
+
+
+async def delete_corpus_service(session: AsyncSession, user_id: str, corpus_id: str) -> bool:
+    return await delete_corpus(session, user_id, corpus_id)
 
 
 async def update_document_service(

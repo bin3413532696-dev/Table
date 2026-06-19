@@ -44,6 +44,39 @@ async def test_non_health_get_sets_csrf_cookie(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_corpora_endpoint_uses_route_service(monkeypatch) -> None:
+    app = _make_app()
+
+    async def fake_get_corpora(session, user_id):
+        del session
+        assert user_id == "00000000-0000-0000-0000-000000000001"
+        return (
+            [
+                {
+                    "id": "00000000-0000-0000-0000-000000000101",
+                    "userId": user_id,
+                    "name": "热力学教材",
+                    "description": "个人资料集",
+                    "defaultTags": ["热力学"],
+                    "documentIds": ["00000000-0000-0000-0000-000000000201"],
+                    "createdAt": 1,
+                    "updatedAt": 2,
+                }
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(knowledge_rag_routes, "get_corpora", fake_get_corpora)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/api/knowledge-rag/corpora")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["name"] == "热力学教材"
+
+
+@pytest.mark.asyncio
 async def test_search_endpoint_rejects_missing_csrf() -> None:
     app = _make_app()
 

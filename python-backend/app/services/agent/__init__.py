@@ -59,6 +59,7 @@ from app.services.agent._constants import (
     ACTIVE_AGENT_RUN_STATUSES,
     DEFAULT_SESSION_TITLE,
     SUPPORTED_STREAM_PROVIDER_FORMATS,
+    AgentToolCall,
     _generate_session_title,
     _iso_timestamp,
     _now,
@@ -80,6 +81,12 @@ from app.services.agent._memory import (
     _select_runs_for_memory_refresh,
     _should_refresh_session_memory,
     _to_agent_session_memory_dto,
+)
+from app.services.agent._long_term_memory import (
+    append_agent_memory_event,
+    build_long_term_memory_context,
+    clear_long_term_memory_for_session,
+    consolidate_agent_memory_events,
 )
 from app.services.agent._graph import (
     AgentConfirmationGraphDependencies,
@@ -328,6 +335,7 @@ async def delete_agent_session_memory_record(
     user_id: str,
     session_id: str,
 ) -> AgentSessionMemoryDto | None:
+    await clear_long_term_memory_for_session(session, user_id, session_id=session_id)
     item = await update_agent_session(
         session,
         user_id,
@@ -482,7 +490,7 @@ async def _refresh_session_memory_record(
 
 async def _refresh_session_memory_task(user_id: str, session_id: str) -> None:
     async with SessionLocal() as background_session:
-        await _refresh_session_memory_record(background_session, user_id, session_id)
+        await consolidate_agent_memory_events(background_session, user_id, session_id=session_id)
 
 
 async def _maybe_schedule_session_memory_refresh(
@@ -493,9 +501,6 @@ async def _maybe_schedule_session_memory_refresh(
     try:
         session_item = await find_agent_session_by_id(session, user_id, session_id)
         if not session_item:
-            return
-        runs = await list_runs_for_session(session, user_id, session_id)
-        if not _should_refresh_session_memory(session_item, runs):
             return
         await update_agent_session(session, user_id, session_id, memory_status="pending")
         asyncio.create_task(_refresh_session_memory_task(user_id, session_id))
@@ -664,11 +669,14 @@ async def stream_agent_run_record(
     runtime = await _resolve_runtime_config_for_user(session, user_id, payload.model)
     session_item = await _resolve_run_session(session, user_id, payload)
     persona = await find_user_setting(session, user_id)
+    long_term_memory = await build_long_term_memory_context(session, user_id, session_id=str(session_item.id))
     user_system_prompt = payload.systemPrompt if payload.systemPrompt is not None else _extract_system_prompt(persona)
     system_prompt = _build_effective_system_prompt(
         user_system_prompt,
         rag_enabled=payload.ragEnabled,
-        session_memory=_build_session_memory_block(session_item),
+        session_memory="\n\n".join(
+            block for block in [_build_session_memory_block(session_item), long_term_memory] if block.strip()
+        ),
     )
     effective_model = runtime.model
     run = await create_agent_run(
@@ -725,7 +733,11 @@ async def stream_agent_run_record(
         execute_tool_call=lambda current_session, current_user_id, tool_call: _execute_agent_tool_call(
             current_session,
             current_user_id,
-            tool_call,
+            AgentToolCall(
+                id=tool_call.id,
+                name=tool_call.name,
+                arguments={**tool_call.arguments, "_sessionId": str(session_item.id)},
+            ),
         ),
         parse_tool_calls=lambda content: _parse_tool_calls(content, rag_enabled=payload.ragEnabled),
         tool_requires_confirmation=_tool_requires_confirmation,
@@ -786,6 +798,14 @@ async def stream_agent_run_record(
     final_run = persisted_run or await find_agent_run_by_id(session, user_id, str(run.id)) or run
     final_detail = _bind_detail_to_run(detail, final_run)
 
+    if final_detail.status in {"completed", "waiting_confirmation"}:
+        await append_agent_memory_event(
+            session,
+            user_id,
+            session_id=str(final_run.session_id),
+            run_id=str(final_run.id),
+            detail=final_detail,
+        )
     await _schedule_memory_refresh_for_detail(
         session,
         user_id,

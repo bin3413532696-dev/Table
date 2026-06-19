@@ -21,9 +21,14 @@ model User {
   knowledgeNotes   KnowledgeNote[]
   knowledgePresetTags KnowledgePresetTag[]
   knowledgeDocuments KnowledgeDocument[]
+  knowledgeCorpora  KnowledgeCorpus[]
+  knowledgeCorpusDocuments KnowledgeCorpusDocument[]
   knowledgeChunks KnowledgeChunk[]
   knowledgeEmbeddingCache KnowledgeEmbeddingCache[]
   knowledgeIndexJobs KnowledgeIndexJob[]
+  agentMemoryEvents AgentMemoryEvent[]
+  agentMemoryRecords AgentMemoryRecord[]
+  agentMemoryBlocks AgentMemoryBlock[]
   tasks            Task[]
   settings         UserSetting?
 
@@ -187,6 +192,38 @@ model KnowledgePresetTag {
   @@map("knowledge_preset_tags")
 }
 
+model KnowledgeCorpus {
+  id              String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String                    @map("user_id") @db.Uuid
+  name            String
+  description     String                    @default("")
+  defaultTagsJson Json                      @default("[]") @map("default_tags_json")
+  createdAt       DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user            User                      @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  documents       KnowledgeCorpusDocument[]
+
+  @@index([userId])
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("knowledge_corpora")
+}
+
+model KnowledgeCorpusDocument {
+  corpusId   String          @map("corpus_id") @db.Uuid
+  documentId String          @map("document_id") @db.Uuid
+  userId     String          @map("user_id") @db.Uuid
+  sortOrder  Int             @default(0) @map("sort_order")
+  addedAt    DateTime        @default(now()) @map("added_at") @db.Timestamptz(6)
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  corpus     KnowledgeCorpus @relation(fields: [corpusId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  document   KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([corpusId, documentId])
+  @@index([userId])
+  @@index([documentId])
+  @@map("knowledge_corpus_documents")
+}
+
 // =====================================================
 // RAG 知识库模型
 // =====================================================
@@ -222,6 +259,7 @@ model KnowledgeDocument {
   user         User                @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: NoAction)
   chunks       KnowledgeChunk[]
   indexJobs    KnowledgeIndexJob[]
+  corpora      KnowledgeCorpusDocument[]
 
   @@index([userId, status], map: "knowledge_documents_status_idx")
   @@index([userId])
@@ -357,4 +395,70 @@ model CheckpointWrite {
 model CheckpointMigration {
   v Int @id
   @@map("checkpoint_migrations")
+}
+
+model AgentMemoryEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  sessionId   String   @map("session_id") @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  eventType   String   @map("event_type")
+  payloadJson Json     @default("{}") @map("payload_json")
+  status      String   @default("pending")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([runId])
+  @@index([userId, status])
+  @@map("agent_memory_events")
+}
+
+model AgentMemoryRecord {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String   @map("user_id") @db.Uuid
+  scopeType        String   @map("scope_type")
+  scopeId          String   @map("scope_id")
+  memoryKind       String   @map("memory_kind")
+  memorySlot       String   @map("memory_slot")
+  title            String   @default("")
+  content          String   @default("")
+  summary          String   @default("")
+  confidence       Decimal  @default(0.5) @db.Decimal(4, 3)
+  salience         Decimal  @default(0.5) @db.Decimal(4, 3)
+  sourceRunId      String?  @map("source_run_id") @db.Uuid
+  sourceDocumentId String?  @map("source_document_id") @db.Uuid
+  evidenceJson     Json     @default("{}") @map("evidence_json")
+  lastAccessedAt   DateTime? @map("last_accessed_at") @db.Timestamptz(6)
+  accessCount      Int      @default(0) @map("access_count")
+  supersedesId     String?  @map("supersedes_id") @db.Uuid
+  ttlAt            DateTime? @map("ttl_at") @db.Timestamptz(6)
+  isDeleted        Boolean  @default(false) @map("is_deleted")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId])
+  @@index([userId, scopeType, scopeId])
+  @@index([userId, memoryKind, memorySlot])
+  @@index([userId, isDeleted])
+  @@map("agent_memory_records")
+}
+
+model AgentMemoryBlock {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  blockType String   @map("block_type")
+  scopeType String   @map("scope_type")
+  scopeId   String   @map("scope_id")
+  content   String   @default("")
+  version   Int      @default(1)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([userId])
+  @@unique([userId, blockType, scopeType, scopeId])
+  @@map("agent_memory_blocks")
 }

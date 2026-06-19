@@ -4,6 +4,7 @@ dist-frontend-tests/
 .env
 *.log
 .claude/
+.Codex/
 .gstack/
 .codex/
 logs/

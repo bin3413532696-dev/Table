@@ -4,7 +4,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-Table 是一个个人工作台应用：React + TypeScript 前端 + FastAPI 后端 + 独立 OCR 微服务，使用 PostgreSQL（含 pgvector 扩展）作为唯一持久层。功能模块：任务、财务、知识笔记、RAG 知识库、AI Agent、Provider 管理。
+Table 是一个面向个人使用的 AI 工作台：React + TypeScript 前端 + FastAPI 后端 + 独立 OCR 微服务，使用 PostgreSQL（含 pgvector 扩展）作为唯一持久层。项目当前的核心定位不是通用办公，而是服务“从大体量资料中持续学习新知识”的场景：用户可上传 PDF、Markdown、TXT、扫描件等文件，系统完成解析、切片、混合检索、重排与 OCR 降级，并在此基础上通过 LangGraph Agent 在单轮对话中跨知识库、任务、财务等模块操作。功能模块：任务、财务、知识笔记、RAG 知识库、AI Agent、Provider 管理。
 
 历史背景：原为 TypeScript 全栈（Express + Prisma + React），后迁移至 Python 后端。**Prisma 现仅用于迁移管理，运行时 ORM 用 SQLAlchemy 2.0（async）**。
 
@@ -90,6 +90,8 @@ core/         → config（pydantic-settings + lru_cache 单例）、csrf、sess
 
 入口 `app/services/knowledge_rag.py`，分阶段：
 
+该链路面向“大文件学习”场景，不应在文档或实现上被描述成仅支持 PDF；PDF 只是其中最重要的一类资料来源。
+
 **上传链路（同步）**：`upload_document_service` 创建 `pending` 文档 + job → 写文件 → `asyncio.create_task(_run_indexing_pipeline_task(...))` fire-and-forget → 立即返回。请求不阻塞 pipeline；前端轮询 `/api/knowledge-rag/jobs/{id}` 看进度。
 
 **Pipeline 任务（`_run_indexing_pipeline_task`，独立 `SessionLocal`）**：
@@ -141,4 +143,5 @@ field_name_snake: Type = Field(default=..., validation_alias="ENV_VAR_UPPER")
 用户要求所有项目产出内聚在仓库目录内，便于备份/迁移/清理：
 
 - **Plan 文件**：进入 plan mode 时，plan 文件路径必须是项目级 `.Codex/plans/<name>.md`，**不要**使用全局 `~/.Codex/plans/`。系统提示给出的全局路径需要主动改写。
-- **Memory / 偏好记录**：项目相关的用户偏好、约定写在本文件（`.Codex/AGENTS.md`）里，不要写到全局 `~/.Codex/projects/<slug>/memory/`。Codex 框架的 memory 系统路径是固定的全局位置，但项目偏好作为约定文档放在 AGENTS.md 才能保证项目自包含且被自动加载。
+- **Skill 文件**：项目级 skill 放 `.Codex/skills/<name>/SKILL.md`。历史上已有 `.claude/skills/` 可参考；若迁移到 Codex，沿用相同目录结构即可。
+- **Memory / 偏好记录**：项目相关的用户偏好、约定写在仓库根目录的 `AGENTS.md` 里，不要写到全局 `~/.Codex/projects/<slug>/memory/`。Codex 框架的 memory 系统路径是固定的全局位置，但项目偏好作为约定文档放在 `AGENTS.md` 才能保证项目自包含且被自动加载。

@@ -6,21 +6,29 @@ from app.schemas.knowledge_rag import (
     BackfillEmbeddingsResponse,
     ChunkListEnvelope,
     ChunkListQuery,
+    CreateKnowledgeCorpusRequest,
     DocumentListEnvelope,
     DocumentListQuery,
     HybridSearchRequest,
     JobListEnvelope,
     JobListQuery,
+    KnowledgeCorpusListEnvelope,
+    KnowledgeCorpusResponse,
     OCRHealthResponse,
     RagStatsResponse,
     TriggerIndexRequest,
+    UpdateKnowledgeCorpusRequest,
     UpdateDocumentRequest,
 )
 from app.services.knowledge_rag import (
+    create_corpus_service,
+    delete_corpus_service,
     DocumentQualityError,
     IndexJobActiveError,
     backfill_embeddings_service,
     delete_document_service,
+    get_corpora,
+    get_corpus,
     get_chunks,
     get_document,
     get_documents,
@@ -31,6 +39,7 @@ from app.services.knowledge_rag import (
     search_service,
     search_with_context_service,
     trigger_index_service,
+    update_corpus_service,
     update_document_service,
     upload_document_service,
 )
@@ -96,6 +105,61 @@ def parse_job_list_query(request: Request) -> JobListQuery:
             "offset": request.query_params.get("offset", 0),
         }
     )
+
+
+@router.get("/corpora", response_model=KnowledgeCorpusListEnvelope)
+async def list_corpora_route(
+    session: DbSession,
+    user: AuthenticatedUser,
+) -> KnowledgeCorpusListEnvelope:
+    items, total = await get_corpora(session, user.user_id)
+    return KnowledgeCorpusListEnvelope(items=items, total=total)
+
+
+@router.get("/corpora/{corpus_id}", response_model=KnowledgeCorpusResponse)
+async def get_corpus_detail(
+    corpus_id: UUID,
+    session: DbSession,
+    user: AuthenticatedUser,
+) -> KnowledgeCorpusResponse:
+    item = await get_corpus(session, user.user_id, str(corpus_id))
+    if not item:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Corpus not found"})
+    return item
+
+
+@router.post("/corpora", response_model=KnowledgeCorpusResponse, status_code=status.HTTP_201_CREATED)
+async def create_corpus_route(
+    payload: CreateKnowledgeCorpusRequest,
+    session: DbSession,
+    user: AuthenticatedUser,
+) -> KnowledgeCorpusResponse:
+    return await create_corpus_service(session, user.user_id, payload)
+
+
+@router.patch("/corpora/{corpus_id}", response_model=KnowledgeCorpusResponse)
+async def update_corpus_route(
+    corpus_id: UUID,
+    payload: UpdateKnowledgeCorpusRequest,
+    session: DbSession,
+    user: AuthenticatedUser,
+) -> KnowledgeCorpusResponse:
+    item = await update_corpus_service(session, user.user_id, str(corpus_id), payload)
+    if not item:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Corpus not found"})
+    return item
+
+
+@router.delete("/corpora/{corpus_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_corpus_route(
+    corpus_id: UUID,
+    session: DbSession,
+    user: AuthenticatedUser,
+) -> Response:
+    deleted = await delete_corpus_service(session, user.user_id, str(corpus_id))
+    if not deleted:
+        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Corpus not found"})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/documents", response_model=DocumentListEnvelope)

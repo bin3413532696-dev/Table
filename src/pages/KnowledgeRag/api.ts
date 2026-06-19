@@ -2,6 +2,7 @@ import { requestApi } from '../../lib/api/client';
 import type {
   IndexJob,
   KnowledgeChunk,
+  KnowledgeCorpus,
   KnowledgeDocument,
   RagStats,
   SearchInput,
@@ -48,6 +49,44 @@ export async function getDocuments(params?: {
   }
 
   return requestApi<ListResponse<KnowledgeDocument>>(`${API_BASE}/documents?${query.toString()}`);
+}
+
+export async function getCorpora(): Promise<ListResponse<KnowledgeCorpus>> {
+  return requestApi<ListResponse<KnowledgeCorpus>>(`${API_BASE}/corpora`);
+}
+
+export async function getCorpus(id: string): Promise<KnowledgeCorpus> {
+  return requestApi<KnowledgeCorpus>(`${API_BASE}/corpora/${id}`);
+}
+
+export async function createCorpus(data: {
+  name: string;
+  description?: string;
+  defaultTags?: string[];
+  documentIds?: string[];
+}): Promise<KnowledgeCorpus> {
+  return requestApi<KnowledgeCorpus>(`${API_BASE}/corpora`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateCorpus(id: string, data: {
+  name?: string;
+  description?: string;
+  defaultTags?: string[];
+  documentIds?: string[];
+}): Promise<KnowledgeCorpus> {
+  return requestApi<KnowledgeCorpus>(`${API_BASE}/corpora/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteCorpus(id: string): Promise<void> {
+  await requestApi<void>(`${API_BASE}/corpora/${id}`, {
+    method: 'DELETE',
+  });
 }
 
 export async function getDocument(id: string): Promise<KnowledgeDocument> {

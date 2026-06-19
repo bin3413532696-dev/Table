@@ -3,12 +3,13 @@ import { FileText, RefreshCw, Database, BarChart3, Loader2, Brain } from 'lucide
 import { DocumentUploader } from '../../KnowledgeRag/components/DocumentUploader';
 import { DocumentList } from '../../KnowledgeRag/components/DocumentList';
 import { DocumentDetail } from '../../KnowledgeRag/components/DocumentDetail';
+import { CorpusManager } from '../../KnowledgeRag/components/CorpusManager';
 import { HybridSearchBar } from '../../KnowledgeRag/components/HybridSearchBar';
 import { SearchResults } from '../../KnowledgeRag/components/SearchResults';
 import { IndexProgress } from '../../KnowledgeRag/components/IndexProgress';
 import { MetadataFilter } from './MetadataFilter';
 import * as ragApi from '../../KnowledgeRag/api';
-import type { KnowledgeDocument, SearchResult, SearchMode, RagStats, MetadataFilter as MetadataFilterType } from '../../KnowledgeRag/types';
+import type { KnowledgeCorpus, KnowledgeDocument, SearchResult, SearchMode, RagStats, MetadataFilter as MetadataFilterType } from '../../KnowledgeRag/types';
 
 type RagViewMode = 'documents' | 'search';
 
@@ -22,6 +23,9 @@ export function RagSection({ onFeedback }: RagSectionProps) {
   const [searchResults, setSearchResults] = React.useState<SearchResult[]>([]);
   const [searchTimeMs, setSearchTimeMs] = React.useState<number>(0);
   const [stats, setStats] = React.useState<RagStats | null>(null);
+  const [corpora, setCorpora] = React.useState<KnowledgeCorpus[]>([]);
+  const [currentCorpusId, setCurrentCorpusId] = React.useState('');
+  const [creatingCorpus, setCreatingCorpus] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [selectedDoc, setSelectedDoc] = React.useState<KnowledgeDocument | null>(null);
   const [metadataFilters, setMetadataFilters] = React.useState<MetadataFilterType>({});
@@ -52,6 +56,9 @@ export function RagSection({ onFeedback }: RagSectionProps) {
       try {
         const result = await ragApi.getDocuments({
           limit: 50,
+          ...(currentCorpusId
+            ? { }
+            : {}),
           publishDateRange: filters.publishDateRange,
           sourceDept: filters.sourceDept,
           securityLevel: filters.securityLevel,
@@ -59,7 +66,10 @@ export function RagSection({ onFeedback }: RagSectionProps) {
         });
         // 检查请求是否被取消
         if (!abortController.signal.aborted) {
-          setDocuments(result.items);
+          const nextItems = currentCorpusId
+            ? result.items.filter((item) => item.corpusIds.includes(currentCorpusId))
+            : result.items;
+          setDocuments(nextItems);
         }
       } catch (err) {
         // 忽略取消错误
@@ -76,7 +86,7 @@ export function RagSection({ onFeedback }: RagSectionProps) {
         }
       }
     }, DEBOUNCE_DELAY);
-  }, [onFeedback]);
+  }, [currentCorpusId, onFeedback]);
 
   // 当 metadataFilters 变化时，触发防抖加载
   useEffect(() => {
@@ -95,6 +105,7 @@ export function RagSection({ onFeedback }: RagSectionProps) {
   // 初始加载统计
   useEffect(() => {
     ragApi.getStats().then(setStats).catch(err => console.error('加载统计失败:', err));
+    ragApi.getCorpora().then((result) => setCorpora(result.items)).catch(err => console.error('加载资料集失败:', err));
   }, []);
 
   // 存在 pending/processing 文档时，5s 周期性刷新列表（让异步 pipeline 的状态推进对用户可见）
@@ -109,13 +120,16 @@ export function RagSection({ onFeedback }: RagSectionProps) {
         securityLevel: metadataFilters.securityLevel,
         businessCategory: metadataFilters.businessCategory,
       }).then(result => {
-        setDocuments(result.items);
+        const nextItems = currentCorpusId
+          ? result.items.filter((item) => item.corpusIds.includes(currentCorpusId))
+          : result.items;
+        setDocuments(nextItems);
         // 同步刷统计（索引完成数量会变）
         ragApi.getStats().then(setStats).catch(() => {});
       }).catch(err => console.error('轮询刷新文档失败:', err));
     }, 5000);
     return () => clearInterval(timer);
-  }, [documents, metadataFilters]);
+  }, [currentCorpusId, documents, metadataFilters]);
 
   // 立即刷新文档列表（不带防抖，用于手动操作）
   const refreshDocuments = async () => {
@@ -128,12 +142,56 @@ export function RagSection({ onFeedback }: RagSectionProps) {
         securityLevel: metadataFilters.securityLevel,
         businessCategory: metadataFilters.businessCategory,
       });
-      setDocuments(result.items);
+      const nextItems = currentCorpusId
+        ? result.items.filter((item) => item.corpusIds.includes(currentCorpusId))
+        : result.items;
+      setDocuments(nextItems);
+      const corporaResult = await ragApi.getCorpora();
+      setCorpora(corporaResult.items);
     } catch (err) {
       console.error('加载文档失败:', err);
       onFeedback?.('error', '加载文档失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateCorpus = async (name: string) => {
+    setCreatingCorpus(true);
+    try {
+      const created = await ragApi.createCorpus({ name });
+      const corporaResult = await ragApi.getCorpora();
+      setCorpora(corporaResult.items);
+      setCurrentCorpusId(created.id);
+      onFeedback?.('success', '资料集已创建');
+    } catch (err) {
+      console.error('创建资料集失败:', err);
+      onFeedback?.('error', '创建资料集失败');
+    } finally {
+      setCreatingCorpus(false);
+    }
+  };
+
+  const handleAttachDocumentToCurrentCorpus = async (documentId: string) => {
+    if (!currentCorpusId) {
+      onFeedback?.('error', '请先选择或创建资料集');
+      return;
+    }
+    const currentCorpus = corpora.find((item) => item.id === currentCorpusId);
+    if (!currentCorpus) {
+      onFeedback?.('error', '当前资料集不存在');
+      return;
+    }
+    const documentIds = Array.from(new Set([...currentCorpus.documentIds, documentId]));
+    try {
+      await ragApi.updateCorpus(currentCorpusId, { documentIds });
+      const corporaResult = await ragApi.getCorpora();
+      setCorpora(corporaResult.items);
+      await refreshDocuments();
+      onFeedback?.('success', '文档已加入当前资料集');
+    } catch (err) {
+      console.error('加入资料集失败:', err);
+      onFeedback?.('error', '加入资料集失败');
     }
   };
 
@@ -272,6 +330,14 @@ export function RagSection({ onFeedback }: RagSectionProps) {
             {/* Upload */}
             <DocumentUploader onUploadSuccess={handleUploadSuccess} disabled={loading} />
 
+            <CorpusManager
+              corpora={corpora}
+              currentCorpusId={currentCorpusId}
+              creating={creatingCorpus}
+              onSelectCorpus={setCurrentCorpusId}
+              onCreateCorpus={handleCreateCorpus}
+            />
+
             {/* Metadata Filter */}
             <MetadataFilter
               filters={metadataFilters}
@@ -347,6 +413,8 @@ export function RagSection({ onFeedback }: RagSectionProps) {
           document={selectedDoc}
           onClose={() => setSelectedDoc(null)}
           onReindex={handleReindex}
+          onAddToCorpus={handleAttachDocumentToCurrentCorpus}
+          currentCorpusName={corpora.find((item) => item.id === currentCorpusId)?.name || ''}
         />
       )}
 

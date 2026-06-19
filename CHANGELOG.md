@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### 文档
+- 统一 Markdown 文档中的项目定位：从“通用个人工作台”收敛为“面向个人、服务大文件学习场景的 RAG + Agent 应用”
+- 更正文档表述，避免将知识库场景错误限制为仅 PDF，统一覆盖 PDF、Markdown、TXT、扫描件等资料类型
+
+### Agent / Memory
+- 新增长时记忆持久层：`agent_memory_events`、`agent_memory_records`、`agent_memory_blocks`
+- Agent 会话支持资料集感知的长期记忆与会话级语料绑定
+- RAG 工具在会话内可根据资料集记忆自动缩小检索文档范围
+- 优化记忆抽取逻辑：复合指令拆分为偏好、规则、目标，减少冗余记忆
+- 修复清空会话记忆时 session 级 memory block 残留问题
+
+### RAG
+- 新增资料集（corpus）模型、接口与前端基础管理能力
+- 为知识文档响应补充 `corpusIds`，支持资料归组与会话级检索收缩
+
 ### 仓库整理
 - 删除开发垃圾文件（.tmp/、server/data/、大模型发展历程.txt、__pycache__、.pytest_cache）
 - 更新 .gitignore 补充常见模式（.DS_Store、.idea/、.vscode/、*.swp 等）
@@ -9,7 +24,6 @@
 - 添加 .dockerignore 减少构建上下文
 - 修复 package.json 元数据（名称、许可证、private 标记）
 - 清理 webpack.config.js 中未声明的依赖别名
-- 移动 AGENTS.md 到 .claude/ 避免根目录混乱
 - 添加 ESLint 基础配置和 Ruff 配置
 - 归档 PYTHON_MIGRATION.md 到 README 迁移说明
 - 统一 .md 文档为中文

@@ -1,6 +1,6 @@
 # Python Backend
 
-This service is the first Python migration slice for `Table`.
+This service is the production backend for `Table`, a personal RAG + Agent workspace focused on learning from large files over repeated conversations.
 
 ## Commands
 
@@ -19,10 +19,20 @@ RUN_PYTHON_INTEGRATION_TESTS=1 uv run --package table-python-backend pytest pyth
 - signed session cookie compatibility and auth routes
 - health endpoint
 - `tasks`, `finance`, and `knowledge` module contract-compatible migration slices
-- `knowledge-rag` fourth slice: upload/save document, lightweight text chunk indexing, semantic/hybrid search, query preprocessing, MMR reranking, cross-encoder reranking, embedding backfill, delete/reindex flow, stats, OCR health wiring
+- `knowledge-rag` slice: upload/save large files, parse PDF / Markdown / TXT and scanned files, parent-child chunk indexing, semantic/hybrid search, query preprocessing, MMR reranking, cross-encoder reranking, embedding backfill, corpus grouping, delete/reindex flow, stats, OCR health wiring
 - `maintenance` routes for business snapshot export/import and scoped workspace reset
 - provider CRUD routes compatible with the existing `/api/providers` frontend contract
-- `agent` routes compatible with `/api/agent/health`, `/api/agent/persona`, session CRUD, run list/detail/create/update/delete, fresh-run execution, and streaming execution for `/api/agent/runs/stream`
+- `agent` routes compatible with `/api/agent/health`, `/api/agent/persona`, session CRUD, run list/detail/create/update/delete, fresh-run execution, streaming execution for `/api/agent/runs/stream`, and layered memory persistence
+
+## Product focus
+
+The backend is optimized for a personal “learn from large materials” workflow:
+
+1. ingest long-form materials instead of only short notes
+2. keep retrieval stable across repeated questions on the same source
+3. recover scanned files through OCR fallback when text extraction is weak
+4. let the agent operate across RAG, tasks, and finance inside one conversation
+5. persist short-term and long-term memory conservatively so sessions remain usable over time
 
 The service reads the existing root `.env` and reuses:
 
@@ -135,8 +145,16 @@ The current run execution behavior is:
 3. it parses fresh-run tool calls from model output, executes migrated query tools immediately, and persists waiting-confirmation state for write tools
 4. it persists session/run records and reconstructed run state directly on `agent_runs`, including messages, tool-call snapshots, text chunks, timelines, and final text
 5. waiting-confirmation runs still expose a placeholder pending tool only when older persisted state has no concrete tool payload
+6. completed runs can emit memory events that are consolidated into personal preferences, session goals, session summaries, and session-scoped corpus bindings
 
 Session detail history now aggregates persisted run messages across the session, which lets the Python backend restore the latest conversation history without relying on the removed LangGraph checkpoint tables.
+
+The current memory behavior is intentionally pragmatic rather than overly complex:
+
+1. short-term memory stays on `agent_sessions.memory_*`
+2. long-term memory is persisted in `agent_memory_events`, `agent_memory_records`, and `agent_memory_blocks`
+3. session RAG context can inherit a corpus binding from prior successful retrieval
+4. memory extraction is conservative and rule-based so it is easier to debug in personal-use scenarios
 
 The current tool-decision behavior is:
 

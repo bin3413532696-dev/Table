@@ -2,6 +2,7 @@
 export interface KnowledgeDocument {
   id: string;
   userId: string;
+  corpusIds: string[];
   title: string;
   summary: string;
   content: string;
@@ -133,4 +134,15 @@ export interface RagStats {
   chunkCount: number;
   chunkWithEmbeddingCount: number;
   cacheCount: number;
+}
+
+export interface KnowledgeCorpus {
+  id: string;
+  userId: string;
+  name: string;
+  description: string;
+  defaultTags: string[];
+  documentIds: string[];
+  createdAt: number;
+  updatedAt: number;
 }

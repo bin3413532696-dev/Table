@@ -242,6 +242,42 @@ class KnowledgePresetTag(Base):
     )
 
 
+class KnowledgeCorpus(Base):
+    __tablename__ = "knowledge_corpora"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column("user_id", UUID(as_uuid=True), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str] = mapped_column(Text, default="")
+    default_tags_json: Mapped[list[str]] = mapped_column("default_tags_json", JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        "created_at",
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updated_at",
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
+class KnowledgeCorpusDocument(Base):
+    __tablename__ = "knowledge_corpus_documents"
+
+    corpus_id: Mapped[uuid.UUID] = mapped_column("corpus_id", UUID(as_uuid=True), primary_key=True)
+    document_id: Mapped[uuid.UUID] = mapped_column("document_id", UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column("user_id", UUID(as_uuid=True), index=True)
+    sort_order: Mapped[int] = mapped_column("sort_order", Integer, default=0)
+    added_at: Mapped[datetime] = mapped_column(
+        "added_at",
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
 class KnowledgeDocument(Base):
     __tablename__ = "knowledge_documents"
 
@@ -367,4 +403,79 @@ class KnowledgeImageDescriptionCache(Base):
     )
     expires_at: Mapped[datetime | None] = mapped_column(
         "expires_at", DateTime(timezone=True), nullable=True
+    )
+
+
+class AgentMemoryEvent(Base):
+    __tablename__ = "agent_memory_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column("user_id", UUID(as_uuid=True), index=True)
+    session_id: Mapped[uuid.UUID] = mapped_column("session_id", UUID(as_uuid=True), index=True)
+    run_id: Mapped[uuid.UUID] = mapped_column("run_id", UUID(as_uuid=True), index=True)
+    event_type: Mapped[str] = mapped_column("event_type", String(100))
+    payload_json: Mapped[dict] = mapped_column("payload_json", JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        "created_at",
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    processed_at: Mapped[datetime | None] = mapped_column("processed_at", DateTime(timezone=True), nullable=True)
+
+
+class AgentMemoryRecord(Base):
+    __tablename__ = "agent_memory_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column("user_id", UUID(as_uuid=True), index=True)
+    scope_type: Mapped[str] = mapped_column("scope_type", String(20))
+    scope_id: Mapped[str] = mapped_column("scope_id", String(64))
+    memory_kind: Mapped[str] = mapped_column("memory_kind", String(20))
+    memory_slot: Mapped[str] = mapped_column("memory_slot", String(50))
+    title: Mapped[str] = mapped_column(String(200), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    confidence: Mapped[float] = mapped_column(Numeric(4, 3), default=0.5)
+    salience: Mapped[float] = mapped_column(Numeric(4, 3), default=0.5)
+    source_run_id: Mapped[uuid.UUID | None] = mapped_column("source_run_id", UUID(as_uuid=True), nullable=True)
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column("source_document_id", UUID(as_uuid=True), nullable=True)
+    evidence_json: Mapped[dict] = mapped_column("evidence_json", JSONB, default=dict)
+    last_accessed_at: Mapped[datetime | None] = mapped_column("last_accessed_at", DateTime(timezone=True), nullable=True)
+    access_count: Mapped[int] = mapped_column("access_count", Integer, default=0)
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column("supersedes_id", UUID(as_uuid=True), nullable=True)
+    ttl_at: Mapped[datetime | None] = mapped_column("ttl_at", DateTime(timezone=True), nullable=True)
+    is_deleted: Mapped[bool] = mapped_column("is_deleted", Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        "created_at",
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        "updated_at",
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+
+class AgentMemoryBlock(Base):
+    __tablename__ = "agent_memory_blocks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column("user_id", UUID(as_uuid=True), index=True)
+    block_type: Mapped[str] = mapped_column("block_type", String(20))
+    scope_type: Mapped[str] = mapped_column("scope_type", String(20))
+    scope_id: Mapped[str] = mapped_column("scope_id", String(64))
+    content: Mapped[str] = mapped_column(Text, default="")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        "updated_at",
+        DateTime(timezone=True),
+        server_default=func.now(),
     )

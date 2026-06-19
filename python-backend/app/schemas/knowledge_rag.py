@@ -91,6 +91,7 @@ class BackfillEmbeddingsResponse(BaseModel):
 class KnowledgeDocumentResponse(BaseModel):
     id: str
     userId: str
+    corpusIds: list[str] = Field(default_factory=list)
     title: str
     summary: str
     content: str
@@ -186,6 +187,48 @@ class SearchResponse(BaseModel):
 class DocumentListEnvelope(BaseModel):
     items: list[KnowledgeDocumentResponse]
     total: int
+
+
+class KnowledgeCorpusResponse(BaseModel):
+    id: str
+    userId: str
+    name: str
+    description: str
+    defaultTags: list[str] = Field(default_factory=list)
+    documentIds: list[str] = Field(default_factory=list)
+    createdAt: int
+    updatedAt: int
+
+
+class KnowledgeCorpusListEnvelope(BaseModel):
+    items: list[KnowledgeCorpusResponse]
+    total: int
+
+
+class CreateKnowledgeCorpusRequest(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    description: Annotated[str, StringConstraints(max_length=2000)] | None = ""
+    defaultTags: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)]] | None = Field(
+        default=None,
+        max_length=20,
+    )
+    documentIds: list[str] | None = Field(default=None, max_length=100)
+
+
+class UpdateKnowledgeCorpusRequest(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)] | None = None
+    description: Annotated[str, StringConstraints(max_length=2000)] | None = None
+    defaultTags: list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)]] | None = Field(
+        default=None,
+        max_length=20,
+    )
+    documentIds: list[str] | None = Field(default=None, max_length=100)
+
+    @model_validator(mode="after")
+    def ensure_mutation_fields(self) -> "UpdateKnowledgeCorpusRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be provided")
+        return self
 
 
 class ChunkListEnvelope(BaseModel):
