@@ -1,36 +1,19 @@
 # 更新日志
 
-## [Unreleased]
+## [1.2.0] - 2026-06-19
 
-### 文档
-- 统一 Markdown 文档中的项目定位：从“通用个人工作台”收敛为“面向个人、服务大文件学习场景的 RAG + Agent 应用”
-- 更正文档表述，避免将知识库场景错误限制为仅 PDF，统一覆盖 PDF、Markdown、TXT、扫描件等资料类型
+### 概述
+- 项目定位进一步收敛为“面向个人、从大体量资料中持续学习新知识”的 RAG + Agent 工作台
 
-### Agent / Memory
-- 新增长时记忆持久层：`agent_memory_events`、`agent_memory_records`、`agent_memory_blocks`
-- Agent 会话支持资料集感知的长期记忆与会话级语料绑定
-- RAG 工具在会话内可根据资料集记忆自动缩小检索文档范围
-- 优化记忆抽取逻辑：复合指令拆分为偏好、规则、目标，减少冗余记忆
-- 修复清空会话记忆时 session 级 memory block 残留问题
+### 亮点
+- 新增资料集（corpus）能力，可将同主题资料归组并用于会话级检索收缩
+- 新增 Agent 长时记忆持久层，支持偏好、规则、目标、摘要与资料集绑定
+- 优化会话内 RAG 行为，围绕同一资料持续提问时可自动收缩检索范围
+- 完善项目文档，统一覆盖 PDF、Markdown、TXT、扫描件等多格式资料场景
 
-### RAG
-- 新增资料集（corpus）模型、接口与前端基础管理能力
-- 为知识文档响应补充 `corpusIds`，支持资料归组与会话级检索收缩
-
-### 仓库整理
-- 删除开发垃圾文件（.tmp/、server/data/、大模型发展历程.txt、__pycache__、.pytest_cache）
-- 更新 .gitignore 补充常见模式（.DS_Store、.idea/、.vscode/、*.swp 等）
-- 添加 .gitattributes 统一跨平台行尾处理
-- 添加 .dockerignore 减少构建上下文
-- 修复 package.json 元数据（名称、许可证、private 标记）
-- 清理 webpack.config.js 中未声明的依赖别名
-- 添加 ESLint 基础配置和 Ruff 配置
-- 归档 PYTHON_MIGRATION.md 到 README 迁移说明
-- 统一 .md 文档为中文
-- 扩充 SECURITY.md 安全策略内容
-- 完善 CHANGELOG.md 历史记录
-- 添加 ocr:dev 脚本并修复 ocr-service README
-- 同步 .env.example 配置模板
+### 验证
+- 后端测试、前端 API 测试与 TypeScript 类型检查均已通过
+- 已在真实 PostgreSQL 环境完成最小记忆链路与资料集检索收缩验证
 
 ## [1.0.0] - 2026-06-02
 
