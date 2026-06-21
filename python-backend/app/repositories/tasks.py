@@ -1,9 +1,10 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from app.db.models import Task
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import Task
 
 
 def parse_due_date(value: str | None) -> date | None:

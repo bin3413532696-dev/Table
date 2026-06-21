@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createCorpus, getCorpora, triggerIndex } from '../../src/pages/KnowledgeRag/api';
+import { createCorpus, getCorpora, triggerIndex } from '../../src/features/knowledge/api/rag';
 import { installFetchMock } from './helpers';
 
 test('triggerIndex accepts message-only response when document is already indexed', async () => {

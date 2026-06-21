@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import re
-
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 DEFAULT_SESSION_TITLE = "新会话"
 ACTIVE_AGENT_RUN_STATUSES = {"running", "waiting_confirmation"}
@@ -44,7 +43,7 @@ class AgentModelRuntimeConfig:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _timestamp_ms(value: datetime | None) -> int:

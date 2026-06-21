@@ -1,10 +1,11 @@
-from decimal import Decimal
 from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
-from app.db.models import FinanceRecord
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import FinanceRecord
 
 
 def parse_record_date(value: str) -> date:

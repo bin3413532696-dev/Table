@@ -4,9 +4,10 @@ from typing import Literal
 from urllib.parse import unquote
 from uuid import UUID
 
+from fastapi import Request
+
 from app.core.config import Settings
 from app.core.session import is_signed_token, verify_session_token
-from fastapi import Request
 
 UserSource = Literal["default", "header", "signed_session", "missing"]
 

@@ -1,12 +1,13 @@
+from types import SimpleNamespace
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-from types import SimpleNamespace
 
 from app.api.routes import knowledge_rag as knowledge_rag_routes
 from app.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, generate_csrf_token
 from app.core.user_context import UserContext
-from app.dependencies import get_authenticated_user
 from app.db.session import get_session
+from app.dependencies import get_authenticated_user
 from app.main import create_app
 
 
@@ -32,7 +33,13 @@ async def test_non_health_get_sets_csrf_cookie(monkeypatch) -> None:
     app = _make_app()
 
     async def fake_get_stats(session, user_id):
-        return {"documentCount": 0, "indexedDocumentCount": 0, "chunkCount": 0, "chunkWithEmbeddingCount": 0, "cacheCount": 0}
+        return {
+            "documentCount": 0,
+            "indexedDocumentCount": 0,
+            "chunkCount": 0,
+            "chunkWithEmbeddingCount": 0,
+            "cacheCount": 0,
+        }
 
     monkeypatch.setattr(knowledge_rag_routes, "get_stats", fake_get_stats)
 

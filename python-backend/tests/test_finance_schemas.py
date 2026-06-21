@@ -1,6 +1,7 @@
-from app.schemas.finance import CreateFinanceRecordRequest, UpdateFinanceRecordRequest
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
+
+from app.schemas.finance import CreateFinanceRecordRequest, UpdateFinanceRecordRequest
 
 
 def test_create_finance_record_accepts_date_aliases() -> None:

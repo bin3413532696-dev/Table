@@ -1,8 +1,9 @@
+from fastapi import Request
+
 from app.core.config import Settings
 from app.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, validate_csrf_token
 from app.core.session import sign_session_token
 from app.core.user_context import DEV_SESSION_COOKIE, resolve_request_user_context
-from fastapi import Request
 
 
 def make_request(headers: list[tuple[bytes, bytes]]) -> Request:

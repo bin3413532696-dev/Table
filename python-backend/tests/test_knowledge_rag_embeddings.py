@@ -1,9 +1,9 @@
 import asyncio
-from types import SimpleNamespace
 from collections import OrderedDict
+from types import SimpleNamespace
 
+import app.services.knowledge_rag_embeddings as knowledge_rag_embeddings
 from app.core.config import Settings
-from app.services import knowledge_rag_embeddings
 from app.services.knowledge_rag_embeddings import (
     EmbeddingChunkInput,
     EmbeddingRuntimeConfig,
@@ -211,6 +211,7 @@ def test_resolve_embedding_runtime_config_falls_back_to_active_provider(monkeypa
         assert config.api_key == "provider-secret"
         assert config.base_url == "https://provider.example.com"
         assert config.model == "text-embedding-provider"
+        assert config.dimensions is None
         assert config.headers == {"X-Test": "1"}
 
     asyncio.run(run())

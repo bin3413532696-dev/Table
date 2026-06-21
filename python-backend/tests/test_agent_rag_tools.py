@@ -2,9 +2,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services import agent as agent_service
 from app.core.config import Settings
 from app.schemas.knowledge_rag import SearchResultResponse
+from app.services.agent._tools import _parse_tool_calls
 from app.services.agent.registry import AgentToolExecutionContext
 from app.services.agent.tools import rag as rag_tools
 
@@ -110,7 +110,7 @@ async def test_chunk_read_prefers_parent_content(monkeypatch) -> None:
 
 
 def test_parse_tool_calls_strips_provider_artifacts() -> None:
-    visible_text, tool_calls = agent_service._parse_tool_calls(
+    visible_text, tool_calls = _parse_tool_calls(
         "根据知识库检索结果，我找到了相关信息。\n<minimax:tool_call>\n\n<minimax:tool_call>",
         rag_enabled=True,
     )

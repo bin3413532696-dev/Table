@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: table_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d table_dev"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/table_dev
+      RUN_PYTHON_INTEGRATION_TESTS: "1"
+      ALLOW_DEFAULT_USER_FALLBACK: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.7.15"
+
+      - name: Enable database extensions
+        run: |
+          psql "$env:DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+        shell: pwsh
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install backend dependencies
+        run: uv sync --default-index https://pypi.org/simple --package table-python-backend
+
+      - name: Install OCR dependencies
+        run: uv sync --default-index https://pypi.org/simple --package table-ocr-service
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Run typecheck
+        run: npm run typecheck
+
+      - name: Run production build
+        run: npm run build
+
+      - name: Check bundle size baseline
+        run: npm run check:bundle-size
+
+      - name: Run frontend API tests
+        run: npm run test:frontend-api
+
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
+      - name: Run backend unit tests
+        run: npm run backend:test:unit
+
+      - name: Run backend integration tests
+        run: npm run backend:test:integration
+
+      - name: Run backend startup tests
+        run: npm run backend:test:startup
+
+      - name: Run OCR tests
+        run: npm run ocr:test
+
+      - name: Run convention tests
+        run: npm run backend:test:conventions
+
+      - name: Run basic smoke tests
+        run: npm run smoke:basic

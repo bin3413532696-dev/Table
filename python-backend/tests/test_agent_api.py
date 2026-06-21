@@ -397,7 +397,37 @@ async def test_stream_agent_run_route_emits_error_event(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "event: error" in body
+    assert '"error": "INFRASTRUCTURE_ERROR"' in body
     assert '"message": "Provider request failed"' in body
+
+
+@pytest.mark.asyncio
+async def test_confirm_agent_tool_stream_route_emits_standard_error_event(monkeypatch) -> None:
+    app = _make_app()
+    token = generate_csrf_token()
+
+    async def fake_stream_confirm_agent_tool_record(session, user_id, run_id, tool_execution_id):
+        del session, user_id, run_id, tool_execution_id
+        raise LookupError("Pending tool not found")
+        yield
+
+    monkeypatch.setattr(agent_routes, "stream_confirm_agent_tool_record", fake_stream_confirm_agent_tool_record)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        async with client.stream(
+            "POST",
+            "/api/agent/runs/00000000-0000-0000-0000-000000000201/tools/pending-confirmation/confirm/stream",
+            headers={CSRF_HEADER_NAME: token},
+        ) as response:
+            body = ""
+            async for chunk in response.aiter_text():
+                body += chunk
+
+    assert response.status_code == 200
+    assert "event: error" in body
+    assert '"error": "NOT_FOUND"' in body
+    assert '"message": "Pending tool not found"' in body
 
 
 @pytest.mark.asyncio

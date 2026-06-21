@@ -1,13 +1,15 @@
+import pytest
+from fastapi import Request
+from pydantic import ValidationError
+
 from app.api.routes.knowledge import parse_search_query
+from app.api.routes.knowledge_rag import parse_document_list_query
 from app.schemas.knowledge import (
     CreateNoteRequest,
     CreatePresetTagRequest,
     UpdateNoteRequest,
     UpdatePresetTagRequest,
 )
-from fastapi import Request
-from pydantic import ValidationError
-import pytest
 
 
 def make_request(query_string: bytes) -> Request:
@@ -49,3 +51,14 @@ def test_parse_search_query_supports_comma_separated_tags() -> None:
     assert query.query == "test"
     assert query.tags == ["a", "b"]
     assert query.limit == 10
+
+
+def test_parse_document_list_query_supports_repeated_and_csv_values() -> None:
+    query = parse_document_list_query(
+        make_request(b"tags=a,b&tags=c&sourceDept=ops,hr&businessCategory=risk&limit=15&offset=5")
+    )
+    assert query.tags == ["a", "b", "c"]
+    assert query.sourceDept == ["ops", "hr"]
+    assert query.businessCategory == ["risk"]
+    assert query.limit == 15
+    assert query.offset == 5

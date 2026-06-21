@@ -1,15 +1,11 @@
-"""_describe_images_and_replace_placeholders 流程测试（mock session + 文件系统）。"""
-from pathlib import Path
+"""describe_images_and_replace_placeholders 流程测试（mock session + 文件系统）。"""
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.services import knowledge_rag
-from app.services.knowledge_rag import (
-    _describe_images_and_replace_placeholders,
-    _image_placeholder_regex,
-)
+import app.services.knowledge_rag_images as knowledge_rag_images
+from app.services.knowledge_rag_collaborators import ImageDescriptionCollaborators
 from app.services.knowledge_rag_vision import VisionLLMRuntimeConfig
 
 
@@ -20,35 +16,58 @@ def _runtime() -> VisionLLMRuntimeConfig:
     )
 
 
+def _collaborators(**overrides) -> ImageDescriptionCollaborators:
+    collaborators = {
+        "describe_single_image_vlm": AsyncMock(return_value=""),
+        "find_image_description_cache": AsyncMock(return_value=None),
+        "find_image_file": knowledge_rag_images.find_image_file,
+        "find_uploaded_document_path": lambda settings, user_id, document_id: None,
+        "image_placeholder_regex": knowledge_rag_images.image_placeholder_regex,
+        "logger": MagicMock(),
+        "store_image_description_cache": AsyncMock(),
+    }
+    collaborators.update(overrides)
+    return ImageDescriptionCollaborators(**collaborators)
+
+
 @pytest.mark.asyncio
 async def test_describe_phase_skipped_when_vision_disabled(monkeypatch, tmp_path) -> None:
-    from types import SimpleNamespace
+    del monkeypatch, tmp_path
     settings = SimpleNamespace(rag_vision_llm_enabled=False)
     content = "no images here"
-    result = await _describe_images_and_replace_placeholders(
-        session=MagicMock(), user_id="u", document_id="d",
-        content=content, settings=settings,
+    result = await knowledge_rag_images.describe_images_and_replace_placeholders(
+        session=MagicMock(),
+        user_id="u",
+        document_id="d",
+        content=content,
+        settings=settings,
+        collaborators=_collaborators(),
     )
     assert result == content
 
 
 @pytest.mark.asyncio
 async def test_describe_phase_no_op_when_no_placeholders(monkeypatch, tmp_path) -> None:
+    del monkeypatch, tmp_path
     settings = SimpleNamespace(
         rag_vision_llm_enabled=True,
         rag_vision_llm_max_images_per_doc=50,
         rag_vision_llm_max_concurrency=3,
     )
-    # resolve_vision_llm_runtime_config 不会被调用（早退）
-    result = await _describe_images_and_replace_placeholders(
-        session=MagicMock(), user_id="u", document_id="d",
-        content="plain text", settings=settings,
+    result = await knowledge_rag_images.describe_images_and_replace_placeholders(
+        session=MagicMock(),
+        user_id="u",
+        document_id="d",
+        content="plain text",
+        settings=settings,
+        collaborators=_collaborators(),
     )
     assert result == "plain text"
 
 
 @pytest.mark.asyncio
 async def test_describe_phase_keeps_placeholder_when_no_provider(monkeypatch, tmp_path) -> None:
+    del tmp_path
     settings = SimpleNamespace(
         rag_vision_llm_enabled=True,
         rag_vision_llm_max_images_per_doc=50,
@@ -62,11 +81,14 @@ async def test_describe_phase_keeps_placeholder_when_no_provider(monkeypatch, tm
     )
 
     content = "before [IMAGE:page=1;idx=0] after"
-    result = await _describe_images_and_replace_placeholders(
-        session=MagicMock(), user_id="u", document_id="d",
-        content=content, settings=settings,
+    result = await knowledge_rag_images.describe_images_and_replace_placeholders(
+        session=MagicMock(),
+        user_id="u",
+        document_id="d",
+        content=content,
+        settings=settings,
+        collaborators=_collaborators(),
     )
-    # 无 provider → 占位符保持原样
     assert result == content
 
 
@@ -89,34 +111,29 @@ async def test_describe_phase_replaces_placeholder_with_cached_description(
     image_path = images_dir / "page_1_idx_0.png"
     image_path.write_bytes(b"png-bytes")
 
-    monkeypatch.setattr(
-        knowledge_rag, "_find_uploaded_document_path",
-        lambda settings, user_id, document_id: pdf_path,
-    )
-
-    # vision runtime 可用
     import app.services.knowledge_rag_vision as vision_mod
     monkeypatch.setattr(
         vision_mod, "resolve_vision_llm_runtime_config",
         AsyncMock(return_value=_runtime()),
     )
 
-    # 缓存命中
-    monkeypatch.setattr(
-        knowledge_rag, "find_image_description_cache",
-        AsyncMock(return_value="cached desc"),
-    )
+    find_cache = AsyncMock(return_value="cached desc")
     store_mock = AsyncMock()
-    monkeypatch.setattr(knowledge_rag, "store_image_description_cache", store_mock)
-
-    # VLM 不应被调用
     vlm_call = AsyncMock()
-    monkeypatch.setattr(knowledge_rag, "_describe_single_image_vlm", vlm_call)
 
     content = "before [IMAGE:page=1;idx=0] after"
-    result = await _describe_images_and_replace_placeholders(
-        session=MagicMock(), user_id="u", document_id="d",
-        content=content, settings=settings,
+    result = await knowledge_rag_images.describe_images_and_replace_placeholders(
+        session=MagicMock(),
+        user_id="u",
+        document_id="d",
+        content=content,
+        settings=settings,
+        collaborators=_collaborators(
+            describe_single_image_vlm=vlm_call,
+            find_image_description_cache=find_cache,
+            find_uploaded_document_path=lambda settings, user_id, document_id: pdf_path,
+            store_image_description_cache=store_mock,
+        ),
     )
     assert "[图片描述 (page 1)]" in result
     assert "cached desc" in result
@@ -139,30 +156,28 @@ async def test_describe_phase_calls_vlm_on_cache_miss(monkeypatch, tmp_path) -> 
     images_dir.mkdir()
     (images_dir / "page_2_idx_0.png").write_bytes(b"img")
 
-    monkeypatch.setattr(
-        knowledge_rag, "_find_uploaded_document_path",
-        lambda settings, user_id, document_id: pdf_path,
-    )
     import app.services.knowledge_rag_vision as vision_mod
     monkeypatch.setattr(
         vision_mod, "resolve_vision_llm_runtime_config",
         AsyncMock(return_value=_runtime()),
     )
-    monkeypatch.setattr(
-        knowledge_rag, "find_image_description_cache",
-        AsyncMock(return_value=None),
-    )
+    find_cache = AsyncMock(return_value=None)
     store_mock = AsyncMock()
-    monkeypatch.setattr(knowledge_rag, "store_image_description_cache", store_mock)
-    monkeypatch.setattr(
-        knowledge_rag, "_describe_single_image_vlm",
-        AsyncMock(return_value="vlm desc"),
-    )
+    describe_image = AsyncMock(return_value="vlm desc")
 
     content = "[IMAGE:page=2;idx=0]"
-    result = await _describe_images_and_replace_placeholders(
-        session=MagicMock(), user_id="u", document_id="d",
-        content=content, settings=settings,
+    result = await knowledge_rag_images.describe_images_and_replace_placeholders(
+        session=MagicMock(),
+        user_id="u",
+        document_id="d",
+        content=content,
+        settings=settings,
+        collaborators=_collaborators(
+            describe_single_image_vlm=describe_image,
+            find_image_description_cache=find_cache,
+            find_uploaded_document_path=lambda settings, user_id, document_id: pdf_path,
+            store_image_description_cache=store_mock,
+        ),
     )
 
     assert "vlm desc" in result
@@ -186,32 +201,26 @@ async def test_describe_phase_skips_beyond_max_images(monkeypatch, tmp_path) -> 
     (images_dir / "page_1_idx_0.png").write_bytes(b"img1")
     (images_dir / "page_1_idx_1.png").write_bytes(b"img2")
 
-    monkeypatch.setattr(
-        knowledge_rag, "_find_uploaded_document_path",
-        lambda settings, user_id, document_id: pdf_path,
-    )
     import app.services.knowledge_rag_vision as vision_mod
     monkeypatch.setattr(
         vision_mod, "resolve_vision_llm_runtime_config",
         AsyncMock(return_value=_runtime()),
     )
-    monkeypatch.setattr(
-        knowledge_rag, "find_image_description_cache",
-        AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        knowledge_rag, "store_image_description_cache",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        knowledge_rag, "_describe_single_image_vlm",
-        AsyncMock(return_value="desc"),
-    )
+    describe_image = AsyncMock(return_value="desc")
 
     content = "[IMAGE:page=1;idx=0] [IMAGE:page=1;idx=1]"
-    result = await _describe_images_and_replace_placeholders(
-        session=MagicMock(), user_id="u", document_id="d",
-        content=content, settings=settings,
+    result = await knowledge_rag_images.describe_images_and_replace_placeholders(
+        session=MagicMock(),
+        user_id="u",
+        document_id="d",
+        content=content,
+        settings=settings,
+        collaborators=_collaborators(
+            describe_single_image_vlm=describe_image,
+            find_image_description_cache=AsyncMock(return_value=None),
+            find_uploaded_document_path=lambda settings, user_id, document_id: pdf_path,
+            store_image_description_cache=AsyncMock(),
+        ),
     )
 
     assert "desc" in result
@@ -229,12 +238,7 @@ async def test_describe_phase_handles_missing_image_file(monkeypatch, tmp_path) 
 
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"pdf")
-    # 不创建 images_dir
 
-    monkeypatch.setattr(
-        knowledge_rag, "_find_uploaded_document_path",
-        lambda settings, user_id, document_id: pdf_path,
-    )
     import app.services.knowledge_rag_vision as vision_mod
     monkeypatch.setattr(
         vision_mod, "resolve_vision_llm_runtime_config",
@@ -242,15 +246,21 @@ async def test_describe_phase_handles_missing_image_file(monkeypatch, tmp_path) 
     )
 
     content = "[IMAGE:page=1;idx=0]"
-    result = await _describe_images_and_replace_placeholders(
-        session=MagicMock(), user_id="u", document_id="d",
-        content=content, settings=settings,
+    result = await knowledge_rag_images.describe_images_and_replace_placeholders(
+        session=MagicMock(),
+        user_id="u",
+        document_id="d",
+        content=content,
+        settings=settings,
+        collaborators=_collaborators(
+            find_uploaded_document_path=lambda settings, user_id, document_id: pdf_path,
+        ),
     )
     assert "图片文件缺失" in result
 
 
 def test_image_placeholder_regex_matches_valid_format() -> None:
-    pattern = _image_placeholder_regex()
+    pattern = knowledge_rag_images.image_placeholder_regex()
     text = "before [IMAGE:page=10;idx=3] after"
     matches = list(pattern.finditer(text))
     assert len(matches) == 1
@@ -259,6 +269,6 @@ def test_image_placeholder_regex_matches_valid_format() -> None:
 
 
 def test_image_placeholder_regex_ignores_malformed() -> None:
-    pattern = _image_placeholder_regex()
+    pattern = knowledge_rag_images.image_placeholder_regex()
     text = "[IMAGE:page=1] [IMAGE:idx=0] [IMAGE:page=;idx=0]"
     assert list(pattern.finditer(text)) == []

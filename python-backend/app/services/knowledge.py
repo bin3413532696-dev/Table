@@ -1,3 +1,5 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models import KnowledgeNote, KnowledgePresetTag
 from app.repositories.knowledge import (
     create_note,
@@ -25,7 +27,6 @@ from app.schemas.knowledge import (
     UpdateNoteRequest,
     UpdatePresetTagRequest,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def to_note_response(note: KnowledgeNote) -> NoteResponse:

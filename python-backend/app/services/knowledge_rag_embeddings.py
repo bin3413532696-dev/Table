@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from hashlib import sha256
-from collections import OrderedDict
 from time import time
 from typing import Any
 
@@ -13,7 +13,6 @@ from app.core.config import Settings, get_settings
 from app.core.provider_crypto import decrypt_provider_secret
 from app.repositories.providers import find_active_provider_for_user
 from app.services.api_urls import build_v1_api_url
-
 
 QUERY_EMBEDDING_CACHE_TTL_SECONDS = 3600
 QUERY_EMBEDDING_CACHE_MAX_ITEMS = 1024
@@ -46,7 +45,7 @@ class EmbeddingRuntimeConfig:
     api_key: str
     base_url: str
     model: str
-    dimensions: int
+    dimensions: int | None
     timeout_ms: int
     max_retries: int
     headers: dict[str, str]
@@ -88,7 +87,7 @@ async def resolve_embedding_runtime_config(
         api_key=api_key,
         base_url=base_url,
         model=(provider.embedding_model or current.embedding_model).strip(),
-        dimensions=current.embedding_dimensions,
+        dimensions=None,
         timeout_ms=current.embedding_timeout_ms,
         max_retries=current.embedding_max_retries,
         headers=_to_string_record(provider.headers_json),
@@ -139,7 +138,7 @@ class OpenAICompatibleEmbeddingClient:
             "model": self._config.model,
             "input": inputs,
         }
-        if self._config.dimensions:
+        if self._config.dimensions is not None:
             payload["dimensions"] = self._config.dimensions
 
         last_error: Exception | None = None
@@ -159,9 +158,10 @@ class OpenAICompatibleEmbeddingClient:
                     data = response.json()
                     embeddings = [item["embedding"] for item in data.get("data", [])]
                     for embedding in embeddings:
-                        if len(embedding) != self._config.dimensions:
+                        if self._config.dimensions is not None and len(embedding) != self._config.dimensions:
                             raise ValueError(
-                                f"Embedding dimension mismatch: expected {self._config.dimensions}, got {len(embedding)}"
+                                "Embedding dimension mismatch: expected "
+                                f"{self._config.dimensions}, got {len(embedding)}"
                             )
                     return embeddings
             except Exception as exc:

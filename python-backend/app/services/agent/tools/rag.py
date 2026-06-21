@@ -10,7 +10,7 @@ from app.services.agent.registry import (
     register_tool_definition,
 )
 from app.services.agent.tools.common import int_arg, string_arg
-from app.services.knowledge_rag import (
+from app.services.knowledge_rag_public import (
     build_search_context,
     resolve_corpus_document_ids,
     search_service,
@@ -48,7 +48,11 @@ def _build_chunk_read_result(chunk: dict[str, object] | None, *, error_message: 
 
     document_title = str(chunk.get("document_title") or "")
     heading_chain = chunk.get("heading_chain")
-    source = f"{document_title} > {heading_chain}" if isinstance(heading_chain, str) and heading_chain else document_title
+    source = (
+        f"{document_title} > {heading_chain}"
+        if isinstance(heading_chain, str) and heading_chain
+        else document_title
+    )
     content = str(chunk.get("parent_content") or chunk.get("content") or "")
     return (
         "<chunk_read_result>\n"

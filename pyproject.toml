@@ -1,2 +1,6 @@
 [tool.uv.workspace]
 members = ["python-backend", "ocr-service"]
+
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true

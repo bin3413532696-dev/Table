@@ -1,6 +1,9 @@
 from typing import Annotated
-
 from uuid import UUID
+
+from fastapi import Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import AuthError
@@ -8,9 +11,6 @@ from app.core.user_context import UserContext, get_user_context, validate_user_i
 from app.db.models import User
 from app.db.session import get_session
 from app.services.provider_bootstrap import ensure_user_provider_bootstrap
-from fastapi import Depends
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 DbSession = Annotated[AsyncSession, Depends(get_session)]
 

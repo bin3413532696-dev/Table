@@ -2,9 +2,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
-
-from app.services import knowledge_rag_pdf
+import app.services.knowledge_rag_pdf as knowledge_rag_pdf
 from app.services.knowledge_rag_pdf import (
     PdfImageRegion,
     _build_markdown_with_placeholders,
@@ -147,7 +145,6 @@ def test_cluster_vector_drawings_handles_get_drawings_exception() -> None:
 
 
 def test_save_pdf_images_creates_dir_and_writes_files(tmp_path) -> None:
-    from pathlib import Path
     pdf_path = tmp_path / "doc.pdf"
     pdf_path.write_bytes(b"fake")
 

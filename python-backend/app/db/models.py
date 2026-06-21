@@ -1,6 +1,6 @@
 import uuid
-from decimal import Decimal
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -99,7 +99,11 @@ class AgentSession(Base):
     memory_todos_json: Mapped[list[dict]] = mapped_column("memory_todos_json", JSONB, default=list)
     memory_rules_json: Mapped[list[str]] = mapped_column("memory_rules_json", JSONB, default=list)
     memory_status: Mapped[str] = mapped_column("memory_status", String, default="idle")
-    memory_updated_at: Mapped[datetime | None] = mapped_column("memory_updated_at", DateTime(timezone=True), nullable=True)
+    memory_updated_at: Mapped[datetime | None] = mapped_column(
+        "memory_updated_at",
+        DateTime(timezone=True),
+        nullable=True,
+    )
     memory_disabled: Mapped[bool] = mapped_column("memory_disabled", Boolean, default=False)
     memory_run_count: Mapped[int] = mapped_column("memory_run_count", Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
@@ -443,9 +447,17 @@ class AgentMemoryRecord(Base):
     confidence: Mapped[float] = mapped_column(Numeric(4, 3), default=0.5)
     salience: Mapped[float] = mapped_column(Numeric(4, 3), default=0.5)
     source_run_id: Mapped[uuid.UUID | None] = mapped_column("source_run_id", UUID(as_uuid=True), nullable=True)
-    source_document_id: Mapped[uuid.UUID | None] = mapped_column("source_document_id", UUID(as_uuid=True), nullable=True)
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        "source_document_id",
+        UUID(as_uuid=True),
+        nullable=True,
+    )
     evidence_json: Mapped[dict] = mapped_column("evidence_json", JSONB, default=dict)
-    last_accessed_at: Mapped[datetime | None] = mapped_column("last_accessed_at", DateTime(timezone=True), nullable=True)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(
+        "last_accessed_at",
+        DateTime(timezone=True),
+        nullable=True,
+    )
     access_count: Mapped[int] = mapped_column("access_count", Integer, default=0)
     supersedes_id: Mapped[uuid.UUID | None] = mapped_column("supersedes_id", UUID(as_uuid=True), nullable=True)
     ttl_at: Mapped[datetime | None] = mapped_column("ttl_at", DateTime(timezone=True), nullable=True)

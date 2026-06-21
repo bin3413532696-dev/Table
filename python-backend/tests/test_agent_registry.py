@@ -1,15 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from types import SimpleNamespace
 import uuid
+from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
+import app.services.agent._execution as agent_execution
+import app.services.agent._runs as agent_runs
+import app.services.agent._runtime_support as agent_runtime_support
 from app.db.models import AgentRun, AgentSession
 from app.schemas.agent import CreateAgentRunRequest
-from app.services import agent as agent_service
-from app.services.agent.registry import AgentLifecycleHook, get_agent_hook_manager, list_provider_capabilities, list_tool_capabilities
+from app.services.agent.registry import (
+    AgentLifecycleHook,
+    get_agent_hook_manager,
+    list_provider_capabilities,
+    list_tool_capabilities,
+)
 
 
 def test_registry_exposes_provider_and_tool_capabilities() -> None:
@@ -27,7 +34,7 @@ async def test_stream_agent_run_record_fires_core_lifecycle_hooks(monkeypatch) -
     user_id = str(uuid.uuid4())
     session_id = uuid.uuid4()
     run_id = uuid.uuid4()
-    created_at = datetime(2026, 6, 1, 8, 0, tzinfo=timezone.utc)
+    created_at = datetime(2026, 6, 1, 8, 0, tzinfo=UTC)
 
     session_item = AgentSession(
         id=session_id,
@@ -129,26 +136,27 @@ async def test_stream_agent_run_record_fires_core_lifecycle_hooks(monkeypatch) -
         assert requested_run_id == str(run_id)
         return completed_run
 
-    async def fake_stream_openai_chat_completion(runtime_config, *, messages):
+    async def fake_stream_provider_chat_completion(runtime_config, *, messages):
+        assert runtime_config.api_format == "openai"
         assert runtime_config.model == "gpt-4o-mini"
         assert messages[-1] == {"role": "user", "content": "Say hi"}
         yield "Hello"
 
-    monkeypatch.setattr(agent_service, "find_active_provider_for_user", fake_find_active_provider_for_user)
-    monkeypatch.setattr(agent_service, "decrypt_provider_secret", lambda value, settings=None: "plain-secret")
-    monkeypatch.setattr(agent_service, "find_agent_session_by_id", fake_find_agent_session_by_id)
-    monkeypatch.setattr(agent_service, "find_user_setting", fake_find_user_setting)
-    monkeypatch.setattr(agent_service, "create_agent_run", fake_create_agent_run)
-    monkeypatch.setattr(agent_service, "update_agent_session", fake_update_agent_session)
-    monkeypatch.setattr(agent_service, "update_agent_run", fake_update_agent_run)
-    monkeypatch.setattr(agent_service, "find_agent_run_by_id", fake_find_agent_run_by_id)
-    monkeypatch.setattr(agent_service, "_stream_openai_chat_completion", fake_stream_openai_chat_completion)
+    monkeypatch.setattr(agent_runtime_support, "find_active_provider_for_user", fake_find_active_provider_for_user)
+    monkeypatch.setattr(agent_runtime_support, "decrypt_provider_secret", lambda value, settings=None: "plain-secret")
+    monkeypatch.setattr(agent_runs, "find_agent_session_by_id", fake_find_agent_session_by_id)
+    monkeypatch.setattr(agent_execution, "find_user_setting", fake_find_user_setting)
+    monkeypatch.setattr(agent_execution, "create_agent_run", fake_create_agent_run)
+    monkeypatch.setattr(agent_execution, "update_agent_session", fake_update_agent_session)
+    monkeypatch.setattr(agent_runtime_support, "update_agent_run", fake_update_agent_run)
+    monkeypatch.setattr(agent_execution, "find_agent_run_by_id", fake_find_agent_run_by_id)
+    monkeypatch.setattr(agent_execution, "_stream_provider_chat_completion", fake_stream_provider_chat_completion)
 
     payload = CreateAgentRunRequest(sessionId=session_id, inputText="Say hi", model="default")
 
     try:
         events.clear()
-        _ = [event async for event in agent_service.stream_agent_run_record(object(), user_id, payload)]
+        _ = [event async for event in agent_execution.stream_agent_run_record(object(), user_id, payload)]
     finally:
         hook_manager.hooks.remove(hook)
 

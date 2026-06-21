@@ -5,18 +5,24 @@ import pytest
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import app.services.agent._execution as agent_execution_service
+import app.services.agent._runs as agent_runs_service
+from app.repositories.agent import create_agent_run as create_agent_run_entity
 from app.core.config import Settings
 from app.db.models import AgentRun, AgentSession, User, UserSetting
 from app.schemas.agent import (
+    AgentRunDetailDto,
+    AgentRunMessageDto,
     AgentPersonaDto,
     CreateAgentRunRequest,
     CreateAgentSessionRequest,
     ListAgentRunsQuery,
+    TimelineEvent,
     ListAgentSessionsQuery,
     UpdateAgentRunRequest,
     UpdateAgentSessionRequest,
 )
-from app.services.agent import (
+from app.services.agent.public import (
     create_agent_run_record,
     create_agent_session_record,
     delete_agent_run_record,
@@ -30,7 +36,7 @@ from app.services.agent import (
     update_agent_run_record,
     update_agent_session_record,
 )
-
+from app.services.provider_bootstrap import ensure_user_provider_bootstrap
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PYTHON_INTEGRATION_TESTS") != "1",
@@ -57,6 +63,48 @@ async def test_agent_persona_and_persistence_crud() -> None:
                 )
             )
             await session.commit()
+            await ensure_user_provider_bootstrap(session, str(user_id), settings)
+
+            async def fake_stream_agent_run_record(current_session, current_user_id, payload):
+                created_run = await agent_runs_service.resolve_run_session(current_session, current_user_id, payload)
+                persisted_run = await create_agent_run_entity(
+                    current_session,
+                    current_user_id,
+                    session_id=str(created_run.id),
+                    input_text=payload.inputText,
+                    model=payload.model,
+                    status="completed",
+                )
+                detail = AgentRunDetailDto(
+                    id=str(persisted_run.id),
+                    sessionId=str(persisted_run.session_id),
+                    status="completed",
+                    inputText=persisted_run.input_text,
+                    model=persisted_run.model,
+                    createdAt=int(persisted_run.created_at.timestamp() * 1000),
+                    updatedAt=int(persisted_run.updated_at.timestamp() * 1000),
+                    version=persisted_run.version,
+                    messages=[
+                        AgentRunMessageDto(
+                            id="assistant-1",
+                            role="assistant",
+                            content="Migration scope reviewed.",
+                            createdAt=int(persisted_run.updated_at.timestamp() * 1000),
+                        )
+                    ],
+                    finalText="Migration scope reviewed.",
+                    timeline=[
+                        TimelineEvent(
+                            type="llm_end",
+                            timestamp=persisted_run.updated_at.isoformat(),
+                            data={"source": "integration-test"},
+                        )
+                    ],
+                )
+                yield {"type": "run_completed", "run": detail.model_dump(mode="json")}
+
+            monkeypatch = pytest.MonkeyPatch()
+            monkeypatch.setattr(agent_execution_service, "stream_agent_run_record", fake_stream_agent_run_record)
 
             persona = await get_agent_persona(session, str(user_id))
             assert persona.systemPrompt == ""
@@ -94,8 +142,8 @@ async def test_agent_persona_and_persistence_crud() -> None:
                 ),
             )
             assert run_detail.sessionId == session_record.id
-            assert run_detail.status == "pending"
-            assert run_detail.messages == []
+            assert run_detail.status == "completed"
+            assert any(message.content == "Migration scope reviewed." for message in run_detail.messages)
 
             created_run = await get_agent_run_detail(session, str(user_id), run_detail.id)
             assert created_run is not None
@@ -139,6 +187,7 @@ async def test_agent_persona_and_persistence_crud() -> None:
             delete_session_result = await delete_agent_session_record(session, str(user_id), session_record.id)
             assert delete_session_result is not None
             assert delete_session_result.deleted is True
+            monkeypatch.undo()
     finally:
         async with session_factory() as session:
             await session.execute(delete(AgentRun).where(AgentRun.user_id == user_id))

@@ -7,11 +7,29 @@ This service is the production backend for `Table`, a personal RAG + Agent works
 Run from the repository root:
 
 ```bash
-uv sync --package table-python-backend
-uv run --package table-python-backend uvicorn app.main:app --host 127.0.0.1 --port 8788
-uv run --package table-python-backend pytest
-RUN_PYTHON_INTEGRATION_TESTS=1 uv run --package table-python-backend pytest python-backend/tests/test_knowledge_rag_integration.py -q
+uv sync --default-index https://pypi.org/simple --package table-python-backend
+uv run --default-index https://pypi.org/simple --package table-python-backend uvicorn app.main:app --host 127.0.0.1 --port 8787
+uv run --default-index https://pypi.org/simple --package table-python-backend pytest
+npm run check:bundle-size
+RUN_PYTHON_INTEGRATION_TESTS=1 uv run --default-index https://pypi.org/simple --package table-python-backend pytest python-backend/tests/test_knowledge_rag_integration.py -q
 ```
+
+Recommended validation entrypoints:
+
+```bash
+npm run backend:test:unit
+npm run backend:test:integration
+npm run backend:test:startup
+npm run backend:test:conventions
+npm run backend:test:ci
+```
+
+Runtime facade convention:
+
+- route modules should use `app.services.agent.public` for agent runtime access
+- route modules should use `app.services.knowledge_rag_public` for `knowledge-rag` runtime access
+- `app.services.agent.__init__` and `app.services.knowledge_rag` still contain compatibility exports, but that surface is frozen and must not grow
+- service and integration tests should target concrete submodules or `knowledge_rag_public`, not `app.services.knowledge_rag`
 
 ## Current scope
 
@@ -44,6 +62,8 @@ The service reads the existing root `.env` and reuses:
 - `SERVER_HOST` / `PYTHON_SERVER_HOST`
 - `SERVER_PORT` / `PYTHON_SERVER_PORT`
 
+Only document environment variables here if they are still consumed by runtime config. Historical migration-only knobs should not stay in README or `.env.example`.
+
 ## Auth and session
 
 The Python backend now understands the same signed dev session cookie used by the TypeScript server:
@@ -58,7 +78,7 @@ Request user resolution now matches the current TypeScript priority:
 2. `x-user-id` when `TRUST_USER_ID_HEADER=true`
 3. `DEFAULT_USER_ID`
 
-The Python backend also now serves the existing auth routes expected by `src/lib/auth.ts`:
+The Python backend also now serves the existing auth routes expected by the frontend auth module (`src/shared/auth/index.ts`):
 
 1. `GET /api/auth/me`
 2. `GET /api/auth/users`
@@ -95,7 +115,7 @@ The Python backend now serves:
 5. `POST /api/providers/{provider_id}/activate`
 6. `DELETE /api/providers/{provider_id}`
 
-Responses match the current frontend `src/lib/apiConfig.ts` expectations, including `hasApiKey` and `apiKeyPreview` derived from the existing encrypted provider secret format.
+Responses match the current provider settings client (`src/features/settings/api/providers.ts`) expectations, including `hasApiKey` and `apiKeyPreview` derived from the existing encrypted provider secret format.
 
 On authenticated requests, the Python backend also performs conservative provider bootstrap from `DEFAULT_PROVIDER_*` env vars:
 
@@ -182,3 +202,12 @@ When `MMR_ENABLED=true`, `knowledge-rag` can apply Maximal Marginal Relevance di
 When `RERANKER_ENABLED=true`, `knowledge-rag` can call the current user's active provider `/rerank` endpoint when that provider has `reranker_model` configured. The Python backend truncates chunk text before reranking, preserves the original ordering when reranking is unavailable, and reports `rerankTimeMs` in search responses when reranking was attempted.
 
 Database integration tests are opt-in. Set `RUN_PYTHON_INTEGRATION_TESTS=1` only when the local Postgres schema is ready and safe to use for test inserts/cleanup.
+
+The current backend test strategy is:
+
+1. `unit` for pure service / schema / helper behavior
+2. `integration` for real PostgreSQL and repository/service flows
+3. `startup` for `lifespan`, orphan-job cleanup, and fail-fast boot behavior
+4. `conventions` for route / docs / config / boundary rules
+
+`npm run backend:test:ci` is the intended aggregated gate.

@@ -1,9 +1,10 @@
 from collections.abc import Sequence
 from uuid import UUID
 
-from app.db.models import KnowledgeNote, KnowledgePresetTag
-from sqlalchemy import Select, delete, func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import KnowledgeNote, KnowledgePresetTag
 
 
 def normalize_tags(value: Sequence[str] | None) -> list[str]:

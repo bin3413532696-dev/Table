@@ -96,6 +96,32 @@ async def test_switch_auth_session_sets_signed_cookie(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_switch_auth_session_not_found_uses_standard_error_shape(monkeypatch) -> None:
+    app = _make_app()
+    token = generate_csrf_token()
+
+    async def fake_get_session_target_user(session, user_id):
+        assert user_id == "00000000-0000-0000-0000-000000000099"
+        return None
+
+    monkeypatch.setattr(auth_routes, "get_session_target_user", fake_get_session_target_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        response = await client.post(
+            "/api/auth/session",
+            headers={CSRF_HEADER_NAME: token},
+            json={"userId": "00000000-0000-0000-0000-000000000099"},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": "NOT_FOUND",
+        "message": "User not found or inactive",
+    }
+
+
+@pytest.mark.asyncio
 async def test_clear_auth_session_clears_cookie(monkeypatch) -> None:
     app = _make_app()
     token = generate_csrf_token()

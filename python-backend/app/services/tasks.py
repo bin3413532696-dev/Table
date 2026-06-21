@@ -1,3 +1,5 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.errors import VersionConflictError
 from app.db.models import Task
 from app.repositories.tasks import (
@@ -8,7 +10,6 @@ from app.repositories.tasks import (
     update_task,
 )
 from app.schemas.task import CreateTaskRequest, TaskResponse, UpdateTaskRequest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def to_task_response(task: Task) -> TaskResponse:

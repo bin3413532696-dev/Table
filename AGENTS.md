@@ -13,7 +13,7 @@ Table 是一个面向个人使用的 AI 工作台：React + TypeScript 前端 + 
 ### 运行服务（开发）
 ```bash
 npm run dev              # 前端 webpack-dev-server，端口 3266
-npm run backend:dev      # uv run uvicorn app.main:app，端口 8787，--reload
+npm run backend:dev      # uv run --default-index https://pypi.org/simple --package table-python-backend uvicorn app.main:app，端口 8787，--reload
 npm run ocr:dev          # OCR 服务（PaddleOCR），端口 8001，--reload
 ```
 前端通过 webpack devServer proxy 把 `/api/*` 转发到 `http://127.0.0.1:8787`（见 `webpack.config.js:57`）。前端独立访问 `http://127.0.0.1:3266`。
@@ -30,29 +30,38 @@ npx prisma migrate dev --name <name>   # 创建新迁移（开发期）
 ```bash
 npm run backend:test          # 全部后端 pytest
 npm run typecheck             # 前端 tsc --noEmit
-npm run test:frontend-api     # 前端 API 层 node:test
+npm run test:frontend-api     # 前端契约 + DOM 交互 node:test
 
 # 单文件后端测试（直接调 uv）：
-uv run --package table-python-backend pytest python-backend/tests/test_knowledge_rag_api.py -q
+uv run --default-index https://pypi.org/simple --package table-python-backend pytest python-backend/tests/test_knowledge_rag_api.py -q
 
 # 单个用例：
-uv run --package table-python-backend pytest python-backend/tests/test_knowledge_rag_api.py::test_name -q
+uv run --default-index https://pypi.org/simple --package table-python-backend pytest python-backend/tests/test_knowledge_rag_api.py::test_name -q
 ```
 后端测试 `pytest-asyncio` 配置为 `asyncio_mode = "auto"`，async 测试无需 `@pytest.mark.asyncio`。
 
-烟雾测试与 e2e 测试见 `package.json` scripts（`*:smoke` / `*:e2e`），需先启动后端。
+烟雾测试与 e2e 测试见 `package.json` scripts（`*:smoke` / `*:e2e`）。其中 `smoke:basic` 会自动拉起并清理后端，其余 smoke / e2e 默认仍需先启动后端。
 
 ### 依赖
 ```bash
-uv sync --package table-python-backend   # 后端依赖（uv workspace）
-uv sync --package table-ocr-service      # OCR 服务依赖
+uv sync --default-index https://pypi.org/simple --package table-python-backend   # 后端依赖（uv workspace）
+uv sync --default-index https://pypi.org/simple --package table-ocr-service      # OCR 服务依赖
 npm install                              # 前端依赖
+```
+
+### uv 索引源约定
+- 本仓库 `uv.lock` 基于官方 PyPI：`https://pypi.org/simple`。
+- 如果本机存在全局 `UV_DEFAULT_INDEX` / `UV_INDEX_URL` 指向私有或镜像源，`uv` 解析可能直接失败，例如返回 `403 Forbidden`。
+- 本仓库已在根 `pyproject.toml` 和 `package.json` scripts 中固定默认索引到官方 PyPI。若手动执行 `uv run` / `uv sync`，优先使用：
+```bash
+uv run --default-index https://pypi.org/simple --package table-python-backend pytest python-backend/tests -q
+uv sync --default-index https://pypi.org/simple --package table-python-backend
 ```
 
 ## High-Level Architecture
 
 ### uv Workspace（多包 Python 项目）
-根 `pyproject.toml` 声明 `tool.uv.workspace.members = ["python-backend", "ocr-service"]`。所有 Python 命令通过 `uv run --package <name>` 执行；npm scripts 已封装主要入口。
+根 `pyproject.toml` 声明 `tool.uv.workspace.members = ["python-backend", "ocr-service"]`。所有 Python 命令建议通过 `uv run --default-index https://pypi.org/simple --package <name>` 执行；npm scripts 已封装主要入口。
 
 ### 后端请求生命周期（`python-backend/app/main.py`）
 
@@ -78,17 +87,30 @@ schemas/      → Pydantic 请求/响应模型
 core/         → config（pydantic-settings + lru_cache 单例）、csrf、session、加密
 ```
 
+### 路由组织约定
+- 路由模块自身声明业务前缀，例如 `APIRouter(prefix="/tasks")`、`APIRouter(prefix="/knowledge")`。
+- `app/api/router.py` 只负责统一挂载 `/api` 和 tags，不再在 `include_router(...)` 里拼业务路径。
+- 不要在同一模块里混用“router prefix + 装饰器相对路径”和“装饰器写完整业务路径”两套模式。
+- 依赖注入参数保持真实契约：`session: DbSession`、`user: AuthenticatedUser` 不要写 `= None` 或 `type: ignore` 假默认值。
+
 ### 错误响应统一格式
 全局 handler（`main.py:79-94`）保证所有错误 JSON 都是 `{"error": "<CODE>", "message": "..."}`：
 - `HTTPException`：detail 为 dict 时**原样透传**（用于自定义业务错误码）
 - `AuthError` → 401/403，`VersionConflictError` → 409，`RequestValidationError` → 422 加 `details`
 - 未捕获 `Exception` → 500 `INFRASTRUCTURE_ERROR`（记录 stack 但不泄露）
+- Agent SSE 的 `event: error` payload 也使用同一结构：`{"error": "<CODE>", "message": "..."}`，不要只发裸 `message`
 
-**新增业务错误时**：仿 `IndexJobActiveError` / `DocumentQualityError`（`services/knowledge_rag.py`）—构造 `detail` dict，service 抛出，路由 catch 后转 `HTTPException(status_code=4xx, detail=exc.detail)`。
+**新增业务错误时**：仿 `IndexJobActiveError` / `DocumentQualityError`（`services/knowledge_rag_errors.py`）—构造 `detail` dict，service 抛出，路由 catch 后转 `HTTPException(status_code=4xx, detail=exc.detail)`。
+
+**禁止模式**：
+- 不要返回 `HTTPException` 对象再由调用方 `raise`；要么直接 `raise HTTPException(...)`，要么返回普通数据
+- 不要让某些路由返回缺少 `error` 字段的错误 JSON，这会破坏前后端统一契约
 
 ### RAG Pipeline（自研，不用 LangChain/LlamaIndex）
 
-入口 `app/services/knowledge_rag.py`，分阶段：
+正式运行时入口为 `app/services/knowledge_rag_public.py`，内部实现分散在 `knowledge_rag_write.py`、`knowledge_rag_query.py`、`knowledge_rag_ingest.py`、`knowledge_rag_images.py`、`knowledge_rag_tasks.py` 等子模块；`app/services/knowledge_rag.py` 仅保留历史兼容职责。
+
+内部实现分阶段：
 
 该链路面向“大文件学习”场景，不应在文档或实现上被描述成仅支持 PDF；PDF 只是其中最重要的一类资料来源。
 
@@ -125,6 +147,10 @@ core/         → config（pydantic-settings + lru_cache 单例）、csrf、sess
 field_name_snake: Type = Field(default=..., validation_alias="ENV_VAR_UPPER")
 ```
 
+配置单一事实来源：
+- 后端默认监听端口以 `app/core/config.py` 的 `Settings.server_port` 默认值为准；README、脚本、说明文档必须引用同一个值
+- FastAPI/OpenAPI 暴露的服务版本以 Python 包元数据 `table-python-backend` 为准，不要在 `main.py` 手写第二份版本号
+
 ## Code Style
 
 - **Python**：ruff line-length=120，target py311。Lint 规则 `E, F, I, W, UP`。注释默认不写，仅在 WHY 非显而易见时加一行。
@@ -136,12 +162,17 @@ field_name_snake: Type = Field(default=..., validation_alias="ENV_VAR_UPPER")
 - 后端测试位于 `python-backend/tests/`，命名 `test_<module>_<aspect>.py`，每模块独立文件。
 - 测试通过 `app.dependencies` 的 override 或直接调 service 函数；避免启动完整 HTTP server，除非测 router 本身。
 - 数据库测试用真实 PostgreSQL（asyncpg），不 mock；pgvector 与 pg_trgm 依赖必须存在。
-- 前端 API 测试（`tests/frontend-api/`）走 `node:test`，编译到 `dist-frontend-tests/` 后运行。
+- 前端测试（`tests/frontend-api/`）走 `node:test`，编译到 `dist-frontend-tests/` 后运行，覆盖 API 契约、结构约束与关键 DOM 交互。
 
 ## Project Conventions（项目自包含约定）
 
 用户要求所有项目产出内聚在仓库目录内，便于备份/迁移/清理：
 
+- **Root 目录认知**：根目录应优先按“核心业务目录 / 工程与质量目录 / 顶层配置文件 / 项目级 AI 协作目录 / 本地产物目录”来理解。`node_modules/`、`.venv/`、`dist/`、`dist-frontend-tests/`、`__pycache__/`、`.pytest_cache/`、`.ruff_cache/`、`.tmp/` 属于本地产物，不应被当作项目正式结构的一部分。
 - **Plan 文件**：进入 plan mode 时，plan 文件路径必须是项目级 `.Codex/plans/<name>.md`，**不要**使用全局 `~/.Codex/plans/`。系统提示给出的全局路径需要主动改写。
 - **Skill 文件**：项目级 skill 放 `.Codex/skills/<name>/SKILL.md`。历史上已有 `.claude/skills/` 可参考；若迁移到 Codex，沿用相同目录结构即可。
+- **AI 协作主目录**：当前项目级 AI 协作主目录是 `.Codex/`。新增的计划、技能、结构治理文档统一进入 `.Codex/`，不要再扩散到新的平级隐藏目录。
+- **历史工具目录**：`.claude/`、`.agents/` 视为历史或并存工具目录，可兼容保留，但不再作为新的项目主约定入口。
+- **规范单一事实来源**：项目规范以仓库根 `AGENTS.md` 和 `.Codex/` 下的治理文档为准。若 `.claude/` 中保留兼容说明，它们只能做薄镜像或桥接提示，不能继续演化成第二套独立规范。
+- **兼容同步顺序**：需要同时兼容 `.claude/` 与 `.Codex/` 时，先更新根 `AGENTS.md` 与 `.Codex/`，再按需同步 `.claude/` 中仍被历史工具读取的桥接文档或 skill。
 - **Memory / 偏好记录**：项目相关的用户偏好、约定写在仓库根目录的 `AGENTS.md` 里，不要写到全局 `~/.Codex/projects/<slug>/memory/`。Codex 框架的 memory 系统路径是固定的全局位置，但项目偏好作为约定文档放在 `AGENTS.md` 才能保证项目自包含且被自动加载。

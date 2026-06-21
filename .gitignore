@@ -3,19 +3,17 @@ dist/
 dist-frontend-tests/
 .env
 *.log
-.claude/
-.Codex/
 .gstack/
 .codex/
 logs/
 data/
-docs/
-!docs/images/
 .venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.agents/
+.claude/
 
 # Build / temp artifacts
 .tmp/

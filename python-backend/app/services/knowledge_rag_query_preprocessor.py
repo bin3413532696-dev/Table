@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from time import time
 from typing import Any
 
@@ -12,7 +12,6 @@ from app.core.config import Settings, get_settings
 from app.core.provider_crypto import decrypt_provider_secret
 from app.repositories.providers import find_active_provider_for_user
 from app.services.api_urls import build_v1_api_url
-
 
 _CHINESE_STOPWORDS = {
     "的",
@@ -237,6 +236,10 @@ async def preprocess_query(
 
     return QueryPreprocessResult(
         original_query=query,
-        expanded_queries=_normalize_queries(expanded_queries, processed_query or query, current.query_expansion_count + 1),
+        expanded_queries=_normalize_queries(
+            expanded_queries,
+            processed_query or query,
+            current.query_expansion_count + 1,
+        ),
         preprocess_time_ms=max(int((time() - started_at) * 1000), 0),
     )

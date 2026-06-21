@@ -1,5 +1,8 @@
 from urllib.parse import quote
 
+from fastapi import APIRouter, Response, status
+
+from app.api.error_mapping import http_not_found
 from app.core.config import get_settings
 from app.core.csrf import CSRF_COOKIE_NAME, generate_csrf_token
 from app.core.session import sign_session_token
@@ -30,7 +33,6 @@ from app.services.auth import (
     update_auth_me,
     verify_pin_code,
 )
-from fastapi import APIRouter, HTTPException, Response, status
 
 router = APIRouter(prefix="/auth")
 
@@ -120,7 +122,7 @@ async def switch_auth_session(
 ) -> AuthMeResponse:
     target_user = await get_session_target_user(session, str(payload.userId))
     if not target_user:
-        raise HTTPException(status_code=404, detail={"message": "User not found or inactive"})
+        raise http_not_found("User not found or inactive")
 
     settings = get_settings()
     _set_session_cookie(response, sign_session_token(str(payload.userId), settings.provider_secret_key))
@@ -170,7 +172,7 @@ async def verify_pin_route(
     try:
         result = VerifyPinResponse.model_validate(await verify_pin_code(session, user.user_id, payload))
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": str(exc)}) from exc
+        raise http_not_found(str(exc)) from exc
 
     if result.valid:
         settings = get_settings()

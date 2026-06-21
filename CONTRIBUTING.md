@@ -17,15 +17,46 @@
 ## 提交前检查
 
 1. TypeScript 类型检查通过：`npm run typecheck`
-2. 前端 API 测试通过：`npm run test:frontend-api`
-3. 后端 pytest 测试通过：`npm run backend:test`
-4. 运行相关烟雾测试
+2. Lint 通过：`npm run lint`
+3. 前端契约 / DOM 交互测试通过：`npm run test:frontend-api`
+4. 后端分层测试通过：`npm run backend:test:ci`
+5. OCR 测试通过：`npm run ocr:test`
+6. 规范检查通过：`npm run check:conventions`
+7. 涉及前端路由、构建配置、样式入口或动态 import 时，生产构建通过：`npm run build`
+8. Bundle 基线检查通过：`npm run check:bundle-size`
+9. 运行相关烟雾测试（`npm run smoke:basic` 会自动拉起并清理本地后端）
+
+## 测试分层
+
+- `unit`：纯函数、schema、工具函数、无需真实基础设施的服务逻辑
+- `integration`：真实 PostgreSQL、repository/service 跨层逻辑、真实 schema 依赖
+- `startup`：FastAPI `lifespan`、数据库启动期清理、副作用与 fail-fast 行为
+- `conventions`：文档、目录、边界、公开入口、错误契约等仓库规则
+- `frontend-api`：前端 API 契约、结构约束与关键 DOM 交互
+- `smoke`：已启动服务上的关键业务最小可用路径
+- `e2e`：CDP / 浏览器级完整流程
+
+后端启动策略采用 `fail-fast`：数据库不可用、关键迁移缺失或启动前置条件不满足时，服务应直接启动失败；修复时必须补充 `startup` 或 `integration` 覆盖，而不是只加依赖 override 的 API 测试。
+
+当前前端关键交互回归至少覆盖：
+
+- `App` / `PinLock`
+- `DocumentUploader`
+- `RagSection` 的上传、资料集、检索、详情与详情动作
 
 ## 变更原则
 
 - 优先增强多格式资料解析、RAG 检索质量、Agent 对话可用性与个人记忆体验
 - 不要把项目重新扩展成重型团队协作系统
 - 涉及文档描述时，不要把项目表述成仅支持 PDF；应覆盖 PDF、Markdown、TXT、扫描件等大文件场景
+- `app` 层只能编排 feature 公共入口，不要直接依赖 feature 深层模块
+- `app` 层引入 feature 时只能走 `public.ts` 或 `page.ts` 入口，包含 `lazy(() => import(...))` 的动态导入
+- `components` 只保留通用 UI / 壳层组件，不要反向依赖具体业务 feature
+- 不要继续向 `app.services.agent.__init__`、`app.services.knowledge_rag` 这类兼容入口新增私有 helper 导出
+- `app.services.agent.public`、`app.services.knowledge_rag_public` 是正式公开入口；兼容 facade 只允许保留既有导出，不再扩展
+- 前端结构测试中的 allowlist 只用于少量历史例外；新增 barrel / 例外必须在 PR 中说明必要性与后续收口方式
+- 新增兼容层或 bundle 明显变大时，必须在 PR 描述里说明原因
+- `npm run check:bundle-size` 通过只代表“没有明显回退”；若输出仍提示 tracked bundle 超过告警阈值，修改相关页面或依赖时应优先顺手削减
 
 ## 提交信息规范
 

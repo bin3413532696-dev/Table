@@ -2,16 +2,16 @@ import json
 from datetime import date
 from uuid import UUID, uuid4
 
+from sqlalchemy import func, or_, select, text, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+
 from app.db.models import (
     KnowledgeChunk,
     KnowledgeDocument,
     KnowledgeEmbeddingCache,
-    KnowledgeImageDescriptionCache,
     KnowledgeIndexJob,
 )
-from sqlalchemy import func, or_, select, text, update
-from sqlalchemy.orm import aliased
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def normalize_tags(values: list[str] | None) -> list[str]:
@@ -736,7 +736,11 @@ async def get_chunk_embeddings_batch(
 
 async def get_rag_stats(session: AsyncSession, user_id: str) -> dict[str, int]:
     document_count = int(
-        await session.scalar(select(func.count()).select_from(KnowledgeDocument).where(KnowledgeDocument.user_id == UUID(user_id)))
+        await session.scalar(
+            select(func.count())
+            .select_from(KnowledgeDocument)
+            .where(KnowledgeDocument.user_id == UUID(user_id))
+        )
         or 0
     )
     indexed_document_count = int(
@@ -749,7 +753,9 @@ async def get_rag_stats(session: AsyncSession, user_id: str) -> dict[str, int]:
         or 0
     )
     chunk_count = int(
-        await session.scalar(select(func.count()).select_from(KnowledgeChunk).where(KnowledgeChunk.user_id == UUID(user_id)))
+        await session.scalar(
+            select(func.count()).select_from(KnowledgeChunk).where(KnowledgeChunk.user_id == UUID(user_id))
+        )
         or 0
     )
     chunk_with_embedding_count = int(

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { fetchAuthMe, type AuthMeResponse } from '../lib/auth';
+import { fetchAuthMe, type AuthMeResponse } from '../shared/auth';
 
 type CurrentUser = AuthMeResponse['data']['user'];
 type CurrentAuth = AuthMeResponse['data']['auth'];

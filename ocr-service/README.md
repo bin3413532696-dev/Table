@@ -82,10 +82,10 @@ Content-Type: multipart/form-data
 
 ```bash
 # 安装依赖
-uv sync --package table-ocr-service
+uv sync --default-index https://pypi.org/simple --package table-ocr-service
 
 # 启动服务
-uv run --package table-ocr-service uvicorn main:app --host 127.0.0.1 --port 8001
+uv run --default-index https://pypi.org/simple --package table-ocr-service uvicorn main:app --host 127.0.0.1 --port 8001
 ```
 
 ### 方式 2: Docker 运行
@@ -101,6 +101,8 @@ docker run -d -p 8001:8001 --name ocr-service ocr-service
 ## 测试
 
 ```bash
+npm run ocr:test
+
 # 健康检查
 curl http://localhost:8001/health
 
@@ -123,6 +125,11 @@ Python 后端通过 `integrations/ocr_service.py` 调用此服务。它不是独
 1. 优先尝试直接提取文本
 2. 对扫描件或文本层质量过低的文件触发 OCR
 3. 将 OCR 结果回填到后续分块、检索与 Agent 问答链路
+
+测试约定：
+
+- `npm run ocr:test` 走轻量自动化测试，不依赖真实 PaddleOCR 模型初始化
+- OCR 服务在主项目测试体系中是独立一层，不应把其覆盖混入后端 `unit` / `integration`
 
 ## 注意事项
 

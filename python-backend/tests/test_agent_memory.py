@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
 
 from app.db.models import AgentRun, AgentSession
 from app.services.agent._memory import (
@@ -25,13 +25,13 @@ def _build_session(*, run_count: int = 0, status: str = "idle", disabled: bool =
         memory_status=status,
         memory_disabled=disabled,
         memory_run_count=run_count,
-        created_at=datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 6, 1, 0, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 1, 0, 0, tzinfo=UTC),
     )
 
 
 def _build_runs(count: int) -> list[AgentRun]:
-    created_at = datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc)
+    created_at = datetime(2026, 6, 1, 0, 0, tzinfo=UTC)
     user_id = uuid.uuid4()
     session_id = uuid.uuid4()
     runs: list[AgentRun] = []

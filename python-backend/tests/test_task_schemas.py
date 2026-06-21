@@ -1,6 +1,7 @@
-from app.schemas.task import CreateTaskRequest, UpdateTaskRequest
-from pydantic import ValidationError
 import pytest
+from pydantic import ValidationError
+
+from app.schemas.task import CreateTaskRequest, UpdateTaskRequest
 
 
 def test_create_task_request_trims_input() -> None:

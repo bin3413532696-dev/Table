@@ -1,5 +1,21 @@
 # 更新日志
 
+## [1.2.1] - 2026-06-20
+
+### 测试与工程化
+- 规范化后端测试分层：`unit` / `integration` / `startup` / `conventions`
+- 为 OCR 服务补充独立轻量测试入口 `npm run ocr:test`
+- 为 `smoke:basic` 增加自动拉起与清理后端的脚本化能力
+- 扩展前端测试，从 API 契约覆盖到关键 DOM 交互链路
+
+### 前端测试覆盖
+- 新增 `App` / `PinLock` / `DocumentUploader` 交互测试
+- 新增 `RagSection` 上传、资料集创建、检索、打开详情、重新索引、加入资料集测试
+- 修正 Node + JSDOM 环境下 `testing-library` 初始化顺序，稳定 React 受控输入测试
+
+### 文档
+- 同步 README、贡献指南、后端与 OCR 说明文档，统一反映新的测试体系与 smoke 行为
+
 ## [1.2.0] - 2026-06-19
 
 ### 概述
@@ -12,7 +28,7 @@
 - 完善项目文档，统一覆盖 PDF、Markdown、TXT、扫描件等多格式资料场景
 
 ### 验证
-- 后端测试、前端 API 测试与 TypeScript 类型检查均已通过
+- 后端测试、前端契约测试与 TypeScript 类型检查均已通过
 - 已在真实 PostgreSQL 环境完成最小记忆链路与资料集检索收缩验证
 
 ## [1.0.0] - 2026-06-02

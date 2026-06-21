@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { taskApi } from '../../src/lib/api/tasks';
-import { syncEngine } from '../../src/sync';
-import { taskStore } from '../../src/store/impl';
+import { taskApi } from '../../src/features/tasks/api';
+import { syncEngine } from '../../src/features/knowledge/sync';
+import { taskStore } from '../../src/features/tasks/store';
 import { installFetchMock } from './helpers';
 
 test('taskApi.getAll normalizes null optional fields from server', async () => {

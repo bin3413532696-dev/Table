@@ -1,8 +1,9 @@
-from app.api.routes.knowledge_rag import parse_document_list_query, parse_upload_tags
-from app.schemas.knowledge_rag import DocumentListQuery, JobListQuery, TriggerIndexRequest, UpdateDocumentRequest
+import pytest
 from fastapi import Request
 from pydantic import ValidationError
-import pytest
+
+from app.api.routes.knowledge_rag import parse_document_list_query, parse_upload_tags
+from app.schemas.knowledge_rag import DocumentListQuery, JobListQuery, TriggerIndexRequest, UpdateDocumentRequest
 
 
 def make_request(query_string: bytes) -> Request:

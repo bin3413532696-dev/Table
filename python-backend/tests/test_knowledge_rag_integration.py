@@ -5,14 +5,16 @@ import pytest
 from sqlalchemy import delete, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import app.services.knowledge_rag_embedding_support as knowledge_rag_embedding_support
+import app.services.knowledge_rag_mutations as knowledge_rag_mutations
+import app.services.knowledge_rag_query as knowledge_rag_query
 from app.core.config import Settings
 from app.core.provider_crypto import encrypt_provider_secret
 from app.db.models import ApiProvider, User
 from app.repositories.knowledge_rag import create_chunks, create_document, update_chunk_embeddings_batch
 from app.schemas.knowledge_rag import HybridSearchRequest
-from app.services import knowledge_rag
-from app.services.knowledge_rag_embeddings import format_vector_for_db
-
+from app.services.knowledge_rag_collaborators import BackfillEmbeddingsCollaborators, EmbeddingSupportCollaborators
+from app.services.knowledge_rag_embeddings import EmbeddingChunkInput, format_vector_for_db, resolve_embedding_runtime_config
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PYTHON_INTEGRATION_TESTS") != "1",
@@ -165,9 +167,9 @@ async def test_hybrid_search_uses_active_provider_from_database(monkeypatch) -> 
                 assert runtime_config.headers == {"X-Provider-Test": "1"}
                 return embedding
 
-            monkeypatch.setattr(knowledge_rag, "embed_query", fake_embed_query)
+            monkeypatch.setattr(knowledge_rag_query, "embed_query", fake_embed_query)
 
-            response = await knowledge_rag.search_service(
+            response = await knowledge_rag_query.search_service(
                 session=session,
                 user_id=str(user_id),
                 payload=HybridSearchRequest(
@@ -274,13 +276,110 @@ async def test_backfill_embeddings_service_updates_missing_chunk_vectors(monkeyp
                     }
                 ]
 
-            monkeypatch.setattr(knowledge_rag, "embed_chunk_batch", fake_embed_chunk_batch)
+            async def fake_find_document_by_id(current_session, requested_user_id, requested_document_id):
+                del current_session
+                assert requested_user_id == str(user_id)
+                assert requested_document_id == str(document.id)
+                return document
 
-            result = await knowledge_rag.backfill_embeddings_service(
+            async def fake_get_chunks_without_embedding(current_session, requested_user_id, requested_document_id):
+                del current_session
+                assert requested_user_id == str(user_id)
+                assert requested_document_id == str(document.id)
+                return [
+                    {
+                        "id": chunk_id,
+                        "content": "backfill target content",
+                        "content_hash": "chunk-hash-backfill",
+                    }
+                ]
+
+            async def fake_find_embedding_cache_batch(current_session, requested_user_id, content_hashes, embedding_model):
+                del current_session
+                assert requested_user_id == str(user_id)
+                assert content_hashes == ["chunk-hash-backfill"]
+                assert embedding_model == settings.embedding_model
+                return {}
+
+            async def fake_store_embedding_cache(
+                current_session,
+                requested_user_id,
+                *,
+                content_hash,
+                embedding_vector,
+                embedding_model,
+                expires_at,
+            ):
+                del expires_at
+                assert requested_user_id == str(user_id)
+                await current_session.execute(
+                    text(
+                        """
+                        INSERT INTO knowledge_embedding_cache (
+                          id,
+                          user_id,
+                          content_hash,
+                          embedding,
+                          embedding_model,
+                          created_at,
+                          expires_at
+                        )
+                        VALUES (
+                          gen_random_uuid(),
+                          CAST(:user_id AS uuid),
+                          :content_hash,
+                          CAST(:embedding_vector AS vector),
+                          :embedding_model,
+                          NOW(),
+                          NULL
+                        )
+                        """
+                    ),
+                    {
+                        "user_id": str(user_id),
+                        "content_hash": content_hash,
+                        "embedding_vector": embedding_vector,
+                        "embedding_model": embedding_model,
+                    },
+                )
+
+            async def fake_apply_chunk_embeddings(
+                current_session,
+                requested_user_id,
+                chunks,
+                *,
+                settings,
+                runtime_config=None,
+                require_provider=False,
+            ):
+                return await knowledge_rag_embedding_support.apply_chunk_embeddings(
+                    current_session,
+                    requested_user_id,
+                    chunks,
+                    settings=settings,
+                    runtime_config=runtime_config,
+                    require_provider=require_provider,
+                    collaborators=EmbeddingSupportCollaborators(
+                        embedding_chunk_input=EmbeddingChunkInput,
+                        embed_chunk_batch=fake_embed_chunk_batch,
+                        find_embedding_cache_batch=fake_find_embedding_cache_batch,
+                        format_vector_for_db=format_vector_for_db,
+                        resolve_embedding_runtime_config=resolve_embedding_runtime_config,
+                        store_embedding_cache=fake_store_embedding_cache,
+                        update_chunk_embeddings_batch=update_chunk_embeddings_batch,
+                    ),
+                )
+
+            result = await knowledge_rag_mutations.backfill_embeddings_service(
                 session=session,
                 user_id=str(user_id),
                 document_id=str(document.id),
                 settings=settings,
+                collaborators=BackfillEmbeddingsCollaborators(
+                    apply_chunk_embeddings=fake_apply_chunk_embeddings,
+                    find_document_by_id=fake_find_document_by_id,
+                    get_chunks_without_embedding=fake_get_chunks_without_embedding,
+                ),
             )
 
             assert result == {"count": 1}

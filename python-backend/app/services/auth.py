@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import Settings
 from app.core.pin import hash_pin, verify_pin
 from app.core.user_context import DEV_SESSION_COOKIE, USER_ID_HEADER, UserContext
@@ -24,8 +27,6 @@ from app.schemas.auth import (
     VerifyPinResponse,
 )
 from app.services.provider_bootstrap import ensure_user_provider_bootstrap
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _extract_bio(profile_json: object) -> str:

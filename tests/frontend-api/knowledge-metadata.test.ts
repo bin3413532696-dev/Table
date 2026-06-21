@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getKnowledgeMetadata } from '../../src/pages/Knowledge/api';
+import { getKnowledgeMetadata } from '../../src/features/knowledge/api/notes';
 import { installFetchMock } from './helpers';
 
 test('getKnowledgeMetadata reads data envelope', async () => {

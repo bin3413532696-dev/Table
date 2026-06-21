@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { financeApi } from '../../src/lib/api/finance';
-import { syncEngine } from '../../src/sync';
-import { financeStore } from '../../src/store/impl';
+import { financeApi } from '../../src/features/finance/api';
+import { syncEngine } from '../../src/features/knowledge/sync';
+import { financeStore } from '../../src/features/finance/store';
 import { installFetchMock } from './helpers';
 
 test('financeApi.getAll normalizes null model from server', async () => {

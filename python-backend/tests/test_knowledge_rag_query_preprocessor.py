@@ -1,5 +1,6 @@
 import asyncio
 
+import app.services.knowledge_rag_query_preprocessor as knowledge_rag_query_preprocessor
 from app.core.config import Settings
 from app.services.knowledge_rag_query_preprocessor import (
     QueryExpansionRuntimeConfig,
@@ -8,7 +9,6 @@ from app.services.knowledge_rag_query_preprocessor import (
     preprocess_query,
     rewrite_query,
 )
-from app.services import knowledge_rag_query_preprocessor
 
 
 def test_rewrite_query_removes_common_stopwords() -> None:
@@ -54,7 +54,15 @@ def test_preprocess_query_rewrite_and_expansion(monkeypatch) -> None:
     )
 
     async def run() -> None:
-        async def fake_multi_query_expansion(session, user_id, query, *, expand_count, settings=None, runtime_config=None):
+        async def fake_multi_query_expansion(
+            session,
+            user_id,
+            query,
+            *,
+            expand_count,
+            settings=None,
+            runtime_config=None,
+        ):
             assert query == "预算 执行 管理"
             assert expand_count == 3
             return knowledge_rag_query_preprocessor.QueryPreprocessResult(

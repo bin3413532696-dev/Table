@@ -1,7 +1,7 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, StringConstraints, model_validator
 
 AuthSource = Literal["default", "header", "signed_session", "missing"]
 TrimmedDisplayName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]

@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import Settings
 from app.db.models import User
-from app.services.provider_bootstrap import ensure_user_provider_bootstrap
 from app.schemas.providers import CreateProviderRequest, UpdateProviderRequest
+from app.services.provider_bootstrap import ensure_user_provider_bootstrap
 from app.services.providers import (
     activate_provider_service,
     create_provider_service,
@@ -17,7 +17,6 @@ from app.services.providers import (
     list_providers_service,
     update_provider_service,
 )
-
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PYTHON_INTEGRATION_TESTS") != "1",

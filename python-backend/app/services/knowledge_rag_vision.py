@@ -16,7 +16,8 @@ from app.services.api_urls import build_v1_api_url
 logger = logging.getLogger("table-python-backend")
 
 
-VISION_LLM_DESCRIPTION_PROMPT = """你正在分析一张来自技术文档的图片（可能是架构图、流程图、时序图、UML、表格截图、配置示例等）。
+VISION_LLM_DESCRIPTION_PROMPT = """你正在分析一张来自技术文档的图片
+（可能是架构图、流程图、时序图、UML、表格截图、配置示例等）。
 请提取并结构化输出：
 1. **图片类型**：架构图 / 流程图 / 时序图 / 类图 / 表格 / 配置 / 其他
 2. **可见标签**：所有组件名、节点名、字段名、端点 URL

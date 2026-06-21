@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ErrorCode, isAppError } from '../../src/core/errors';
-import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, fetchWithAuth } from '../../src/lib/auth';
-import { requestApi } from '../../src/lib/api/client';
+import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME, fetchWithAuth } from '../../src/shared/auth';
+import { requestApi } from '../../src/shared/api/client';
+import { readApiErrorMessage } from '../../src/shared/api/error';
 import { getHeader, installFetchMock } from './helpers';
 
 test('requestApi adds JSON content-type for JSON bodies', async () => {
@@ -149,4 +150,14 @@ test('requestApi maps 404 responses to AppError', async () => {
   } finally {
     mock.restore();
   }
+});
+
+test('readApiErrorMessage prefers standard error payload fields', async () => {
+  const response = new Response(JSON.stringify({ error: 'NOT_FOUND', message: 'missing entity' }), {
+    status: 404,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  const message = await readApiErrorMessage(response, 'fallback');
+  assert.equal(message, 'missing entity');
 });

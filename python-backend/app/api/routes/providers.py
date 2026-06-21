@@ -1,5 +1,8 @@
 from uuid import UUID
 
+from fastapi import APIRouter, status
+
+from app.api.error_mapping import http_not_found
 from app.dependencies import AuthenticatedUser, DbSession
 from app.schemas.providers import (
     CreateProviderRequest,
@@ -19,7 +22,6 @@ from app.services.providers import (
     list_providers_service,
     update_provider_service,
 )
-from fastapi import APIRouter, HTTPException, status
 
 router = APIRouter(prefix="/providers")
 
@@ -55,7 +57,7 @@ async def update_provider(
 ) -> ProviderEnvelope:
     provider = await update_provider_service(session, user.user_id, str(provider_id), payload)
     if not provider:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Provider not found"})
+        raise http_not_found("Provider not found")
     return ProviderEnvelope(data=ProviderDataEnvelope(provider=provider))
 
 
@@ -67,7 +69,7 @@ async def delete_provider(
 ) -> ProviderDeleteEnvelope:
     result = await delete_provider_service(session, user.user_id, str(provider_id))
     if not result:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Provider not found"})
+        raise http_not_found("Provider not found")
     return ProviderDeleteEnvelope(data=ProviderDeleteData(**result))
 
 
@@ -79,5 +81,5 @@ async def activate_provider(
 ) -> ProviderEnvelope:
     provider = await activate_provider_service(session, user.user_id, str(provider_id))
     if not provider:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Provider not found"})
+        raise http_not_found("Provider not found")
     return ProviderEnvelope(data=ProviderDataEnvelope(provider=provider))

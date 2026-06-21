@@ -1,5 +1,8 @@
 from uuid import UUID
 
+from fastapi import APIRouter, Response, status
+
+from app.api.error_mapping import http_not_found
 from app.dependencies import AuthenticatedUser, DbSession
 from app.schemas.finance import (
     CreateFinanceRecordRequest,
@@ -14,9 +17,8 @@ from app.services.finance import (
     get_finance_record_detail,
     update_finance_record_entry,
 )
-from fastapi import APIRouter, HTTPException, Response, status
 
-router = APIRouter()
+router = APIRouter(prefix="/finance")
 
 
 @router.get("/", response_model=FinanceRecordListEnvelope)
@@ -45,10 +47,7 @@ async def get_finance_record(
 ) -> FinanceRecordEnvelope:
     record = await get_finance_record_detail(session, user.user_id, str(record_id))
     if not record:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "NOT_FOUND", "message": "Finance record not found"},
-        )
+        raise http_not_found("Finance record not found")
     return FinanceRecordEnvelope(data=record, source="postgres")
 
 
@@ -61,10 +60,7 @@ async def update_finance_record(
 ) -> FinanceRecordEnvelope:
     record = await update_finance_record_entry(session, user.user_id, str(record_id), payload)
     if not record:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "NOT_FOUND", "message": "Finance record not found"},
-        )
+        raise http_not_found("Finance record not found")
     return FinanceRecordEnvelope(data=record, source="postgres")
 
 
@@ -76,8 +72,5 @@ async def delete_finance_record(
 ) -> Response:
     record = await delete_finance_record_entry(session, user.user_id, str(record_id))
     if not record:
-        raise HTTPException(
-            status_code=404,
-            detail={"error": "NOT_FOUND", "message": "Finance record not found"},
-        )
+        raise http_not_found("Finance record not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,5 +1,12 @@
 import logging
+from contextlib import asynccontextmanager
+from importlib.metadata import version
 
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+from app.api.constants import HEALTH_CHECK_PATH
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.csrf import (
@@ -12,10 +19,6 @@ from app.core.errors import AuthError, VersionConflictError
 from app.core.user_context import reset_user_context, resolve_request_user_context, set_user_context
 from app.db.session import SessionLocal
 from app.repositories.knowledge_rag import fail_orphan_jobs_on_startup
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 
 @asynccontextmanager
@@ -32,13 +35,13 @@ async def lifespan(_app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Table Python Backend", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Table Python Backend", version=version("table-python-backend"), lifespan=lifespan)
     logger = logging.getLogger("table-python-backend")
     app.include_router(api_router)
 
     @app.middleware("http")
     async def request_context_middleware(request: Request, call_next):
-        if not request.url.path.startswith("/api/health") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        if not request.url.path.startswith(HEALTH_CHECK_PATH) and request.method not in {"GET", "HEAD", "OPTIONS"}:
             if not validate_csrf_token(request):
                 return JSONResponse(
                     status_code=403,
@@ -54,7 +57,7 @@ def create_app() -> FastAPI:
 
         if (
             request.method == "GET"
-            and not request.url.path.startswith("/api/health")
+            and not request.url.path.startswith(HEALTH_CHECK_PATH)
             and not request_has_csrf_cookie(request)
         ):
             response.set_cookie(

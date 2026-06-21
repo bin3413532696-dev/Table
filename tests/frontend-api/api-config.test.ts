@@ -3,11 +3,13 @@ import test from 'node:test';
 
 import {
   clearProviderCache,
+  fetchProviderModels,
   getActiveApiConfig,
   getApiConfigs,
   getPreferredAgentModel,
+  parseProviderModelOptions,
   refreshApiConfigs,
-} from '../../src/lib/apiConfig';
+} from '../../src/features/settings/api/providers';
 import { installFetchMock } from './helpers';
 
 test('refreshApiConfigs reads provider list envelope and updates cache', async () => {
@@ -53,5 +55,63 @@ test('refreshApiConfigs reads provider list envelope and updates cache', async (
   } finally {
     mock.restore();
     clearProviderCache();
+  }
+});
+
+test('parseProviderModelOptions normalizes openai and gemini payloads', () => {
+  const openaiModels = parseProviderModelOptions(
+    {
+      data: [
+        { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
+      ],
+    },
+    'openai'
+  );
+  const geminiModels = parseProviderModelOptions(
+    {
+      models: [
+        { name: 'models/gemini-1.5-pro', displayName: 'Gemini 1.5 Pro' },
+      ],
+    },
+    'gemini'
+  );
+
+  assert.deepEqual(openaiModels, [{ name: 'gpt-4o-mini', label: 'GPT-4o Mini' }]);
+  assert.deepEqual(geminiModels, [{ name: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' }]);
+});
+
+test('fetchProviderModels tries standard model endpoints until one succeeds', async () => {
+  const mock = installFetchMock(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith('/v1/models')) {
+      assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer sk-test');
+      return new Response(JSON.stringify({
+        data: [
+          { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (url.endsWith('/models')) {
+      return new Response('missing', { status: 404 });
+    }
+    return new Response('unexpected', { status: 500 });
+  });
+
+  try {
+    const models = await fetchProviderModels({
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-test',
+      apiFormat: 'openai',
+    });
+
+    assert.equal(mock.calls.length, 2);
+    assert.equal(String(mock.calls[0].input), 'https://api.example.com/models');
+    assert.equal(String(mock.calls[1].input), 'https://api.example.com/v1/models');
+    assert.deepEqual(models, [{ name: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' }]);
+  } finally {
+    mock.restore();
   }
 });

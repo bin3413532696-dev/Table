@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getNoteById, searchNotes } from '../../src/pages/Knowledge/api';
+import { getNoteById, searchNotes } from '../../src/features/knowledge/api/notes';
 import { installFetchMock } from './helpers';
 
 test('getNoteById returns null on 404', async () => {

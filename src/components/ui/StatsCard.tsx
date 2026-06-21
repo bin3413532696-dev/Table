@@ -71,7 +71,6 @@ export function StatsCard({
   trend = '',
   formattedValue,
   rawValue,
-  index = 0,
 }: StatsCardProps) {
   const config = COLOR_CONFIG[color];
   const displayValue = formattedValue ?? (typeof value === 'number' ? value.toLocaleString() : value);

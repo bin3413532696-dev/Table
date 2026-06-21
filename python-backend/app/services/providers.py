@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import update
@@ -36,7 +36,7 @@ def _normalize_optional_string(value: str | None) -> str | None:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def to_provider_response(provider: ApiProvider, *, include_secret: bool = False) -> ProviderResponse:
@@ -95,7 +95,11 @@ async def create_provider_service(
         name=payload.name.strip(),
         api_format=payload.apiFormat,
         base_url=payload.baseUrl.strip(),
-        api_key_encrypted=encrypt_provider_secret(payload.apiKey) if _normalize_optional_string(payload.apiKey) else None,
+        api_key_encrypted=(
+            encrypt_provider_secret(payload.apiKey)
+            if _normalize_optional_string(payload.apiKey)
+            else None
+        ),
         model=_normalize_optional_string(payload.model),
         embedding_model=_normalize_optional_string(payload.embeddingModel),
         reranker_model=_normalize_optional_string(payload.rerankerModel),

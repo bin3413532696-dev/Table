@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getStoredRagEnabled, RAG_ENABLED_KEY } from '../../src/agent/storage';
+import { getStoredRagEnabled, RAG_ENABLED_KEY } from '../../src/features/agent/runtime/storage';
 
 type StorageMock = {
   getItem: (key: string) => string | null;

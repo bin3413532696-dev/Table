@@ -2,7 +2,7 @@
  * 任务相关类型定义
  */
 
-import { BaseEntity, Timestamp } from './base';
+import { BaseEntity } from './base';
 
 /** 任务优先级 */
 export type TaskPriority = 'low' | 'medium' | 'high';

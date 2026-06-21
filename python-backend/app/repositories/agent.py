@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from app.db.models import AgentRun, AgentSession, UserSetting
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import AgentRun, AgentSession, UserSetting
 
 _UNSET = object()
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def list_agent_sessions(

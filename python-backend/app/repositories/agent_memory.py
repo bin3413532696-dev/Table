@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import delete, func, select, update
@@ -11,7 +11,7 @@ from app.db.models import AgentMemoryBlock, AgentMemoryEvent, AgentMemoryRecord
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 async def create_memory_event(

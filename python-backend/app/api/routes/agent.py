@@ -1,7 +1,14 @@
-import json
 from typing import Annotated
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, Response, status
+from fastapi.responses import StreamingResponse
+
+from app.api.error_mapping import (
+    http_conflict,
+    http_not_found,
+    stream_with_standard_errors,
+)
 from app.dependencies import AuthenticatedUser, DbSession
 from app.schemas.agent import (
     AgentCapabilitiesDto,
@@ -12,24 +19,24 @@ from app.schemas.agent import (
     AgentRunListResponse,
     AgentRuntimeStatusDto,
     AgentSessionDetailDto,
-    AgentSessionMemoryDto,
     AgentSessionDto,
     AgentSessionListResponse,
+    AgentSessionMemoryDto,
     CreateAgentRunRequest,
     CreateAgentSessionRequest,
     ListAgentRunsQuery,
     ListAgentSessionsQuery,
-    UpdateAgentSessionMemorySettingsRequest,
     UpdateAgentRunRequest,
+    UpdateAgentSessionMemorySettingsRequest,
     UpdateAgentSessionRequest,
 )
-from app.services.agent import (
+from app.services.agent.public import (
     confirm_agent_tool_record,
     create_agent_run_record,
     create_agent_session_record,
     delete_agent_run_record,
-    delete_agent_session_record,
     delete_agent_session_memory_record,
+    delete_agent_session_record,
     get_agent_capabilities,
     get_agent_persona,
     get_agent_run_detail,
@@ -47,21 +54,8 @@ from app.services.agent import (
     update_agent_session_memory_settings_record,
     update_agent_session_record,
 )
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/agent")
-
-
-def _encode_sse_event(event: str, data: dict[str, object]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-def _tool_not_found() -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={"error": "NOT_FOUND", "message": "Agent run or tool execution not found"},
-    )
 
 
 @router.get("/health", response_model=AgentRuntimeStatusDto)
@@ -106,7 +100,7 @@ async def get_agent_session_route(
 ) -> AgentSessionDetailDto:
     item = await get_agent_session_detail(session, user.user_id, str(session_id))
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+        raise http_not_found("Session not found")
     return item
 
 
@@ -128,7 +122,7 @@ async def patch_agent_session(
 ) -> AgentSessionDto:
     item = await update_agent_session_record(session, user.user_id, str(session_id), payload)
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+        raise http_not_found("Session not found")
     return item
 
 
@@ -140,7 +134,7 @@ async def remove_agent_session(
 ) -> Response:
     item = await delete_agent_session_record(session, user.user_id, str(session_id))
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+        raise http_not_found("Session not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -152,7 +146,7 @@ async def get_agent_session_memory_route(
 ) -> AgentSessionMemoryDto:
     item = await get_agent_session_memory_record(session, user.user_id, str(session_id))
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+        raise http_not_found("Session not found")
     return item
 
 
@@ -165,7 +159,7 @@ async def patch_agent_session_memory_settings(
 ) -> AgentSessionMemoryDto:
     item = await update_agent_session_memory_settings_record(session, user.user_id, str(session_id), payload)
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+        raise http_not_found("Session not found")
     return item
 
 
@@ -177,7 +171,7 @@ async def remove_agent_session_memory(
 ) -> AgentSessionMemoryDto:
     item = await delete_agent_session_memory_record(session, user.user_id, str(session_id))
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Session not found"})
+        raise http_not_found("Session not found")
     return item
 
 
@@ -205,23 +199,10 @@ async def stream_agent_run_route(
     session: DbSession,
     user: AuthenticatedUser,
 ) -> StreamingResponse:
-    async def event_stream():
-        try:
-            async for event in stream_agent_run_record(session, user.user_id, payload):
-                event_name = str(event.get("type") or "message")
-                yield _encode_sse_event(event_name, event)
-            yield _encode_sse_event("done", {"ok": True})
-        except HTTPException as exc:
-            if isinstance(exc.detail, dict):
-                detail = exc.detail
-            else:
-                detail = {"message": str(exc.detail)}
-            yield _encode_sse_event("error", detail)
-        except Exception as exc:
-            yield _encode_sse_event("error", {"message": str(exc) or "Unexpected server error"})
-
     return StreamingResponse(
-        event_stream(),
+        stream_with_standard_errors(
+            lambda: stream_agent_run_record(session, user.user_id, payload),
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -239,7 +220,7 @@ async def get_agent_run_route(
 ) -> AgentRunDetailDto:
     item = await get_agent_run_detail(session, user.user_id, str(run_id))
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Agent run not found"})
+        raise http_not_found("Agent run not found")
     return item
 
 
@@ -252,7 +233,7 @@ async def patch_agent_run(
 ) -> AgentRunDto:
     item = await update_agent_run_record(session, user.user_id, str(run_id), payload)
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Agent run not found"})
+        raise http_not_found("Agent run not found")
     return item
 
 
@@ -265,10 +246,10 @@ async def remove_agent_run(
     try:
         item = await delete_agent_run_record(session, user.user_id, str(run_id))
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"error": "CONFLICT", "message": str(exc)}) from exc
+        raise http_conflict(str(exc)) from exc
 
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Agent run not found"})
+        raise http_not_found("Agent run not found")
     return item
 
 
@@ -282,10 +263,10 @@ async def confirm_agent_tool_route(
     try:
         item = await confirm_agent_tool_record(session, user.user_id, str(run_id), tool_execution_id)
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"error": "CONFLICT", "message": str(exc)}) from exc
+        raise http_conflict(str(exc)) from exc
 
     if not item:
-        raise _tool_not_found()
+        raise http_not_found("Agent run or tool execution not found")
     return item
 
 
@@ -296,21 +277,12 @@ async def confirm_agent_tool_stream_route(
     session: DbSession,
     user: AuthenticatedUser,
 ) -> StreamingResponse:
-    async def event_stream():
-        try:
-            async for event in stream_confirm_agent_tool_record(session, user.user_id, str(run_id), tool_execution_id):
-                event_name = str(event.get("type") or "message")
-                yield _encode_sse_event(event_name, event)
-            yield _encode_sse_event("done", {"ok": True})
-        except LookupError as exc:
-            yield _encode_sse_event("error", {"message": str(exc)})
-        except ValueError as exc:
-            yield _encode_sse_event("error", {"message": str(exc)})
-        except Exception as exc:
-            yield _encode_sse_event("error", {"message": str(exc) or "Unexpected server error"})
-
     return StreamingResponse(
-        event_stream(),
+        stream_with_standard_errors(
+            lambda: stream_confirm_agent_tool_record(session, user.user_id, str(run_id), tool_execution_id),
+            lookup_errors=(LookupError,),
+            conflict_errors=(ValueError,),
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
@@ -330,10 +302,10 @@ async def reject_agent_tool_route(
     try:
         item = await reject_agent_tool_record(session, user.user_id, str(run_id), tool_execution_id)
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail={"error": "CONFLICT", "message": str(exc)}) from exc
+        raise http_conflict(str(exc)) from exc
 
     if not item:
-        raise _tool_not_found()
+        raise http_not_found("Agent run or tool execution not found")
     return item
 
 
@@ -344,21 +316,12 @@ async def reject_agent_tool_stream_route(
     session: DbSession,
     user: AuthenticatedUser,
 ) -> StreamingResponse:
-    async def event_stream():
-        try:
-            async for event in stream_reject_agent_tool_record(session, user.user_id, str(run_id), tool_execution_id):
-                event_name = str(event.get("type") or "message")
-                yield _encode_sse_event(event_name, event)
-            yield _encode_sse_event("done", {"ok": True})
-        except LookupError as exc:
-            yield _encode_sse_event("error", {"message": str(exc)})
-        except ValueError as exc:
-            yield _encode_sse_event("error", {"message": str(exc)})
-        except Exception as exc:
-            yield _encode_sse_event("error", {"message": str(exc) or "Unexpected server error"})
-
     return StreamingResponse(
-        event_stream(),
+        stream_with_standard_errors(
+            lambda: stream_reject_agent_tool_record(session, user.user_id, str(run_id), tool_execution_id),
+            lookup_errors=(LookupError,),
+            conflict_errors=(ValueError,),
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",

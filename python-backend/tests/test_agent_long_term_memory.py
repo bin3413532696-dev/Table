@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
 from app.schemas.agent import AgentRunDetailDto
 from app.services.agent._long_term_memory import (
-    _extract_preference_memory,
     _extract_goal_memory,
+    _extract_preference_memory,
     _extract_rule_memory,
     append_agent_memory_event,
     build_long_term_memory_context,
@@ -84,7 +84,7 @@ async def test_append_agent_memory_event_passes_payload(monkeypatch) -> None:
         captured["payload"] = payload
         return SimpleNamespace(id=uuid.uuid4())
 
-    monkeypatch.setattr("app.services.agent._long_term_memory.create_memory_event", fake_create_memory_event)
+    monkeypatch.setattr("app.services.agent._long_term_memory_store.create_memory_event", fake_create_memory_event)
 
     await append_agent_memory_event(
         object(),
@@ -113,7 +113,7 @@ async def test_build_long_term_memory_context_joins_identity_and_task_blocks(mon
             return SimpleNamespace(content="当前目标：整理热力学复习提纲")
         return None
 
-    monkeypatch.setattr("app.services.agent._long_term_memory.get_memory_block", fake_get_memory_block)
+    monkeypatch.setattr("app.services.agent._long_term_memory_store.get_memory_block", fake_get_memory_block)
 
     context = await build_long_term_memory_context(object(), user_id, session_id=session_id)
 
@@ -139,7 +139,12 @@ async def test_consolidate_agent_memory_events_derives_records_and_refreshes_cac
             "finalText": "好的，我会用中文，并避免自动改财务记录。",
             "messages": [
                 {"id": "u1", "role": "user", "content": "以后默认中文回答，并且不要自动修改财务记录", "createdAt": 1},
-                {"id": "a1", "role": "assistant", "content": "好的，我会用中文，并避免自动改财务记录。", "createdAt": 2},
+                {
+                    "id": "a1",
+                    "role": "assistant",
+                    "content": "好的，我会用中文，并避免自动改财务记录。",
+                    "createdAt": 2,
+                },
             ],
             "executedToolCalls": [],
             "pendingToolCalls": [],
@@ -193,21 +198,30 @@ async def test_consolidate_agent_memory_events_derives_records_and_refreshes_cac
             id=uuid.UUID(session_id),
             user_id=uuid.UUID(user_id),
             title="Session",
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
 
     async def fake_list_runs_for_session(session, requested_user_id, current_session_id):
         del session, requested_user_id, current_session_id
         return [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=uuid.uuid4())]
 
-    monkeypatch.setattr("app.services.agent._long_term_memory.list_pending_memory_events", fake_list_pending_memory_events)
-    monkeypatch.setattr("app.services.agent._long_term_memory.upsert_memory_record", fake_upsert_memory_record)
-    monkeypatch.setattr("app.services.agent._long_term_memory.upsert_memory_block", fake_upsert_memory_block)
-    monkeypatch.setattr("app.services.agent._long_term_memory.mark_memory_event_processed", fake_mark_memory_event_processed)
-    monkeypatch.setattr("app.services.agent._long_term_memory.list_memory_records_for_scope", fake_list_memory_records_for_scope)
-    monkeypatch.setattr("app.services.agent._long_term_memory.update_agent_session", fake_update_agent_session)
-    monkeypatch.setattr("app.services.agent._long_term_memory.list_runs_for_session", fake_list_runs_for_session)
+    monkeypatch.setattr(
+        "app.services.agent._long_term_memory_store.list_pending_memory_events",
+        fake_list_pending_memory_events,
+    )
+    monkeypatch.setattr("app.services.agent._long_term_memory_store.upsert_memory_record", fake_upsert_memory_record)
+    monkeypatch.setattr("app.services.agent._long_term_memory_store.upsert_memory_block", fake_upsert_memory_block)
+    monkeypatch.setattr(
+        "app.services.agent._long_term_memory_store.mark_memory_event_processed",
+        fake_mark_memory_event_processed,
+    )
+    monkeypatch.setattr(
+        "app.services.agent._long_term_memory_store.list_memory_records_for_scope",
+        fake_list_memory_records_for_scope,
+    )
+    monkeypatch.setattr("app.services.agent._long_term_memory_store.update_agent_session", fake_update_agent_session)
+    monkeypatch.setattr("app.services.agent._long_term_memory_store.list_runs_for_session", fake_list_runs_for_session)
 
     await consolidate_agent_memory_events(object(), user_id, session_id=session_id)
 
@@ -235,11 +249,11 @@ async def test_clear_long_term_memory_for_session_deletes_records_and_blocks(mon
         return 2
 
     monkeypatch.setattr(
-        "app.services.agent._long_term_memory.delete_memory_records_for_scope",
+        "app.services.agent._long_term_memory_store.delete_memory_records_for_scope",
         fake_delete_memory_records_for_scope,
     )
     monkeypatch.setattr(
-        "app.services.agent._long_term_memory.delete_memory_blocks_for_scope",
+        "app.services.agent._long_term_memory_store.delete_memory_blocks_for_scope",
         fake_delete_memory_blocks_for_scope,
     )
 

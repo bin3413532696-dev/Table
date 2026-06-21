@@ -1,9 +1,9 @@
 import asyncio
 from types import SimpleNamespace
 
+import app.services.knowledge_rag_reranker as knowledge_rag_reranker
 from app.core.config import Settings
 from app.schemas.knowledge_rag import SearchResultResponse
-from app.services import knowledge_rag_reranker
 from app.services.knowledge_rag_reranker import (
     RerankerRuntimeConfig,
     cross_encoder_rerank,

@@ -1,6 +1,6 @@
 from functools import lru_cache
-from typing import Literal
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     server_host: str = Field(default="127.0.0.1", validation_alias=AliasChoices("PYTHON_SERVER_HOST", "SERVER_HOST"))
-    server_port: int = Field(default=8788, validation_alias=AliasChoices("PYTHON_SERVER_PORT"))
+    server_port: int = Field(default=8787, validation_alias=AliasChoices("PYTHON_SERVER_PORT", "SERVER_PORT"))
     environment: str = Field(default="development", validation_alias=AliasChoices("PYTHON_ENV", "NODE_ENV"))
     database_url: str = Field(validation_alias="DATABASE_URL")
     allow_default_user_fallback: bool = Field(
@@ -83,7 +83,10 @@ class Settings(BaseSettings):
     rag_quality_min_valid_ratio: float = Field(default=0.80, validation_alias="RAG_QUALITY_MIN_VALID_RATIO")
     rag_quality_scan_detection_chars: int = Field(default=50, validation_alias="RAG_QUALITY_SCAN_DETECTION_CHARS")
     rag_pdf_text_fast_path_min_chars: int = Field(default=500, validation_alias="RAG_PDF_TEXT_FAST_PATH_MIN_CHARS")
-    rag_pdf_parser: Literal["markitdown", "pypdf", "ocr"] = Field(default="markitdown", validation_alias="RAG_PDF_PARSER")
+    rag_pdf_parser: Literal["markitdown", "pypdf", "ocr"] = Field(
+        default="markitdown",
+        validation_alias="RAG_PDF_PARSER",
+    )
     rag_pdf_markitdown_min_chars: int = Field(default=200, validation_alias="RAG_PDF_MARKITDOWN_MIN_CHARS")
     rag_pdf_extract_images_enabled: bool = Field(default=True, validation_alias="RAG_PDF_EXTRACT_IMAGES_ENABLED")
     rag_pdf_vector_graphics_min_size: int = Field(default=100, validation_alias="RAG_PDF_VECTOR_GRAPHICS_MIN_SIZE")

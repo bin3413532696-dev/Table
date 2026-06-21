@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   deleteAgentSessionMemory,
+  extractMessageTextFromLangGraphChunk,
   fetchAgentCapabilities,
   fetchAgentSessionMemory,
   streamAgentRun,
   updateAgentSessionMemorySettings,
-} from '../../src/lib/agentApi';
+} from '../../src/features/agent/api';
 import { getHeader, installFetchMock } from './helpers';
 
 function createRunDetail() {
@@ -122,6 +123,56 @@ test('streamAgentRun tolerates SSE id, retry, and comment fields', async () => {
   } finally {
     mock.restore();
   }
+});
+
+test('streamAgentRun surfaces SSE error events', async () => {
+  const body = [
+    'event: error',
+    'data: {"message":"provider unavailable"}',
+    '',
+  ].join('\n');
+
+  const mock = installFetchMock(async () => new Response(
+    new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode(body));
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }
+  ));
+
+  try {
+    await assert.rejects(
+      () => streamAgentRun({ inputText: 'hello', model: 'gpt-test' }),
+      (error: unknown) => error instanceof Error && error.message === 'provider unavailable'
+    );
+  } finally {
+    mock.restore();
+  }
+});
+
+test('extractMessageTextFromLangGraphChunk joins structured text content', () => {
+  const text = extractMessageTextFromLangGraphChunk({
+    type: 'langgraph_chunk',
+    mode: 'messages',
+    chunk: [
+      'messages',
+      {
+        content: [
+          { text: '你好' },
+          '，',
+          { text: '世界' },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(text, '你好，世界');
 });
 
 test('fetchAgentSessionMemory requests the session memory endpoint', async () => {

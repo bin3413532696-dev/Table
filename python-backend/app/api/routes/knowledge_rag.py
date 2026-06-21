@@ -1,6 +1,10 @@
 import json
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
+
+from app.api.error_mapping import http_bad_request, http_conflict, http_not_found
+from app.api.query_parsing import get_csv_list_query_param, get_query_param
 from app.dependencies import AuthenticatedUser, DbSession
 from app.schemas.knowledge_rag import (
     BackfillEmbeddingsResponse,
@@ -17,19 +21,19 @@ from app.schemas.knowledge_rag import (
     OCRHealthResponse,
     RagStatsResponse,
     TriggerIndexRequest,
-    UpdateKnowledgeCorpusRequest,
     UpdateDocumentRequest,
+    UpdateKnowledgeCorpusRequest,
 )
-from app.services.knowledge_rag import (
-    create_corpus_service,
-    delete_corpus_service,
+from app.services.knowledge_rag_public import (
     DocumentQualityError,
     IndexJobActiveError,
     backfill_embeddings_service,
+    create_corpus_service,
+    delete_corpus_service,
     delete_document_service,
+    get_chunks,
     get_corpora,
     get_corpus,
-    get_chunks,
     get_document,
     get_documents,
     get_job,
@@ -43,20 +47,8 @@ from app.services.knowledge_rag import (
     update_document_service,
     upload_document_service,
 )
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 
 router = APIRouter(prefix="/knowledge-rag")
-
-
-def not_implemented(detail: str) -> HTTPException:
-    return HTTPException(status_code=501, detail={"error": "NOT_IMPLEMENTED", "message": detail})
-
-
-def _split_csv_values(values: list[str]) -> list[str]:
-    result: list[str] = []
-    for value in values:
-        result.extend([item.strip() for item in value.split(",") if item.strip()])
-    return result
 
 
 def parse_upload_tags(raw_tags: str | None) -> list[str]:
@@ -72,16 +64,16 @@ def parse_upload_tags(raw_tags: str | None) -> list[str]:
 def parse_document_list_query(request: Request) -> DocumentListQuery:
     return DocumentListQuery.model_validate(
         {
-            "status": request.query_params.get("status"),
-            "fileType": request.query_params.get("fileType"),
-            "tags": _split_csv_values(request.query_params.getlist("tags")) or None,
-            "publishDateStart": request.query_params.get("publishDateStart"),
-            "publishDateEnd": request.query_params.get("publishDateEnd"),
-            "sourceDept": _split_csv_values(request.query_params.getlist("sourceDept")) or None,
-            "securityLevel": request.query_params.get("securityLevel"),
-            "businessCategory": _split_csv_values(request.query_params.getlist("businessCategory")) or None,
-            "limit": request.query_params.get("limit", 20),
-            "offset": request.query_params.get("offset", 0),
+            "status": get_query_param(request, "status"),
+            "fileType": get_query_param(request, "fileType"),
+            "tags": get_csv_list_query_param(request, "tags"),
+            "publishDateStart": get_query_param(request, "publishDateStart"),
+            "publishDateEnd": get_query_param(request, "publishDateEnd"),
+            "sourceDept": get_csv_list_query_param(request, "sourceDept"),
+            "securityLevel": get_query_param(request, "securityLevel"),
+            "businessCategory": get_csv_list_query_param(request, "businessCategory"),
+            "limit": get_query_param(request, "limit", 20),
+            "offset": get_query_param(request, "offset", 0),
         }
     )
 
@@ -89,9 +81,9 @@ def parse_document_list_query(request: Request) -> DocumentListQuery:
 def parse_chunk_list_query(request: Request) -> ChunkListQuery:
     return ChunkListQuery.model_validate(
         {
-            "documentId": request.query_params.get("documentId"),
-            "limit": request.query_params.get("limit", 50),
-            "offset": request.query_params.get("offset", 0),
+            "documentId": get_query_param(request, "documentId"),
+            "limit": get_query_param(request, "limit", 50),
+            "offset": get_query_param(request, "offset", 0),
         }
     )
 
@@ -99,10 +91,10 @@ def parse_chunk_list_query(request: Request) -> ChunkListQuery:
 def parse_job_list_query(request: Request) -> JobListQuery:
     return JobListQuery.model_validate(
         {
-            "status": request.query_params.get("status"),
-            "documentId": request.query_params.get("documentId"),
-            "limit": request.query_params.get("limit", 20),
-            "offset": request.query_params.get("offset", 0),
+            "status": get_query_param(request, "status"),
+            "documentId": get_query_param(request, "documentId"),
+            "limit": get_query_param(request, "limit", 20),
+            "offset": get_query_param(request, "offset", 0),
         }
     )
 
@@ -124,7 +116,7 @@ async def get_corpus_detail(
 ) -> KnowledgeCorpusResponse:
     item = await get_corpus(session, user.user_id, str(corpus_id))
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Corpus not found"})
+        raise http_not_found("Corpus not found")
     return item
 
 
@@ -146,7 +138,7 @@ async def update_corpus_route(
 ) -> KnowledgeCorpusResponse:
     item = await update_corpus_service(session, user.user_id, str(corpus_id), payload)
     if not item:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Corpus not found"})
+        raise http_not_found("Corpus not found")
     return item
 
 
@@ -158,15 +150,15 @@ async def delete_corpus_route(
 ) -> Response:
     deleted = await delete_corpus_service(session, user.user_id, str(corpus_id))
     if not deleted:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Corpus not found"})
+        raise http_not_found("Corpus not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/documents", response_model=DocumentListEnvelope)
 async def list_documents(
+    session: DbSession,
+    user: AuthenticatedUser,
     query: DocumentListQuery = Depends(parse_document_list_query),
-    session: DbSession = None,  # type: ignore[assignment]
-    user: AuthenticatedUser = None,  # type: ignore[assignment]
 ) -> DocumentListEnvelope:
     items, total = await get_documents(session, user.user_id, query)
     return DocumentListEnvelope(items=items, total=total)
@@ -180,7 +172,7 @@ async def get_document_detail(
 ):
     document = await get_document(session, user.user_id, str(document_id))
     if not document:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Document not found"})
+        raise http_not_found("Document not found")
     return document
 
 
@@ -193,17 +185,17 @@ async def update_document(
 ):
     document = await update_document_service(session, user.user_id, str(document_id), payload)
     if not document:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Document not found"})
+        raise http_not_found("Document not found")
     return document
 
 
 @router.post("/documents/upload")
 async def upload_document(
+    session: DbSession,
+    user: AuthenticatedUser,
     file: UploadFile = File(...),
     title: str | None = Form(default=None),
     tags: str | None = Form(default=None),
-    session: DbSession = None,  # type: ignore[assignment]
-    user: AuthenticatedUser = None,  # type: ignore[assignment]
 ):
     parsed_tags = parse_upload_tags(tags)
     try:
@@ -217,14 +209,14 @@ async def upload_document(
     except DocumentQualityError as exc:
         raise HTTPException(status_code=400, detail=exc.detail) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail={"error": "BAD_REQUEST", "message": str(exc)}) from exc
+        raise http_bad_request(str(exc)) from exc
 
 
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: UUID, session: DbSession, user: AuthenticatedUser) -> Response:
     deleted = await delete_document_service(session, user.user_id, str(document_id))
     if not deleted:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Document not found"})
+        raise http_not_found("Document not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -240,7 +232,7 @@ async def trigger_index(
     except IndexJobActiveError as exc:
         raise HTTPException(status_code=409, detail=exc.detail) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": str(exc)}) from exc
+        raise http_not_found(str(exc)) from exc
 
 
 @router.post("/documents/{document_id}/backfill", response_model=BackfillEmbeddingsResponse)
@@ -252,17 +244,17 @@ async def backfill_embeddings(
     try:
         result = await backfill_embeddings_service(session, user.user_id, str(document_id))
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": str(exc)}) from exc
+        raise http_not_found(str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail={"error": "CONFLICT", "message": str(exc)}) from exc
+        raise http_conflict(str(exc)) from exc
     return BackfillEmbeddingsResponse(**result)
 
 
 @router.get("/jobs", response_model=JobListEnvelope)
 async def list_jobs(
+    session: DbSession,
+    user: AuthenticatedUser,
     query: JobListQuery = Depends(parse_job_list_query),
-    session: DbSession = None,  # type: ignore[assignment]
-    user: AuthenticatedUser = None,  # type: ignore[assignment]
 ) -> JobListEnvelope:
     items, total = await get_jobs(session, user.user_id, query)
     return JobListEnvelope(items=items, total=total)
@@ -272,15 +264,15 @@ async def list_jobs(
 async def get_job_detail(job_id: UUID, session: DbSession, user: AuthenticatedUser):
     job = await get_job(session, user.user_id, str(job_id))
     if not job:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Job not found"})
+        raise http_not_found("Job not found")
     return job
 
 
 @router.get("/chunks", response_model=ChunkListEnvelope)
 async def list_chunks(
+    session: DbSession,
+    user: AuthenticatedUser,
     query: ChunkListQuery = Depends(parse_chunk_list_query),
-    session: DbSession = None,  # type: ignore[assignment]
-    user: AuthenticatedUser = None,  # type: ignore[assignment]
 ) -> ChunkListEnvelope:
     items, total = await get_chunks(session, user.user_id, query)
     return ChunkListEnvelope(items=items, total=total)

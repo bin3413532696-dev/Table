@@ -31,3 +31,4 @@
 - **切勿** 在公开网络中将 `TRUST_USER_ID_HEADER` 设为 `true`
 - 数据库连接串中的密码应使用强密码
 - API 密钥（LLM Provider）建议使用环境变量注入，而非硬编码
+- 对外部署前应先验证 `npm run backend:test:ci`、`npm run test:frontend-api`、`npm run ocr:test`、`npm run smoke:basic`

@@ -2,7 +2,7 @@
  * 财务相关类型定义
  */
 
-import { BaseEntity, Timestamp } from './base';
+import { BaseEntity } from './base';
 
 /** 财务记录类型 */
 export type FinanceType = 'income' | 'expense';

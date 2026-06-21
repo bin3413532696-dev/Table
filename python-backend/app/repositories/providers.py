@@ -1,8 +1,9 @@
 from uuid import UUID
 
-from app.db.models import ApiProvider, UserSetting
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import ApiProvider, UserSetting
 
 
 async def find_active_provider_for_user(session: AsyncSession, user_id: str) -> ApiProvider | None:

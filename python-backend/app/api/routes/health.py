@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 
-router = APIRouter()
+from app.api.constants import HEALTH_ROUTE_PREFIX
+
+router = APIRouter(prefix=HEALTH_ROUTE_PREFIX)
 
 
 @router.get("")

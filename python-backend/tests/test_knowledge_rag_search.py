@@ -2,16 +2,17 @@ import asyncio
 
 import pytest
 
+import app.services.knowledge_rag_embedding_support as knowledge_rag_embedding_support
+import app.services.knowledge_rag_mutations as knowledge_rag_mutations
+import app.services.knowledge_rag_query as knowledge_rag_query
+import app.services.knowledge_rag_query_preprocessor as knowledge_rag_query_preprocessor
+import app.services.knowledge_rag_reranker as knowledge_rag_reranker
 from app.core.config import Settings
 from app.schemas.knowledge_rag import HybridSearchRequest, SearchResultResponse
-from app.services import knowledge_rag
-from app.services import knowledge_rag_query_preprocessor
-from app.services import knowledge_rag_reranker
-from app.services.knowledge_rag import (
-    _fuse_search_results,
-    _score_keyword_candidate,
-    build_search_context,
-)
+from app.services.knowledge_rag_collaborators import BackfillEmbeddingsCollaborators, EmbeddingSupportCollaborators
+from app.services.knowledge_rag_embeddings import EmbeddingChunkInput, EmbeddingRuntimeConfig, format_vector_for_db
+from app.services.knowledge_rag_query import build_search_context
+from app.services.knowledge_rag_query_support import _fuse_search_results, _score_keyword_candidate
 
 
 def test_score_keyword_candidate_prefers_title_and_content_phrase_matches() -> None:
@@ -224,11 +225,11 @@ def test_search_service_hybrid_combines_semantic_and_keyword(monkeypatch) -> Non
             assert runtime_config is not None
             return [0.1, 0.2]
 
-        monkeypatch.setattr(knowledge_rag, "keyword_search_chunks", fake_keyword_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "semantic_search_chunks", fake_semantic_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "embed_query", fake_embed_query)
+        monkeypatch.setattr(knowledge_rag_query, "keyword_search_chunks", fake_keyword_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "semantic_search_chunks", fake_semantic_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "embed_query", fake_embed_query)
 
-        response = await knowledge_rag.search_service(
+        response = await knowledge_rag_query.search_service(
             session=object(),
             user_id="00000000-0000-0000-0000-000000000001",
             payload=HybridSearchRequest(query="budget", mode="hybrid", limit=3, threshold=0.2),
@@ -258,7 +259,15 @@ def test_search_service_query_preprocess_expands_queries_and_deduplicates(monkey
         keyword_queries: list[str] = []
         semantic_queries: list[str] = []
 
-        async def fake_preprocess_query(session, user_id, query, *, enable_expansion=False, enable_rewrite=True, settings=None):
+        async def fake_preprocess_query(
+            session,
+            user_id,
+            query,
+            *,
+            enable_expansion=False,
+            enable_rewrite=True,
+            settings=None,
+        ):
             assert query == "预算执行分析"
             assert enable_expansion is True
             assert enable_rewrite is True
@@ -355,12 +364,12 @@ def test_search_service_query_preprocess_expands_queries_and_deduplicates(monkey
             assert runtime_config is not None
             return [0.1, 0.2] if query == "预算执行分析" else [0.2, 0.1]
 
-        monkeypatch.setattr(knowledge_rag, "preprocess_query", fake_preprocess_query)
-        monkeypatch.setattr(knowledge_rag, "keyword_search_chunks", fake_keyword_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "semantic_search_chunks", fake_semantic_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "embed_query", fake_embed_query)
+        monkeypatch.setattr(knowledge_rag_query, "preprocess_query", fake_preprocess_query)
+        monkeypatch.setattr(knowledge_rag_query, "keyword_search_chunks", fake_keyword_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "semantic_search_chunks", fake_semantic_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "embed_query", fake_embed_query)
 
-        response = await knowledge_rag.search_service(
+        response = await knowledge_rag_query.search_service(
             session=object(),
             user_id="00000000-0000-0000-0000-000000000001",
             payload=HybridSearchRequest(
@@ -408,11 +417,11 @@ def test_search_service_passes_only_supported_filters(monkeypatch) -> None:
         async def fake_embed_query(query, current_settings, runtime_config=None):
             return [0.1, 0.2]
 
-        monkeypatch.setattr(knowledge_rag, "keyword_search_chunks", fake_keyword_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "semantic_search_chunks", fake_semantic_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "embed_query", fake_embed_query)
+        monkeypatch.setattr(knowledge_rag_query, "keyword_search_chunks", fake_keyword_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "semantic_search_chunks", fake_semantic_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "embed_query", fake_embed_query)
 
-        await knowledge_rag.search_service(
+        await knowledge_rag_query.search_service(
             session=object(),
             user_id="00000000-0000-0000-0000-000000000001",
             payload=HybridSearchRequest(
@@ -565,12 +574,12 @@ def test_search_service_mmr_reranks_diverse_results(monkeypatch) -> None:
                 "c": [0.0, 1.0],
             }
 
-        monkeypatch.setattr(knowledge_rag, "keyword_search_chunks", fake_keyword_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "semantic_search_chunks", fake_semantic_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "embed_query", fake_embed_query)
-        monkeypatch.setattr(knowledge_rag, "get_chunk_embeddings_batch", fake_get_chunk_embeddings_batch)
+        monkeypatch.setattr(knowledge_rag_query, "keyword_search_chunks", fake_keyword_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "semantic_search_chunks", fake_semantic_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "embed_query", fake_embed_query)
+        monkeypatch.setattr(knowledge_rag_query, "get_chunk_embeddings_batch", fake_get_chunk_embeddings_batch)
 
-        response = await knowledge_rag.search_service(
+        response = await knowledge_rag_query.search_service(
             session=object(),
             user_id="00000000-0000-0000-0000-000000000001",
             payload=HybridSearchRequest(
@@ -684,12 +693,12 @@ def test_search_service_reranker_applies_threshold_and_source(monkeypatch) -> No
                 rerank_time_ms=8,
             )
 
-        monkeypatch.setattr(knowledge_rag, "keyword_search_chunks", fake_keyword_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "semantic_search_chunks", fake_semantic_search_chunks)
-        monkeypatch.setattr(knowledge_rag, "embed_query", fake_embed_query)
-        monkeypatch.setattr(knowledge_rag, "cross_encoder_rerank", fake_cross_encoder_rerank)
+        monkeypatch.setattr(knowledge_rag_query, "keyword_search_chunks", fake_keyword_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "semantic_search_chunks", fake_semantic_search_chunks)
+        monkeypatch.setattr(knowledge_rag_query, "embed_query", fake_embed_query)
+        monkeypatch.setattr(knowledge_rag_query, "cross_encoder_rerank", fake_cross_encoder_rerank)
 
-        response = await knowledge_rag.search_service(
+        response = await knowledge_rag_query.search_service(
             session=object(),
             user_id="00000000-0000-0000-0000-000000000001",
             payload=HybridSearchRequest(
@@ -732,7 +741,7 @@ def test_backfill_embeddings_service_uses_cache_and_deduplicates_embeddings(monk
             ]
 
         async def fake_resolve_embedding_runtime_config(session, user_id, current_settings):
-            return knowledge_rag.EmbeddingRuntimeConfig(
+            return EmbeddingRuntimeConfig(
                 api_key="token",
                 base_url="https://api.openai.com",
                 model=current_settings.embedding_model,
@@ -759,30 +768,58 @@ def test_backfill_embeddings_service_uses_cache_and_deduplicates_embeddings(monk
                 }
             ]
 
-        async def fake_store_embedding_cache(session, user_id, *, content_hash, embedding_vector, embedding_model, expires_at):
+        async def fake_store_embedding_cache(
+            session,
+            user_id,
+            *,
+            content_hash,
+            embedding_vector,
+            embedding_model,
+            expires_at,
+        ):
             cache_writes.append((content_hash, embedding_vector, embedding_model))
 
         async def fake_update_chunk_embeddings_batch(session, user_id, updates):
             updates_seen.extend(updates)
             return len(updates)
 
-        monkeypatch.setattr(knowledge_rag, "find_document_by_id", fake_find_document_by_id)
-        monkeypatch.setattr(knowledge_rag, "get_chunks_without_embedding", fake_get_chunks_without_embedding)
-        monkeypatch.setattr(
-            knowledge_rag,
-            "resolve_embedding_runtime_config",
-            fake_resolve_embedding_runtime_config,
-        )
-        monkeypatch.setattr(knowledge_rag, "find_embedding_cache_batch", fake_find_embedding_cache_batch)
-        monkeypatch.setattr(knowledge_rag, "embed_chunk_batch", fake_embed_chunk_batch)
-        monkeypatch.setattr(knowledge_rag, "store_embedding_cache", fake_store_embedding_cache)
-        monkeypatch.setattr(knowledge_rag, "update_chunk_embeddings_batch", fake_update_chunk_embeddings_batch)
+        async def fake_apply_chunk_embeddings(
+            session,
+            user_id,
+            chunks,
+            *,
+            settings,
+            runtime_config=None,
+            require_provider=False,
+        ):
+            return await knowledge_rag_embedding_support.apply_chunk_embeddings(
+                session,
+                user_id,
+                chunks,
+                settings=settings,
+                runtime_config=runtime_config,
+                require_provider=require_provider,
+                collaborators=EmbeddingSupportCollaborators(
+                    embedding_chunk_input=EmbeddingChunkInput,
+                    embed_chunk_batch=fake_embed_chunk_batch,
+                    find_embedding_cache_batch=fake_find_embedding_cache_batch,
+                    format_vector_for_db=format_vector_for_db,
+                    resolve_embedding_runtime_config=fake_resolve_embedding_runtime_config,
+                    store_embedding_cache=fake_store_embedding_cache,
+                    update_chunk_embeddings_batch=fake_update_chunk_embeddings_batch,
+                ),
+            )
 
-        result = await knowledge_rag.backfill_embeddings_service(
+        result = await knowledge_rag_mutations.backfill_embeddings_service(
             session=object(),
             user_id="00000000-0000-0000-0000-000000000001",
             document_id="doc-1",
             settings=settings,
+            collaborators=BackfillEmbeddingsCollaborators(
+                apply_chunk_embeddings=fake_apply_chunk_embeddings,
+                find_document_by_id=fake_find_document_by_id,
+                get_chunks_without_embedding=fake_get_chunks_without_embedding,
+            ),
         )
 
         assert result == {"count": 3}
@@ -830,20 +867,67 @@ def test_backfill_embeddings_service_requires_provider(monkeypatch) -> None:
         async def fake_resolve_embedding_runtime_config(session, user_id, current_settings):
             return None
 
-        monkeypatch.setattr(knowledge_rag, "find_document_by_id", fake_find_document_by_id)
-        monkeypatch.setattr(knowledge_rag, "get_chunks_without_embedding", fake_get_chunks_without_embedding)
-        monkeypatch.setattr(
-            knowledge_rag,
-            "resolve_embedding_runtime_config",
-            fake_resolve_embedding_runtime_config,
-        )
+        async def fake_embed_chunk_batch(inputs, current_settings, runtime_config=None):
+            del inputs, current_settings, runtime_config
+            return []
+
+        async def fake_find_embedding_cache_batch(session, user_id, content_hashes, embedding_model):
+            del session, user_id, content_hashes, embedding_model
+            return {}
+
+        async def fake_store_embedding_cache(
+            session,
+            user_id,
+            *,
+            content_hash,
+            embedding_vector,
+            embedding_model,
+            expires_at,
+        ):
+            del session, user_id, content_hash, embedding_vector, embedding_model, expires_at
+
+        async def fake_update_chunk_embeddings_batch(session, user_id, updates):
+            del session, user_id, updates
+            return 0
+
+        async def fake_apply_chunk_embeddings(
+            session,
+            user_id,
+            chunks,
+            *,
+            settings,
+            runtime_config=None,
+            require_provider=False,
+        ):
+            return await knowledge_rag_embedding_support.apply_chunk_embeddings(
+                session,
+                user_id,
+                chunks,
+                settings=settings,
+                runtime_config=runtime_config,
+                require_provider=require_provider,
+                collaborators=EmbeddingSupportCollaborators(
+                    embedding_chunk_input=EmbeddingChunkInput,
+                    embed_chunk_batch=fake_embed_chunk_batch,
+                    find_embedding_cache_batch=fake_find_embedding_cache_batch,
+                    format_vector_for_db=format_vector_for_db,
+                    resolve_embedding_runtime_config=fake_resolve_embedding_runtime_config,
+                    store_embedding_cache=fake_store_embedding_cache,
+                    update_chunk_embeddings_batch=fake_update_chunk_embeddings_batch,
+                ),
+            )
 
         with pytest.raises(RuntimeError, match="Embedding provider is not configured"):
-            await knowledge_rag.backfill_embeddings_service(
+            await knowledge_rag_mutations.backfill_embeddings_service(
                 session=object(),
                 user_id="00000000-0000-0000-0000-000000000001",
                 document_id="doc-1",
                 settings=settings,
+                collaborators=BackfillEmbeddingsCollaborators(
+                    apply_chunk_embeddings=fake_apply_chunk_embeddings,
+                    find_document_by_id=fake_find_document_by_id,
+                    get_chunks_without_embedding=fake_get_chunks_without_embedding,
+                ),
             )
 
     asyncio.run(run())

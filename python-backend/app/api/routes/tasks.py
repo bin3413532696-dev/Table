@@ -1,3 +1,8 @@
+from uuid import UUID
+
+from fastapi import APIRouter, Response, status
+
+from app.api.error_mapping import http_not_found
 from app.dependencies import AuthenticatedUser, DbSession
 from app.schemas.task import (
     CreateTaskRequest,
@@ -12,10 +17,8 @@ from app.services.tasks import (
     get_task_list,
     update_task_record,
 )
-from fastapi import APIRouter, HTTPException, Response, status
-from uuid import UUID
 
-router = APIRouter()
+router = APIRouter(prefix="/tasks")
 
 
 @router.get("/", response_model=TaskListEnvelope)
@@ -38,7 +41,7 @@ async def create_task(
 async def get_task(task_id: UUID, session: DbSession, user: AuthenticatedUser) -> TaskEnvelope:
     task = await get_task_detail(session, user.user_id, str(task_id))
     if not task:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Task not found"})
+        raise http_not_found("Task not found")
     return TaskEnvelope(data=task, source="postgres")
 
 
@@ -51,7 +54,7 @@ async def update_task(
 ) -> TaskEnvelope:
     task = await update_task_record(session, user.user_id, str(task_id), payload)
     if not task:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Task not found"})
+        raise http_not_found("Task not found")
     return TaskEnvelope(data=task, source="postgres")
 
 
@@ -59,5 +62,5 @@ async def update_task(
 async def delete_task(task_id: UUID, session: DbSession, user: AuthenticatedUser) -> Response:
     task = await delete_task_record(session, user.user_id, str(task_id))
     if not task:
-        raise HTTPException(status_code=404, detail={"error": "NOT_FOUND", "message": "Task not found"})
+        raise http_not_found("Task not found")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

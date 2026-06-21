@@ -1,3 +1,5 @@
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.errors import VersionConflictError
 from app.db.models import FinanceRecord
 from app.repositories.finance import (
@@ -12,7 +14,6 @@ from app.schemas.finance import (
     FinanceRecordResponse,
     UpdateFinanceRecordRequest,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def to_finance_record_response(record: FinanceRecord) -> FinanceRecordResponse:

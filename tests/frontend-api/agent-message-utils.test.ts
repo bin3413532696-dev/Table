@@ -6,8 +6,8 @@ import {
   mapSessionDetailToHistoryMessages,
   toInitialMessages,
   trimMessagesHistory,
-} from '../../src/agent/messageUtils';
-import { MAX_HISTORY_MESSAGES } from '../../src/agent/types';
+} from '../../src/features/agent/runtime/messageUtils';
+import { MAX_HISTORY_MESSAGES } from '../../src/features/agent/runtime/types';
 
 test('trimMessagesHistory keeps the newest messages within history count', () => {
   const messages = Array.from({ length: MAX_HISTORY_MESSAGES + 5 }, (_, index) => ({

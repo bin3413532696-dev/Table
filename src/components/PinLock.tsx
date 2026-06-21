@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lock, AlertCircle } from 'lucide-react';
-import { verifyPinApi, clearPinApi } from '../lib/auth';
+import { verifyPinApi, clearPinApi } from '../shared/auth';
 
 interface PinLockProps {
   onSuccess: () => void;

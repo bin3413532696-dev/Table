@@ -13,7 +13,7 @@ def _get_signing_key(secret: str) -> bytes:
 def _compute_hmac(user_id: str, expires_at: int, secret: str) -> bytes:
     return hmac.new(
         _get_signing_key(secret),
-        f"{user_id}.{expires_at}".encode("utf-8"),
+        f"{user_id}.{expires_at}".encode(),
         hashlib.sha256,
     ).digest()
 
