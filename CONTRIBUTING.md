@@ -26,6 +26,36 @@
 8. Bundle 基线检查通过：`npm run check:bundle-size`
 9. 运行相关烟雾测试（`npm run smoke:basic` 会自动拉起并清理本地后端）
 
+## 推送前自检清单
+
+如果只是日常小改动，至少按下面顺序执行一遍，避免“本地能用，CI 红叉”：
+
+1. 先看工作区状态：`git status`
+2. 跑前端静态检查：`npm run lint`、`npm run typecheck`
+3. 跑前端契约 / 交互测试：`npm run test:frontend-api`
+4. 涉及页面入口、动态 import、构建配置、依赖升级时，补跑：`npm run build`、`npm run check:bundle-size`
+5. 涉及 Python 后端、数据库、知识库、Agent、OCR 时，补跑：`npm run backend:test:ci`、`npm run ocr:test`
+6. 涉及关键业务链路时，补跑对应 smoke：`npm run smoke:basic`、`npm run knowledge-rag:smoke` 等
+
+推荐的最小发布前入口：
+
+```bash
+npm run prepush:check
+```
+
+若本次改动覆盖后端或 OCR，再继续执行：
+
+```bash
+npm run prepush:check:full
+```
+
+注意事项：
+
+- GitHub Actions 默认跑在 Linux；本地 Windows 能通过的路径写法、通配符、大小写引用，在 CI 里不一定同样成立
+- `git push` 成功只代表代码已上传，不代表 CI 已通过；红叉通常是检查失败，不是上传失败
+- 优先复用 `package.json` 里的脚本，不要在推送前手写一串只在本机 shell 下成立的临时命令
+- 如果本次是发布或大规模重构，优先跑 `npm run check`
+
 ## 测试分层
 
 - `unit`：纯函数、schema、工具函数、无需真实基础设施的服务逻辑

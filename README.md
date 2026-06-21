@@ -188,6 +188,8 @@ npm run dev                # 启动开发服务器
 npm run build              # 构建生产包
 npm run lint               # 前端 + 后端 lint
 npm run check              # 完整检查入口
+npm run prepush:check      # 推送前最小自检
+npm run prepush:check:full # 推送前完整自检（含后端/OCR）
 npm run check:bundle-size  # 校验生产 bundle 不明显恶化
 npm run typecheck          # TypeScript 类型检查
 npm run test:frontend-api  # 前端契约 + DOM 交互测试

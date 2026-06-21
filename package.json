@@ -28,6 +28,8 @@
     "lint": "npm run lint:frontend && npm run lint:backend",
     "check:bundle-size": "node scripts/check-bundle-size.mjs",
     "check:conventions": "npm run backend:test:conventions && npm run test:frontend-api",
+    "prepush:check": "npm run lint && npm run typecheck && npm run test:frontend-api && npm run build && npm run check:bundle-size",
+    "prepush:check:full": "npm run prepush:check && npm run backend:test:ci && npm run ocr:test",
     "smoke:basic": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\smoke\\run-basic-smoke.ps1",
     "check": "npm run lint && npm run typecheck && npm run build && npm run check:bundle-size && npm run test:frontend-api && npm run backend:test:ci && npm run ocr:test",
     "knowledge:smoke": "node scripts/smoke/knowledge-notes-smoke.mjs",
