@@ -4,7 +4,6 @@ dist-frontend-tests/
 .env
 *.log
 .gstack/
-.codex/
 logs/
 data/
 .venv/
@@ -13,7 +12,23 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .agents/
-.claude/
+[.]Codex/plans/
+.claude/plans/
+.claude/settings.local.json
+
+# Repository-managed AI collaboration docs and skills
+![.]Codex/
+![.]Codex/README.md
+![.]Codex/architecture-debt.md
+![.]Codex/skills/
+![.]Codex/skills/release/
+![.]Codex/skills/release/SKILL.md
+!.claude/
+!.claude/AGENTS.md
+!.claude/CLAUDE.md
+!.claude/skills/
+!.claude/skills/release/
+!.claude/skills/release/SKILL.md
 
 # Build / temp artifacts
 .tmp/
