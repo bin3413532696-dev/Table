@@ -49,6 +49,12 @@ npm run prepush:check
 npm run prepush:check:full
 ```
 
+`npm run prepush:check:full` 当前会额外覆盖：
+
+- `npm run backend:test:ci`
+- `npm run ocr:test`
+- `npm run smoke:basic`
+
 注意事项：
 
 - GitHub Actions 默认跑在 Linux；本地 Windows 能通过的路径写法、通配符、大小写引用，在 CI 里不一定同样成立
