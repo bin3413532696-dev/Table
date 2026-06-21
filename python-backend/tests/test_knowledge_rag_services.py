@@ -616,7 +616,7 @@ async def test_execute_indexing_pipeline_embeds_only_small_chunks() -> None:
         collaborators=ExecuteIndexingPipelineCollaborators(
             apply_chunk_embeddings=fake_apply_chunk_embeddings,
             is_soft_embedding_failure=knowledge_rag_embedding_support.is_soft_embedding_failure,
-            chunk_document_content=lambda content, file_type: [chunk],
+            chunk_document_content=lambda content, file_type: [small_chunk, parent_chunk],
             create_chunks=fake_create_chunks,
             delete_chunks_by_document=fake_delete_chunks_by_document,
             embedding_provider_available=fake_embedding_provider_available,

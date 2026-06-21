@@ -1,3 +1,10 @@
+from app.services.knowledge_rag import (
+    create_corpus_service,
+    delete_corpus_service,
+    trigger_index_service,
+    update_corpus_service,
+    update_document_service,
+)
 from app.services.knowledge_rag_errors import DocumentQualityError, IndexJobActiveError
 from app.services.knowledge_rag_mutations import backfill_embeddings_service
 from app.services.knowledge_rag_query import (
@@ -18,13 +25,6 @@ from app.services.knowledge_rag_query import (
 from app.services.knowledge_rag_write import (
     delete_document_service,
     upload_document_service,
-)
-from app.services.knowledge_rag import (
-    create_corpus_service,
-    delete_corpus_service,
-    trigger_index_service,
-    update_corpus_service,
-    update_document_service,
 )
 
 __all__ = [

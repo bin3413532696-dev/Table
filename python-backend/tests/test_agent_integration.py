@@ -7,18 +7,18 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.services.agent._execution as agent_execution_service
 import app.services.agent._runs as agent_runs_service
-from app.repositories.agent import create_agent_run as create_agent_run_entity
 from app.core.config import Settings
 from app.db.models import AgentRun, AgentSession, User, UserSetting
+from app.repositories.agent import create_agent_run as create_agent_run_entity
 from app.schemas.agent import (
+    AgentPersonaDto,
     AgentRunDetailDto,
     AgentRunMessageDto,
-    AgentPersonaDto,
     CreateAgentRunRequest,
     CreateAgentSessionRequest,
     ListAgentRunsQuery,
-    TimelineEvent,
     ListAgentSessionsQuery,
+    TimelineEvent,
     UpdateAgentRunRequest,
     UpdateAgentSessionRequest,
 )

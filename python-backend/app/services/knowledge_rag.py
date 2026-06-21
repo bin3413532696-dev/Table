@@ -76,7 +76,6 @@ from app.services.knowledge_rag_collaborators import (
     UpdateDocumentCollaborators,
     UploadDocumentCollaborators,
 )
-from app.services.knowledge_rag_errors import DocumentQualityError, IndexJobActiveError
 from app.services.knowledge_rag_embeddings import (
     EmbeddingChunkInput,
     EmbeddingRuntimeConfig,
@@ -85,6 +84,7 @@ from app.services.knowledge_rag_embeddings import (
     format_vector_for_db,
     resolve_embedding_runtime_config,
 )
+from app.services.knowledge_rag_errors import DocumentQualityError, IndexJobActiveError
 from app.services.knowledge_rag_indexing import chunk_document_content
 from app.services.knowledge_rag_query_support import (
     to_corpus_response,

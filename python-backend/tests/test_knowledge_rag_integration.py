@@ -14,7 +14,11 @@ from app.db.models import ApiProvider, User
 from app.repositories.knowledge_rag import create_chunks, create_document, update_chunk_embeddings_batch
 from app.schemas.knowledge_rag import HybridSearchRequest
 from app.services.knowledge_rag_collaborators import BackfillEmbeddingsCollaborators, EmbeddingSupportCollaborators
-from app.services.knowledge_rag_embeddings import EmbeddingChunkInput, format_vector_for_db, resolve_embedding_runtime_config
+from app.services.knowledge_rag_embeddings import (
+    EmbeddingChunkInput,
+    format_vector_for_db,
+    resolve_embedding_runtime_config,
+)
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_PYTHON_INTEGRATION_TESTS") != "1",
@@ -294,7 +298,12 @@ async def test_backfill_embeddings_service_updates_missing_chunk_vectors(monkeyp
                     }
                 ]
 
-            async def fake_find_embedding_cache_batch(current_session, requested_user_id, content_hashes, embedding_model):
+            async def fake_find_embedding_cache_batch(
+                current_session,
+                requested_user_id,
+                content_hashes,
+                embedding_model,
+            ):
                 del current_session
                 assert requested_user_id == str(user_id)
                 assert content_hashes == ["chunk-hash-backfill"]

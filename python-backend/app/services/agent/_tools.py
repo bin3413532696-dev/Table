@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.services.agent._tool_prompting as agent_tool_prompting
 from app.core.config import Settings, get_settings
 from app.schemas.agent import AgentRunToolExecutionDto
-import app.services.agent._tool_prompting as agent_tool_prompting
 from app.services.agent._constants import AgentToolCall, _now, _string_or_none, _timestamp_ms
 from app.services.agent.registry import AgentToolExecutionContext, get_tool_definition
 from app.services.agent.tools import ensure_builtin_tool_definitions_registered

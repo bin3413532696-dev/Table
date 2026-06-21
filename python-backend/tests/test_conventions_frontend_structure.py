@@ -111,7 +111,9 @@ def test_app_layer_uses_public_or_page_entrypoints_when_importing_features() -> 
         for pattern in (import_pattern, dynamic_import_pattern):
             for match in pattern.finditer(source):
                 target = match.group("target")
-                assert target.endswith(allowed_suffixes), f"{path} must import feature public/page entrypoints only: {target}"
+                assert target.endswith(allowed_suffixes), (
+                    f"{path} must import feature public/page entrypoints only: {target}"
+                )
 
 
 def test_feature_modules_do_not_depend_on_other_feature_root_indexes() -> None:

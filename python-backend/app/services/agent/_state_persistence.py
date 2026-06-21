@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.services.agent._runtime_support as agent_runtime_support
 from app.db.models import AgentRun, AgentSession
 from app.schemas.agent import (
     AgentRunDetailDto,
@@ -13,7 +14,6 @@ from app.schemas.agent import (
     AgentSessionDetailDto,
     TimelineEvent,
 )
-import app.services.agent._runtime_support as agent_runtime_support
 from app.services.agent._constants import (
     PENDING_CONFIRMATION_TOOL_ID,
     PENDING_CONFIRMATION_TOOL_NAME,
