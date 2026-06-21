@@ -37,7 +37,7 @@
     "modules:smoke": "node scripts/smoke/tasks-finance-smoke.mjs",
     "build": "webpack --mode production",
     "typecheck": "tsc --noEmit",
-    "test:frontend-api": "tsc -p tsconfig.frontend-tests.json && node --test \"dist-frontend-tests/tests/frontend-api/*.test.js\"",
+    "test:frontend-api": "tsc -p tsconfig.frontend-tests.json && node scripts/run-frontend-api-tests.mjs",
     "agent:e2e": "node scripts/e2e/agent-e2e-cdp.mjs",
     "knowledge:e2e": "node scripts/e2e/knowledge-notes-e2e-cdp.mjs",
     "agent:modules:e2e": "node scripts/e2e/agent-modules-e2e-cdp.mjs"
